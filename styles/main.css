@@ -1,7 +1,16 @@
-@import url("/styles/fonts.css");@import url("/styles/tokens.css");@import url("/styles/base.css");@import url("/styles/layout.css");@import url("/styles/components/header.css");@import url("/styles/components/footer.css");@import url("/styles/components/cards.css");@import url("/styles/components/faq.css");@import url("/styles/pages/industry.css");@import url("/styles/responsive.css");
+@import url("/styles/fonts.css");
+@import url("/styles/tokens.css");
+@import url("/styles/base.css");
+@import url("/styles/layout.css");
+@import url("/styles/components/header.css");
+@import url("/styles/components/footer.css");
+@import url("/styles/components/cards.css");
+@import url("/styles/components/faq.css");
+@import url("/styles/pages/industry.css");
+@import url("/styles/responsive.css");
 @import url("/styles/pages/photo-studio.css");
 @import url("/styles/components/photo-studio-menu.css");
-
 @import url("/styles/components/3d-interactions.css");
 @import url("/styles/components/premium-surfaces.css");
 @import url("/styles/components/brand-composition.css");
+@import url("/styles/pages/homepage.css");
