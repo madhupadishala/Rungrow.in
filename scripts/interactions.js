@@ -3,8 +3,9 @@ const finePointer=window.matchMedia("(hover: hover) and (pointer: fine)").matche
 
 function initTilt(){
   if(reducedMotion||!finePointer)return;
-  const elements=document.querySelectorAll("[data-tilt]");
+  const elements=document.querySelectorAll("[data-tilt],.card");
   elements.forEach(element=>{
+    element.dataset.tilt="";
     let frame=0;
     const reset=()=>{
       cancelAnimationFrame(frame);
