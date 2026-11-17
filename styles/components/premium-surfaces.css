@@ -1,0 +1,60 @@
+/* Premium brand surfaces: warm mineral neutrals, forest depth and restrained brass. */
+.hero{
+  background:
+    radial-gradient(ellipse at 78% 18%,color-mix(in srgb,var(--accent-gold) 12%,transparent),transparent 38%),
+    radial-gradient(ellipse at 12% 86%,color-mix(in srgb,var(--accent) 8%,transparent),transparent 42%),
+    var(--canvas);
+}
+.visual,.photo-hub-visual,.product-demo{
+  background:linear-gradient(145deg,color-mix(in srgb,var(--surface) 96%,var(--accent) 4%),var(--surface));
+  box-shadow:0 26px 64px rgba(13,35,26,.13),inset 0 1px 0 rgba(255,255,255,.52);
+}
+.card{
+  background:linear-gradient(155deg,var(--surface),color-mix(in srgb,var(--surface) 94%,var(--accent) 6%));
+  box-shadow:0 8px 26px rgba(20,42,32,.035);
+}
+.card:hover{
+  box-shadow:0 18px 42px rgba(20,42,32,.10);
+}
+.icon-box,.product-icon{
+  background:color-mix(in srgb,var(--soft) 78%,var(--accent-gold) 22%);
+  color:var(--accent);
+}
+.btn-primary{
+  background:linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 72%,#0b3829));
+  border-color:var(--accent);
+  box-shadow:0 7px 18px color-mix(in srgb,var(--accent) 18%,transparent);
+}
+.btn-primary:hover{
+  background:var(--accent-hover);
+  box-shadow:0 10px 25px color-mix(in srgb,var(--accent) 25%,transparent);
+}
+.steps{
+  background:linear-gradient(120deg,var(--navy),color-mix(in srgb,var(--navy) 78%,var(--accent) 22%));
+  color:#f4f1e8;
+}
+.steps h2{color:#fffdf8}
+.steps .section-intro,.steps .step p{color:#c5d2c9}
+.step{border-color:color-mix(in srgb,#fff 22%,transparent)}
+.step-no{color:var(--accent-gold)}
+.footer{
+  background:var(--navy);
+  color:#f2f3e9;
+}
+.footer p,.footer a{color:#c0cbc3}
+.footer h4{color:#fffdf8}
+.footer-bottom{border-color:color-mix(in srgb,#fff 18%,transparent);color:#8fa197}
+.cta-panel{
+  background:
+    radial-gradient(ellipse at 90% 0%,color-mix(in srgb,var(--accent-gold) 12%,transparent),transparent 45%),
+    var(--surface);
+}
+@media(prefers-color-scheme:dark){
+  :root:not([data-theme=light]){
+    color-scheme:dark;
+    --canvas:#091512;--surface:#10211c;--ink:#f2f3e9;--muted:#c0cbc3;
+    --subtle:#8fa197;--line:#263a32;--accent:#55bd91;--accent-hover:#79d4aa;
+    --accent-gold:#c7a66b;--navy:#06110e;--soft:#172c24;
+    --shadow:0 20px 55px rgba(0,0,0,.3);
+  }
+}
