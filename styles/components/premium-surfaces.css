@@ -1,60 +1,43 @@
-/* Premium brand surfaces: warm mineral neutrals, forest depth and restrained brass. */
+/* Rich RunGrow identity: emerald, warm brass, midnight blue and illuminated mineral surfaces. */
 .hero{
+  position:relative;isolation:isolate;overflow:hidden;
   background:
-    radial-gradient(ellipse at 78% 18%,color-mix(in srgb,var(--accent-gold) 12%,transparent),transparent 38%),
-    radial-gradient(ellipse at 12% 86%,color-mix(in srgb,var(--accent) 8%,transparent),transparent 42%),
-    var(--canvas);
+    radial-gradient(ellipse at 82% 22%,rgba(218,164,83,.23),transparent 32%),
+    radial-gradient(ellipse at 5% 85%,rgba(8,123,88,.16),transparent 42%),
+    linear-gradient(112deg,color-mix(in srgb,var(--canvas) 95%,#e3c58f 5%),var(--canvas) 54%,color-mix(in srgb,var(--canvas) 90%,#8dc9ad 10%));
 }
+.hero:after{content:"";position:absolute;z-index:-1;inset:0;opacity:.24;pointer-events:none;background-image:linear-gradient(rgba(16,36,58,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(16,36,58,.045) 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(90deg,transparent,black 70%,transparent)}
 .visual,.photo-hub-visual,.product-demo{
-  background:linear-gradient(145deg,color-mix(in srgb,var(--surface) 96%,var(--accent) 4%),var(--surface));
-  box-shadow:0 26px 64px rgba(13,35,26,.13),inset 0 1px 0 rgba(255,255,255,.52);
+  background:linear-gradient(145deg,color-mix(in srgb,var(--surface) 90%,white 10%),color-mix(in srgb,var(--surface) 94%,var(--accent) 6%));
+  border-color:color-mix(in srgb,var(--accent) 20%,var(--line));
+  box-shadow:0 28px 70px rgba(16,36,58,.17),inset 0 1px 0 rgba(255,255,255,.72);
 }
 .card{
-  background:linear-gradient(155deg,var(--surface),color-mix(in srgb,var(--surface) 94%,var(--accent) 6%));
-  box-shadow:0 8px 26px rgba(20,42,32,.035);
+  background:linear-gradient(150deg,var(--surface) 0%,color-mix(in srgb,var(--surface) 93%,var(--accent) 7%) 100%);
+  border-color:color-mix(in srgb,var(--accent) 12%,var(--line));
+  box-shadow:0 9px 28px rgba(16,36,58,.055),inset 0 1px 0 rgba(255,255,255,.55);
 }
-.card:hover{
-  box-shadow:0 18px 42px rgba(20,42,32,.10);
-}
-.icon-box,.product-icon{
-  background:color-mix(in srgb,var(--soft) 78%,var(--accent-gold) 22%);
-  color:var(--accent);
-}
-.btn-primary{
-  background:linear-gradient(135deg,var(--accent),color-mix(in srgb,var(--accent) 72%,#0b3829));
-  border-color:var(--accent);
-  box-shadow:0 7px 18px color-mix(in srgb,var(--accent) 18%,transparent);
-}
-.btn-primary:hover{
-  background:var(--accent-hover);
-  box-shadow:0 10px 25px color-mix(in srgb,var(--accent) 25%,transparent);
-}
-.steps{
-  background:linear-gradient(120deg,var(--navy),color-mix(in srgb,var(--navy) 78%,var(--accent) 22%));
-  color:#f4f1e8;
-}
-.steps h2{color:#fffdf8}
-.steps .section-intro,.steps .step p{color:#c5d2c9}
-.step{border-color:color-mix(in srgb,#fff 22%,transparent)}
-.step-no{color:var(--accent-gold)}
-.footer{
-  background:var(--navy);
-  color:#f2f3e9;
-}
-.footer p,.footer a{color:#c0cbc3}
-.footer h4{color:#fffdf8}
-.footer-bottom{border-color:color-mix(in srgb,#fff 18%,transparent);color:#8fa197}
-.cta-panel{
-  background:
-    radial-gradient(ellipse at 90% 0%,color-mix(in srgb,var(--accent-gold) 12%,transparent),transparent 45%),
-    var(--surface);
-}
-@media(prefers-color-scheme:dark){
-  :root:not([data-theme=light]){
-    color-scheme:dark;
-    --canvas:#091512;--surface:#10211c;--ink:#f2f3e9;--muted:#c0cbc3;
-    --subtle:#8fa197;--line:#263a32;--accent:#55bd91;--accent-hover:#79d4aa;
-    --accent-gold:#c7a66b;--navy:#06110e;--soft:#172c24;
-    --shadow:0 20px 55px rgba(0,0,0,.3);
-  }
-}
+.card:hover{border-color:color-mix(in srgb,var(--accent) 58%,var(--line));box-shadow:0 20px 44px rgba(16,36,58,.13),0 0 0 1px color-mix(in srgb,var(--accent) 9%,transparent)}
+.icon-box,.product-icon{background:linear-gradient(145deg,var(--soft-gold),var(--soft));color:var(--accent);border-color:color-mix(in srgb,var(--accent-gold) 32%,var(--line))}
+.label,.card-link{color:var(--accent)}
+.product-visual{background:linear-gradient(135deg,var(--soft-gold),var(--soft),color-mix(in srgb,var(--surface) 65%,var(--accent) 35%));border-color:color-mix(in srgb,var(--accent) 20%,var(--line))}
+.steps{background:radial-gradient(ellipse at 92% 0%,rgba(27,139,102,.36),transparent 42%),linear-gradient(118deg,#10243a 0%,#123c3b 62%,#10243a 100%);color:#f8f5ed}
+.steps h2{color:#fffdf8}.steps .section-intro,.steps .step p{color:#c6d5d6}.step{border-color:rgba(255,255,255,.2)}.step-no{color:#e5b768}
+.footer{background:radial-gradient(ellipse at 92% 0%,rgba(8,123,88,.26),transparent 42%),linear-gradient(115deg,#0b1928,#102b36 72%,#0b1928);color:#f4f2e9}
+.footer p,.footer a{color:#c1ccd0}.footer h4{color:#fffdf8}.footer-bottom{border-color:rgba(255,255,255,.17);color:#91a4ad}
+.cta-panel{background:radial-gradient(ellipse at 100% 0%,rgba(218,164,83,.19),transparent 42%),linear-gradient(115deg,var(--surface),color-mix(in srgb,var(--surface) 92%,var(--accent) 8%));border-color:color-mix(in srgb,var(--accent) 24%,var(--line));box-shadow:0 18px 48px rgba(16,36,58,.07)}
+.trustbar{background:linear-gradient(90deg,var(--surface),color-mix(in srgb,var(--surface) 91%,var(--accent) 9%),var(--surface))}
+.btn-primary{background:linear-gradient(125deg,#0a9368,#087b58 55%,#075b46);border-color:#087b58;color:#fffdf8}
+.btn-primary:hover{background:linear-gradient(125deg,#e0b46d,#c58a3d);border-color:#c58a3d;color:#172538}
+:root[data-theme=dark] .hero{background:radial-gradient(ellipse at 82% 22%,rgba(224,180,109,.14),transparent 34%),radial-gradient(ellipse at 5% 85%,rgba(66,197,150,.13),transparent 42%),linear-gradient(112deg,#101f2b,#0c1722 55%,#10271f)}
+:root[data-theme=dark] .hero:after{opacity:.18;background-image:linear-gradient(rgba(255,255,255,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.06) 1px,transparent 1px)}
+:root[data-theme=dark] .visual,:root[data-theme=dark] .photo-hub-visual,:root[data-theme=dark] .product-demo{background:linear-gradient(145deg,#1a3040,#142434);box-shadow:0 28px 70px rgba(0,0,0,.38),inset 0 1px 0 rgba(255,255,255,.07)}
+:root[data-theme=dark] .card{background:linear-gradient(150deg,#192d3d,#142434);box-shadow:0 10px 30px rgba(0,0,0,.18)}
+:root[data-theme=dark] .card:hover{box-shadow:0 20px 45px rgba(0,0,0,.32),0 0 0 1px rgba(66,197,150,.12)}
+:root[data-theme=dark] .icon-box,:root[data-theme=dark] .product-icon{background:linear-gradient(145deg,#3b3324,#1b3a35);border-color:#435144}
+:root[data-theme=dark] .product-visual{background:linear-gradient(135deg,#342e24,#17392f,#1b3040)}
+:root[data-theme=dark] .steps,:root[data-theme=dark] .footer{background:radial-gradient(ellipse at 92% 0%,rgba(66,197,150,.2),transparent 42%),linear-gradient(118deg,#07121d,#0d292b 65%,#07121d)}
+:root[data-theme=dark] .cta-panel{background:radial-gradient(ellipse at 100% 0%,rgba(224,180,109,.1),transparent 42%),#142434}
+:root[data-theme=dark] .btn-primary{background:linear-gradient(125deg,#42c596,#16835f);border-color:#42c596;color:#08251d}
+:root[data-theme=dark] .btn-primary:hover{background:linear-gradient(125deg,#e0b46d,#c58a3d);border-color:#e0b46d;color:#172538}
+@media(prefers-reduced-motion:reduce){.hero:after{display:none}}

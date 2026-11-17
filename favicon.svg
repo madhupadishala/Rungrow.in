@@ -1,1 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="15" fill="#0f172a"/><path d="M42 19H29c-8 0-13 5-13 13v13h10V32c0-3 1-4 4-4h12V19Zm-8 17 15 9" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M43 39h7v7" fill="none" stroke="#059669" stroke-width="5" stroke-linecap="round"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="emerald" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#13a879"/><stop offset=".58" stop-color="#087b58"/><stop offset="1" stop-color="#07513f"/></linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f0c779"/><stop offset="1" stop-color="#c58a3d"/></linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="#10243a"/>
+  <rect x="4" y="4" width="56" height="56" rx="13" fill="url(#emerald)"/>
+  <path d="M43 17H29c-9 0-14 5-14 14v17h11V31c0-3 1-4 4-4h13V17Z" fill="none" stroke="#fffaf0" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m34 37 15 10m-8-1h8v-8" fill="none" stroke="url(#gold)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="49" cy="15" r="4" fill="url(#gold)"/>
+</svg>
