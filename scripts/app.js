@@ -1,1 +1,11 @@
-import {mountComponents} from "./components.js";import {initTheme} from "./theme.js";import {initNavigation} from "./navigation.js";import {initFaq} from "./faq.js";await mountComponents();initTheme();initNavigation();initFaq();document.querySelectorAll("[data-current-year]").forEach(n=>n.textContent=String(new Date().getFullYear()));
+import {mountComponents} from "./components.js";
+import {initTheme} from "./theme.js";
+import {initNavigation} from "./navigation.js";
+import {initPhotoStudioMenu} from "./photo-studio-menu.js";
+import {initFaq} from "./faq.js";
+await mountComponents();
+initTheme();
+initNavigation();
+initPhotoStudioMenu();
+initFaq();
+document.querySelectorAll("[data-current-year]").forEach(node=>node.textContent=String(new Date().getFullYear()));

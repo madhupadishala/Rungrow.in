@@ -1,0 +1,24 @@
+{
+  "id": "billing-software",
+  "name": "Photo Studio Billing Software",
+  "canonical": "/solutions/photo-studio/billing-software/",
+  "status": "planned-early-access",
+  "positioning": "Every shoot deserves a clear money trail.",
+  "scope": [
+    "event and package quotations",
+    "GST and non-GST invoice workflow design",
+    "advance and milestone payment tracking",
+    "project expenses and shoot profitability"
+  ],
+  "integrationBoundaries": {
+    "paymentTracking": "Planned product workflow",
+    "paymentLinks": "Requires supported provider integration",
+    "gatewayCollection": "Requires merchant onboarding and live gateway integration"
+  },
+  "complianceNote": "Tax and invoice behavior must be validated against applicable law before release.",
+  "metrics": {
+    "minimumMultiplier": 10,
+    "label": "ILLUSTRATIVE DEMO DATA",
+    "evidenceType": "synthetic-not-customer-results"
+  }
+}

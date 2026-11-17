@@ -1,23 +1,25 @@
 # RunGrow website
 
-A static, component-oriented website.
+Static, component-oriented website. The Photo Studio vertical is a hub with two independent product destinations.
 
-## Project structure
-- `index.html` and `solutions/*/index.html`: page composition, page-specific content and SEO metadata.
-- `components/header` and `components/footer`: shared HTML components maintained once and mounted by the component loader.
-- `styles/tokens.css`: theme and design tokens.
-- `styles/base.css`: document defaults, reset and accessibility.
-- `styles/layout.css`: shared grids, sections, hero, buttons and layout primitives.
-- `styles/components/`: isolated header, footer, cards and FAQ styles.
-- `styles/pages/`: page-family styles.
-- `styles/responsive.css`: breakpoints, reduced-motion and print rules.
-- `scripts/`: ES modules; component mounting, theme, navigation and FAQ behaviour are separate modules.
-- `assets/`: static assets and web manifest.
+## Architecture
+- `index.html` and `solutions/*/index.html`: static page composition and page-specific SEO.
+- `components/header/header.html`: shared navigation and Photo Studio mega-menu.
+- `styles/components/header.css`: shared header styles.
+- `styles/components/photo-studio-menu.css`: isolated mega-menu and vertical styles.
+- `styles/pages/photo-studio.css`: Photo Studio hub and product page styles.
+- `scripts/photo-studio-menu.js`: accessible mega-menu interactions, separate from global navigation.
+- `data/photo-studio/*.json`: structured vertical and product metadata.
+- `scripts/`: component mounting, theme, navigation and FAQ modules.
 
-## Component workflow
-1. Edit reusable markup in its component folder.
-2. Edit that component's CSS in `styles/components/`.
-3. Keep interaction logic in its own module under `scripts/`.
-4. Keep page files focused on composing page-specific sections.
+## Photo Studio routes
+- `/solutions/photo-studio/` — vertical hub.
+- `/solutions/photo-studio/growth-os/` — Growth OS.
+- `/solutions/photo-studio/billing-software/` — Billing Software planned/early-access page.
+- `/solutions/photo-studios/` — permanently redirected to the singular hub route.
 
-Shared components are fetched from same-origin static files before interactive modules initialize. Run the site through its static host or a local HTTP server; direct `file://` opening is not supported.
+## Content integrity
+All 10x+ values are synthetic illustration data, not measured performance or customer outcomes. They carry visible demo-data disclosures. WhatsApp AI booking, crew/equipment calendars, proofing galleries, payment gateway collection and shared data synchronization are not promised unless separately implemented and verified. Billing Software is labelled planned/early access; tax and payment behavior requires validation before release.
+
+## Local preview
+Serve the repository root with a static HTTP server. Direct `file://` opening is unsupported because shared components are fetched at runtime.

@@ -1,0 +1,23 @@
+{
+  "id": "growth-os",
+  "name": "Photo Studio Growth OS",
+  "canonical": "/solutions/photo-studio/growth-os/",
+  "status": "product-page",
+  "positioning": "Turn every enquiry into a visible next step.",
+  "scope": [
+    "lead and enquiry management",
+    "follow-up organisation",
+    "supported social channel connection context",
+    "studio activity visibility"
+  ],
+  "notAdvertisedUntilVerified": [
+    "WhatsApp AI booking",
+    "automated crew and equipment calendars",
+    "client proofing galleries"
+  ],
+  "metrics": {
+    "minimumMultiplier": 10,
+    "label": "ILLUSTRATIVE DEMO DATA",
+    "evidenceType": "synthetic-not-customer-results"
+  }
+}

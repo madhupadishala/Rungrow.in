@@ -1,0 +1,32 @@
+{
+  "vertical": "photo-studio",
+  "canonical": "/solutions/photo-studio/",
+  "products": [
+    {
+      "id": "growth-os",
+      "name": "Photo Studio Growth OS",
+      "href": "/solutions/photo-studio/growth-os/",
+      "status": "product-page",
+      "scope": [
+        "lead and enquiry management",
+        "follow-up organisation",
+        "supported channel connection context",
+        "studio activity visibility"
+      ]
+    },
+    {
+      "id": "billing-software",
+      "name": "Photo Studio Billing Software",
+      "href": "/solutions/photo-studio/billing-software/",
+      "status": "planned-early-access",
+      "scope": [
+        "event and package quotations",
+        "GST and non-GST invoice workflow design",
+        "advance and milestone tracking",
+        "project expenses and shoot profitability"
+      ]
+    }
+  ],
+  "integrationPolicy": "Independent products; shared data synchronization is not promised.",
+  "metricsPolicy": "10x+ values are synthetic illustrative demo data and require visible disclosure."
+}
