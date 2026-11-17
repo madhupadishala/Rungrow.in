@@ -1,0 +1,31 @@
+.clinic-hero{padding:54px 0 64px}
+.clinic-hero-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(340px,.92fr);gap:48px;align-items:center}
+.clinic-hero-copy h1{font-size:clamp(38px,4.4vw,58px);line-height:1.08;max-width:650px}
+.clinic-hero-copy .lead{max-width:590px}
+.clinic-hero-media{position:relative;min-height:410px;overflow:hidden;border-radius:18px;background:var(--soft);border:1px solid var(--line)}
+.clinic-hero-media img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.clinic-hero-media:after{content:"";position:absolute;inset:35% 0 0;background:linear-gradient(transparent,rgba(7,24,29,.68))}
+.clinic-photo-note{position:absolute;z-index:1;left:22px;bottom:20px;color:white;display:grid;gap:5px}
+.clinic-photo-note small{font-size:9px;letter-spacing:.15em;font-weight:800}
+.clinic-photo-note strong{font:600 22px/1.15 'Plus Jakarta Sans',sans-serif}
+.clinic-visual-section{padding:68px 0;background:var(--soft)}
+.clinic-visual-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.clinic-visual-card{position:relative;min-height:290px;overflow:hidden;border-radius:13px;background:var(--surface);border:1px solid var(--line)}
+.clinic-visual-card img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform .5s}
+.clinic-visual-card:hover img{transform:scale(1.045)}
+.clinic-visual-card:after{content:"";position:absolute;inset:25% 0 0;background:linear-gradient(transparent,rgba(5,20,28,.82))}
+.clinic-visual-card-copy{position:absolute;z-index:1;left:16px;right:14px;bottom:17px;color:#fff}
+.clinic-visual-card-copy small{font-size:8px;letter-spacing:.14em;font-weight:800;color:#d4e8db}
+.clinic-visual-card-copy h3{font-size:16px;margin:7px 0 4px;color:#fff}
+.clinic-visual-card-copy p{font-size:10px;line-height:1.5;color:rgba(255,255,255,.82);margin:0}
+.clinic-workflow{display:grid;grid-template-columns:1fr 1fr;gap:34px;align-items:center}
+.clinic-workflow-media{height:390px;position:relative;overflow:hidden;border-radius:16px;background:var(--soft)}
+.clinic-workflow-media img{width:100%;height:100%;object-fit:cover}
+.clinic-workflow-copy{max-width:560px}
+.clinic-workflow-copy .section-intro{margin-bottom:20px}
+.clinic-checks{display:grid;gap:0;border-top:1px solid var(--line)}
+.clinic-checks>div{display:flex;gap:12px;padding:13px 0;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted)}
+.clinic-checks span{color:var(--accent);font-weight:800}
+@media(max-width:900px){.clinic-hero-grid{grid-template-columns:1fr 1fr;gap:22px}.clinic-hero-media{min-height:350px}.clinic-visual-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:680px){.clinic-hero{padding:32px 0 42px}.clinic-hero-grid{grid-template-columns:1fr;gap:24px}.clinic-hero-media{min-height:280px}.clinic-visual-section{padding:46px 0}.clinic-visual-grid{grid-template-columns:1fr 1fr;gap:9px}.clinic-visual-card{min-height:245px}.clinic-visual-card-copy{left:12px;right:10px;bottom:13px}.clinic-visual-card-copy h3{font-size:14px}.clinic-visual-card-copy p{font-size:9px}.clinic-workflow{grid-template-columns:1fr;gap:22px}.clinic-workflow-media{height:270px}}
+@media(max-width:390px){.clinic-visual-grid{grid-template-columns:1fr}.clinic-visual-card{min-height:260px}}

@@ -1,0 +1,68 @@
+/* Theme-aware homepage surfaces. The homepage uses an editorial palette, but every surface follows the selected theme. */
+:root[data-theme="dark"] .home-page{background:#0c1722;color:#f1f3ed}
+:root[data-theme="dark"] .home-page .header{background:rgba(12,23,34,.94);border-color:#2b4050}
+:root[data-theme="dark"] .home-page .announcement{background:#07131f;color:#d4e5dc}
+:root[data-theme="dark"] .home-page .brand-name{color:#f1f3ed}
+:root[data-theme="dark"] .home-hero{background:#0c1722}
+:root[data-theme="dark"] .home-hero h1,:root[data-theme="dark"] .home-section h2,:root[data-theme="dark"] .home-delivery h2,:root[data-theme="dark"] .home-resources h2{color:#f1f3ed}
+:root[data-theme="dark"] .home-eyebrow{color:#62c99d}
+:root[data-theme="dark"] .home-eyebrow>span{background:#62c99d}
+:root[data-theme="dark"] .home-hero h1 em,:root[data-theme="dark"] .home-section h2 em,:root[data-theme="dark"] .home-delivery h2 em,:root[data-theme="dark"] .home-resources h2 em{color:#62c99d}
+:root[data-theme="dark"] .home-lead,:root[data-theme="dark"] .home-section-heading>p,:root[data-theme="dark"] .home-delivery-copy>p{color:#b7c4c9}
+:root[data-theme="dark"] .home-text-link{color:#e1e9e5;border-color:#40534f}
+:root[data-theme="dark"] .home-hero-foot,:root[data-theme="dark"] .home-proofline small{color:#9eafb1}
+:root[data-theme="dark"] .home-foot-rule{background:#53665f}
+:root[data-theme="dark"] .home-proofline{background:#111f2c;border-color:#2b4050}
+:root[data-theme="dark"] .home-proofline>div:not(.home-proof-note){border-color:#2b4050}
+:root[data-theme="dark"] .home-proofline b{color:#e5eee8}
+:root[data-theme="dark"] .home-proof-note{color:#8fa29e}
+:root[data-theme="dark"] .home-industries{background:#0c1722}
+:root[data-theme="dark"] .home-industry{background:#1a2d38}
+:root[data-theme="dark"] .home-products{background:#07131f}
+:root[data-theme="dark"] .home-product-feature{background:#172b38;color:#edf3ee}
+:root[data-theme="dark"] .home-product-copy h3,:root[data-theme="dark"] .home-product-links>a{color:#edf3ee}
+:root[data-theme="dark"] .home-product-copy>p,:root[data-theme="dark"] .home-product-links small{color:#aab9bb}
+:root[data-theme="dark"] .home-product-links,:root[data-theme="dark"] .home-product-links>a{border-color:#344a52}
+:root[data-theme="dark"] .home-delivery{background:#0c1722}
+:root[data-theme="dark"] .home-delivery-image{background:#1b2d36}
+:root[data-theme="dark"] .home-principles{border-color:#2b4050}
+:root[data-theme="dark"] .home-principles>div{border-color:#2b4050}
+:root[data-theme="dark"] .home-principles b{color:#e6eee8}
+:root[data-theme="dark"] .home-principles small{color:#a5b4b4}
+:root[data-theme="dark"] .home-resources{background:#142432}
+:root[data-theme="dark"] .home-resource-list,:root[data-theme="dark"] .home-resource-list>a{border-color:#344953}
+:root[data-theme="dark"] .home-resource-list b{color:#edf3ee}
+:root[data-theme="dark"] .home-resource-list small{color:#a8b8b7}
+:root[data-theme="dark"] .home-resource-icon{border-color:#40564f;color:#62c99d}
+:root[data-theme="dark"] .home-closing{background:#075b46}
+:root[data-theme="dark"] .home-button-primary{background:#16835f;border-color:#16835f}
+:root[data-theme="dark"] .home-button-primary:hover{background:#0d6d50}
+:root[data-theme="dark"] .home-button-light{background:#e6eee7;color:#10243a;border-color:#e6eee7}
+:root[data-theme="dark"] .home-interface-card{border-color:#3a4c52}
+:root[data-theme="dark"] .theme-toggle{background:#172b39;color:#eaf2ec;border-color:#3a505a}
+:root[data-theme="dark"] .menu-toggle{background:#172b39;color:#eaf2ec;border-color:#3a505a}
+@media(max-width:720px){
+ .home-hero{padding:44px 18px 38px;gap:18px}
+ .home-hero-visual{min-height:390px}
+ .home-photo-frame{width:88%;height:340px}
+ .home-interface-card{width:88%;bottom:0}
+ .home-proofline{padding-inline:18px}
+ .home-industry-grid{grid-template-columns:1fr 1fr;gap:8px}
+ .home-industry{min-height:250px}
+ .home-products-inner{gap:24px}
+ .home-product-feature{grid-template-columns:1fr}
+ .home-product-image{min-height:220px}
+ .home-delivery{padding:62px 18px}
+ .home-delivery-image{height:330px}
+ .home-section{padding:62px 18px}
+ .home-resources{padding:60px 18px}
+}
+@media(max-width:390px){
+ .home-industry-grid{grid-template-columns:1fr}
+ .home-industry{min-height:270px}
+ .home-hero-visual{min-height:350px}
+ .home-photo-frame{height:305px;width:90%}
+ .home-interface-card{width:94%}
+ .home-hero-actions{align-items:flex-start;flex-direction:column}
+ .home-product-image{min-height:200px}
+}
