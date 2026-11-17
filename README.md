@@ -1,5 +1,7 @@
 # RunGrow website
 
+Vibe coding standard: [docs/vibe-coding-no-nos.md](docs/vibe-coding-no-nos.md). Follow this document before every design or code change.
+
 Static, component-oriented website. The Photo Studio vertical is a hub with two independent product destinations.
 
 ## Architecture
