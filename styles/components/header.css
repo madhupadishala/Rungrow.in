@@ -1,0 +1,11 @@
+.announcement{background:var(--navy);color:var(--surface);padding:7px 16px;text-align:center;font-size:12px}
+.header{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--canvas) 94%,transparent);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.nav{height:64px;display:flex;align-items:center;justify-content:space-between;gap:20px}
+.brand{display:inline-flex;align-items:center;gap:9px;font:800 21px 'Plus Jakarta Sans',sans-serif;letter-spacing:-1px}
+.brand-mark{width:30px;height:30px;border-radius:8px;background:var(--navy);color:var(--canvas);display:grid;place-items:center;font:700 16px 'Plus Jakarta Sans'}
+.brand-name span{color:var(--accent)}
+.nav-links{display:flex;gap:26px;align-items:center;color:var(--muted);font-size:14px;font-weight:500}
+.nav-links a:hover,.footer a:hover{color:var(--accent)}
+.nav-actions{display:flex;gap:8px;align-items:center}
+.theme-toggle,.menu-toggle{width:38px;height:38px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;display:grid;place-items:center;cursor:pointer}
+.menu-toggle{display:none}

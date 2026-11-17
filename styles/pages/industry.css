@@ -1,0 +1,5 @@
+.breadcrumb{font-size:12px;color:var(--subtle);padding:18px 0}
+.breadcrumb a{color:var(--muted)}
+.page-hero{padding:26px 0 42px}
+.page-hero h1{font:700 42px/1.15 'Plus Jakarta Sans';letter-spacing:-.025em;max-width:800px;margin:12px 0}
+.page-hero .lead{font-size:17px}

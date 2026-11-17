@@ -1,0 +1,1 @@
+import {mountComponents} from "./components.js";import {initTheme} from "./theme.js";import {initNavigation} from "./navigation.js";import {initFaq} from "./faq.js";await mountComponents();initTheme();initNavigation();initFaq();document.querySelectorAll("[data-current-year]").forEach(n=>n.textContent=String(new Date().getFullYear()));

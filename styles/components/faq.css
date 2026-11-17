@@ -1,0 +1,5 @@
+.faq{max-width:820px;border-top:1px solid var(--line)}
+.faq-item{border-bottom:1px solid var(--line)}
+.faq-q{width:100%;background:none;border:0;color:var(--ink);padding:17px 0;display:flex;justify-content:space-between;text-align:left;font-weight:600;cursor:pointer}
+.faq-a{display:none;color:var(--muted);font-size:14px;padding:0 28px 17px 0}
+.faq-item.open .faq-a{display:block}

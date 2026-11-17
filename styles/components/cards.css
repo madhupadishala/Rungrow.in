@@ -1,0 +1,13 @@
+.icon-box{width:36px;height:36px;flex:0 0 36px;border:1px solid var(--line);border-radius:9px;display:grid;place-items:center;color:var(--muted);background:var(--surface)}
+.card{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:22px;min-width:0}
+.card p{font-size:14px;color:var(--muted);margin:0 0 14px}
+.card-link{display:inline-flex;align-items:center;gap:7px;color:var(--accent);font-size:13px;font-weight:600}
+.card:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.product-visual{height:120px;background:var(--soft);border:1px solid var(--line);border-radius:8px;margin:-2px -2px 16px;display:grid;place-items:center}
+.mock-screen{width:76%;height:82px;border:1px solid var(--line);border-radius:6px;background:var(--surface);padding:9px}
+.mock-line{height:6px;width:42%;background:var(--line);border-radius:3px;margin-bottom:9px}
+.mock-row{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.mock-row i{height:24px;background:var(--soft);border:1px solid var(--line);border-radius:3px}
+.label{color:var(--accent);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.card h3{margin-top:7px}
+.card-foot{border-top:1px solid var(--line);padding-top:12px;margin-top:14px;display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--subtle)}
