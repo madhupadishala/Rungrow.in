@@ -1,6 +1,5 @@
 import pytest
 from datetime import datetime,timedelta,timezone
-from app.main import app
 from app.policy import Principal
 from app.repositories import InMemoryWorkforceRepository
 
@@ -39,7 +38,7 @@ async def test_self_approval_rejected(install_test_repository,client):
     assert response.status_code==403
 
 @pytest.mark.asyncio
-async def test_expired_approval_rejected(install_test_repository,client):
+async def test_expired_approval_rejected(install_test_repository,client,test_app):
     repo=install_test_repository
     item=await repo.create_approval(product_id=None,employee_id="market-intel",action_type="campaign.activate",payload={"id":"1"},expires_at=datetime.now(timezone.utc)+timedelta(minutes=5))
     item["expires_at"]=datetime.now(timezone.utc)-timedelta(seconds=1)
@@ -51,7 +50,7 @@ async def test_expired_approval_rejected(install_test_repository,client):
     async def use_shared_repo(p=__import__("fastapi").Depends(__import__("app.security",fromlist=["current_principal"]).current_principal)):
         repo.principal=other
         return repo
-    app.dependency_overrides[get_workforce_repo]=use_shared_repo
+    test_app.dependency_overrides[get_workforce_repo]=use_shared_repo
     response=await client.post(f"/v1/workforce/approvals/{item['id']}/decision",json={"decision":"approved","reason":"Reviewed"})
     assert response.status_code in (403,409)
 
