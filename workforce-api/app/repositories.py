@@ -259,6 +259,7 @@ class WorkforceRepositoryProtocol(Protocol):
     async def list_approvals(self, product_id=None): ...
     async def decide_approval(self, approval_id, decision, reason, product_id=None): ...
     async def validate_approval(self, approval_id, **kwargs): ...
+    async def append_audit(self, action, resource_type, resource_id, product_id, details): ...
     async def list_audit(self, product_id=None): ...
 
 
@@ -355,6 +356,10 @@ class InMemoryWorkforceRepository:
           sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
         if not __import__("hmac").compare_digest(item["payload_hash"],expected): raise PermissionError("Payload integrity failure")
         return item
+
+    async def append_audit(self, action, resource_type, resource_id, product_id, details):
+        self._scope(product_id)
+        self._audit(action,resource_type,resource_id,product_id,details)
 
     async def list_audit(self, product_id=None):
         self._scope(product_id)
