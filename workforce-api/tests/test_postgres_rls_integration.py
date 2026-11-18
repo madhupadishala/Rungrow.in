@@ -29,6 +29,8 @@ async def test_postgres_role_is_restricted_and_rls_is_forced():
                 AND c.relowner=(SELECT oid FROM pg_roles WHERE rolname=current_user)
             """))
             assert owners.scalar_one()==0
+            delete_privilege=await conn.execute(text("SELECT has_table_privilege(current_user,'wf_audit_events','DELETE')"))
+            assert delete_privilege.scalar_one() is False
     finally:
         await engine.dispose()
 
