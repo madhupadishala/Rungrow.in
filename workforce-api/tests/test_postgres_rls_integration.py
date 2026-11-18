@@ -55,3 +55,28 @@ async def test_audit_is_append_only_for_restricted_role():
                 await conn.execute(text("UPDATE wf_audit_events SET action='tampered' WHERE resource_id='audit-fixture'"))
     finally:
         await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_unknown_product_foreign_key_and_unentitled_product_rls():
+    engine=create_async_engine(URL)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','tenant-a',true)"))
+            await conn.execute(text("SELECT set_config('app.product_ids','photo-studio-billing',true)"))
+            with pytest.raises(Exception):
+                await conn.execute(text("""
+                  INSERT INTO wf_tasks(id,tenant_id,product_id,department,assignee_role_id,title,description,priority,status,created_by,idempotency_key,created_at)
+                  VALUES(gen_random_uuid(),'tenant-a','not-registered','Ops','market-intel','invalid product','','normal','queued','tenant-a','bad-product-fixture',now())
+                """))
+            await conn.execute(text("""
+              INSERT INTO wf_tasks(id,tenant_id,product_id,department,assignee_role_id,title,description,priority,status,created_by,idempotency_key,created_at)
+              VALUES(gen_random_uuid(),'tenant-a','photo-studio-growth-os','Ops','market-intel','unentitled product','','normal','queued','tenant-a','unentitled-fixture',now())
+              ON CONFLICT DO NOTHING
+            """))
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','tenant-a',true)"))
+            await conn.execute(text("SELECT set_config('app.product_ids','photo-studio-billing',true)"))
+            rows=await conn.execute(text("SELECT * FROM wf_tasks WHERE product_id='photo-studio-growth-os'"))
+            assert list(rows)==[]
+    finally:
+        await engine.dispose()
