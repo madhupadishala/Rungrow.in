@@ -258,7 +258,7 @@ class PostgresWorkforceRepository:
           WHERE r.id=:run AND r.tenant_id=:tenant AND r.execution_state='AWAITING_APPROVAL'
             AND EXISTS (SELECT 1 FROM wf_approvals a WHERE a.id=:approval AND a.tenant_id=r.tenant_id
               AND a.product_id IS NOT DISTINCT FROM r.product_id AND a.employee_id=r.employee_id
-              AND a.status='approved' AND a.expires_at>now() AND a.consumed_at IS NULL)
+              AND a.status='APPROVED' AND a.expires_at>now() AND a.consumed_at IS NULL)
           RETURNING r.*
         """,{"run":run_id,"tenant":self.principal.tenant_id,"approval":approval_id})
         if not item: raise PermissionError("Run cannot resume without matching live approval")
