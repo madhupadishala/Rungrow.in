@@ -83,8 +83,8 @@ class ModelGateway:
     async def generate_structured(self, *, messages: list[dict[str,str]], output_model: Type[BaseModel],
         tenant_id: str, product_id: str | None, employee_id: str, run_id: str,
         outbound: bool=False, is_sandbox: bool=False,
-        estimated_input_cost_inr_per_1k: float=0.0,
-        estimated_output_cost_inr_per_1k: float=0.0):
+        estimated_input_cost_inr_per_1k: float | None=None,
+        estimated_output_cost_inr_per_1k: float | None=None):
         messages=self.with_ai_identity(messages,outbound)
         if is_sandbox:
             messages=[{"role":"system","content":"SANDBOX MODE: simulate and practise only. Never contact real customers, call production webhooks, trigger financial actions, or mutate production customer records."},*messages]
@@ -110,7 +110,9 @@ class ModelGateway:
             response=repaired
             parsed=output_model.model_validate_json(response.content) if hasattr(output_model,"model_validate_json") else output_model.parse_raw(response.content)
         latency=int((time.perf_counter()-started)*1000)
-        cost=(prompt*estimated_input_cost_inr_per_1k+completion*estimated_output_cost_inr_per_1k)/1000
+        input_rate=estimated_input_cost_inr_per_1k if estimated_input_cost_inr_per_1k is not None else float(os.getenv("WORKFORCE_INPUT_COST_INR_PER_1K","0"))
+        output_rate=estimated_output_cost_inr_per_1k if estimated_output_cost_inr_per_1k is not None else float(os.getenv("WORKFORCE_OUTPUT_COST_INR_PER_1K","0"))
+        cost=(prompt*input_rate+completion*output_rate)/1000
         telemetry={"prompt_tokens":prompt,"completion_tokens":completion,"estimated_cost_inr":cost,
             "latency_ms":latency,"provider":response.provider,"model":response.model,
             "tenant_id":tenant_id,"product_id":product_id,"employee_id":employee_id,"run_id":run_id,"is_sandbox":is_sandbox}
