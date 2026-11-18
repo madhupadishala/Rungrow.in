@@ -19,8 +19,9 @@ async def test_postgres_role_is_restricted_and_rls_is_forced():
               WHERE n.nspname='public' AND c.relname IN
                 ('wf_tasks','wf_agent_runs','wf_memory','wf_approvals','wf_audit_events')
             """))
-            assert len(list(forced))==5
-            assert all(row.relforcerowsecurity for row in forced)
+            rows=list(forced)
+            assert len(rows)==5
+            assert all(row.relforcerowsecurity for row in rows)
     finally:
         await engine.dispose()
 
@@ -46,7 +47,11 @@ async def test_audit_is_append_only_for_restricted_role():
     try:
         async with engine.begin() as conn:
             await conn.execute(text("SELECT set_config('app.current_tenant_id','tenant-a',true)"))
+            await conn.execute(text("""
+              INSERT INTO wf_audit_events(id,tenant_id,actor_id,action,resource_type,resource_id,details,occurred_at)
+              VALUES(gen_random_uuid(),'tenant-a','tester','fixture','test','audit-fixture','{}'::jsonb,now())
+            """))
             with pytest.raises(Exception):
-                await conn.execute(text("UPDATE wf_audit_events SET action='tampered' WHERE false"))
+                await conn.execute(text("UPDATE wf_audit_events SET action='tampered' WHERE resource_id='audit-fixture'"))
     finally:
         await engine.dispose()
