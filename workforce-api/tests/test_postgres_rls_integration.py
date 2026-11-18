@@ -38,7 +38,7 @@ async def test_rls_tenant_context_hides_other_tenants():
     try:
         async with engine.begin() as conn:
             await conn.execute(text("SELECT set_config('app.current_tenant_id','tenant-b',true)"))
-            await conn.execute(text("INSERT INTO wf_tasks(id,tenant_id,product_id,department,assignee_role_id,title,description,priority,status,created_by,idempotency_key,created_at) VALUES (gen_random_uuid(),'tenant-b',NULL,'Ops','market-intel','B task','','normal','queued','user-b','rls-fixture-b',now()) ON CONFLICT DO NOTHING"))
+            await conn.execute(text("INSERT INTO wf_tasks(id,tenant_id,product_id,department,assignee_role_id,title,description,priority,status,created_by,idempotency_key,created_at) VALUES (gen_random_uuid(),'tenant-b',NULL,'Ops','market-intel','B task','','normal','QUEUED','user-b','rls-fixture-b',now()) ON CONFLICT DO NOTHING"))
         async with engine.begin() as conn:
             await conn.execute(text("SELECT set_config('app.current_tenant_id','tenant-a',true)"))
             rows=await conn.execute(text("SELECT * FROM wf_tasks WHERE tenant_id='tenant-b'"))
