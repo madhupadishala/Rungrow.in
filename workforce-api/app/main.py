@@ -368,6 +368,8 @@ async def execute_registered_tool(body: ToolExecutionRequest,
             principal=p,employee=employee,run=run,payload=body.payload,approval_id=body.approval_id)
         return {"status":"completed","result":result}
     except (ApprovalBoundaryError,SandboxViolation) as exc:
-        raise HTTPException(getattr(exc,"status_code",403),str(exc)) from exc
+        detail={"message":str(exc)}
+        if getattr(exc,"approval_id",None): detail["approval_id"]=exc.approval_id
+        raise HTTPException(getattr(exc,"status_code",403),detail) from exc
     except HTTPException: raise
     except Exception as exc: translate_repo_error(exc)
