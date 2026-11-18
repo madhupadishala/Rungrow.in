@@ -573,6 +573,23 @@ class InMemoryWorkforceRepository:
         if not __import__("hmac").compare_digest(item["payload_hash"],expected): raise PermissionError("Payload integrity failure")
         return item
 
+    async def record_model_usage(self, **usage):
+        self._scope(usage.get("product_id"))
+        self.model_usage.append({"id":str(uuid4()),"tenant_id":self.principal.tenant_id,**usage})
+        self._audit("model.usage","model_usage",usage["run_id"],usage.get("product_id"),usage)
+
+    async def commit_boundary(self):
+        return None
+
+    async def resume_agent_run(self, run_id, approval_id):
+        run=await self.get_agent_run(run_id)
+        approval=next((x for x in self.approvals if x["id"]==approval_id and x["tenant_id"]==self.principal.tenant_id),None)
+        if not run or run.get("execution_state")!="AWAITING_APPROVAL" or not approval or approval["status"]!="approved" or approval["expires_at"]<=datetime.now(timezone.utc) or approval["product_id"]!=run.get("product_id") or approval["employee_id"]!=run["employee_id"] or approval.get("consumed_at"):
+            raise PermissionError("Run cannot resume without matching live approval")
+        run.update(status="planned",execution_state="QUEUED")
+        self._audit("agent_run.resumed","agent_run",run_id,run.get("product_id"),{"approval_id":approval_id})
+        return run
+
     async def append_audit(self, action, resource_type, resource_id, product_id, details):
         self._scope(product_id)
         self._audit(action,resource_type,resource_id,product_id,details)
