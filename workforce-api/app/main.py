@@ -337,7 +337,7 @@ async def resume_orchestrator_run(run_id: str, approval_id: str,
     authorize_product_access(p,run.get("product_id"))
     approvals=await repo.list_approvals(run.get("product_id"))
     approval=next((x for x in approvals if x["id"]==approval_id),None)
-    if not approval or approval.get("status") not in {"approved","APPROVED"} or approval.get("employee_id")!=run["employee_id"]:
+    if not approval or approval.get("status") not in {"APPROVED"} or approval.get("employee_id")!=run["employee_id"]:
         raise HTTPException(409,"Matching approved human decision required; execution still requires boundary validation")
     resumed=await repo.resume_agent_run(run_id,approval_id)
     return {"run_id":run_id,"status":resumed["execution_state"],"execution":"not_started"}
