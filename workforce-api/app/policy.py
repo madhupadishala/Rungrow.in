@@ -26,7 +26,9 @@ SENSITIVE = {
     "contract.commit", "payment.initiate", "payment.refund", "data.export",
     "user.invite", "role.grant", "production.deploy", "campaign.activate",
     "customer.delete", "lead.bulk_contact", "legal.commit",
-    "investor.commit", "investment.commit", "securities.commit", "data.sensitive_export", "access.control.change",
+    "investor.commit", "investment.commit", "securities.commit", "investor.outreach",
+    "outreach.send", "email.send", "whatsapp.send", "sms.send", "customer.contact",
+    "nonstandard.discount", "sensitive.export", "data.sensitive_export", "access.control.change", "access.grant", "user.role.change",
 }
 
 
