@@ -147,3 +147,13 @@ def test_outbound_prompt_always_contains_explicit_ai_identity_disclosure():
     assert messages[0]["role"]=="system"
     assert "AI assistant" in messages[0]["content"]
     assert "Never claim or imply that you are human" in messages[0]["content"]
+
+@pytest.mark.asyncio
+async def test_sandbox_model_calls_are_marked_and_prompted_as_simulation_only():
+    repo=InMemoryWorkforceRepository(principal(),PRODUCTS)
+    provider=MockModelProvider([{"summary":"practice","count":1}])
+    gateway=ModelGateway({"mock":provider},repository=repo)
+    await gateway.generate_structured(messages=[],output_model=Plan,tenant_id="tenant-a",
+        product_id="photo-studio-growth-os",employee_id="market-intel",run_id="sandbox-run",is_sandbox=True)
+    assert "SANDBOX MODE" in provider.calls[0]["messages"][0]["content"]
+    assert repo.model_usage[0]["is_sandbox"] is True
