@@ -254,13 +254,13 @@ class PostgresWorkforceRepository:
           "model":usage["model"],"prompt":usage["prompt_tokens"],"completion":usage["completion_tokens"],
           "cost":usage["estimated_cost_inr"],"latency":usage["latency_ms"]})
 
-    async def claim_task(self, worker_id: str, lease_seconds: int):
+    async def claim_task(self, worker_id: str, lease_seconds: int, product_id: str | None=None):
         return await self._one("""
           WITH candidate AS (
             SELECT id FROM wf_tasks
             WHERE ((status IN ('QUEUED','RETRY_SCHEDULED') AND next_retry_at <= now())
               OR (status='RUNNING' AND lease_expires_at <= now()))
-              AND tenant_id=:tenant
+              AND tenant_id=:tenant AND (:requested_product IS NULL OR product_id=:requested_product)
               AND (product_id IS NULL OR product_id=ANY(string_to_array(:products,',')) OR :admin='true')
             ORDER BY next_retry_at,created_at
             FOR UPDATE SKIP LOCKED LIMIT 1
@@ -275,7 +275,7 @@ class PostgresWorkforceRepository:
           RETURNING t.*
         """,{"tenant":self.principal.tenant_id,"products":",".join(self.principal.product_ids),
              "admin":"true" if "*" in self.principal.permissions else "false",
-             "worker":worker_id,"lease":lease_seconds})
+             "worker":worker_id,"lease":lease_seconds,"requested_product":product_id})
 
     async def finish_task(self, task_id: str, worker_id: str, result: Any):
         item=await self._one("""
@@ -378,11 +378,12 @@ class WorkforceRepositoryProtocol(Protocol):
         item.setdefault("lease_expires_at",None); item.setdefault("result",None)
         return item
 
-    async def claim_task(self, worker_id, lease_seconds):
+    async def claim_task(self, worker_id, lease_seconds, product_id=None):
         now=datetime.now(timezone.utc)
         eligible=[]
         for task in self.tasks:
             if task["tenant_id"]!=self.principal.tenant_id: continue
+            if product_id is not None and task.get("product_id")!=product_id: continue
             self._scope(task.get("product_id"))
             status=task.get("status","QUEUED").upper()
             retry=task.get("next_retry_at",now)
@@ -440,7 +441,7 @@ class WorkforceRepositoryProtocol(Protocol):
     async def append_audit(self, action, resource_type, resource_id, product_id, details): ...
     async def list_audit(self, product_id=None): ...
     async def record_model_usage(self, **usage): ...
-    async def claim_task(self, worker_id, lease_seconds): ...
+    async def claim_task(self, worker_id, lease_seconds, product_id=None): ...
     async def finish_task(self, task_id, worker_id, result): ...
     async def fail_task(self, task_id, worker_id, error, retry_delay, max_attempts): ...
     async def enqueue_task(self, **kwargs): ...
