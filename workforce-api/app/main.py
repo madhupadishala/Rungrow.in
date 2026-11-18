@@ -371,4 +371,5 @@ async def execute_registered_tool(body: ToolExecutionRequest,
         if getattr(exc,"approval_id",None): detail["approval_id"]=exc.approval_id
         raise HTTPException(getattr(exc,"status_code",403),detail) from exc
     except HTTPException: raise
+    except KeyError as exc: raise HTTPException(404,str(exc)) from exc
     except Exception as exc: translate_repo_error(exc)
