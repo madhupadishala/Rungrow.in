@@ -191,7 +191,7 @@ class PostgresWorkforceRepository:
           WHERE id=:id AND tenant_id=:tenant AND product_id IS NOT DISTINCT FROM :product
             AND status='pending' AND requester_id <> :approver AND expires_at > now()
           RETURNING *
-        """, {"decision": decision, "approver": self.principal.user_id, "reason": reason,
+        """, {"decision": decision.upper(), "approver": self.principal.user_id, "reason": reason,
               "id": approval_id, "tenant": self.principal.tenant_id, "product": product_id})
         if not item:
             raise PermissionError("Approval is unavailable, expired, already decided, or separation of duties failed")
