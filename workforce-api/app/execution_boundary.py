@@ -67,13 +67,16 @@ class ExecutionBoundaryGuard:
                 await self.repository.append_audit("approval.execution_denied","tool",tool_name,run.get("product_id"),{"run_id":run.get("id"),"reason":str(exc)})
                 await self.repository.commit_boundary()
                 raise ApprovalBoundaryError(str(exc),409) from exc
+        await self.repository.start_agent_run(run["id"])
         await self.repository.append_audit("tool.execution.started","tool",tool_name,run.get("product_id"),{"run_id":run["id"],"approval_id":approval_id})
         await self.repository.commit_boundary()
         try:
             result=await tool.handler(**payload)
         except Exception as exc:
+            await self.repository.fail_agent_run(run["id"],str(exc))
             await self.repository.append_audit("tool.execution.failed","tool",tool_name,run.get("product_id"),{"run_id":run["id"],"error":str(exc)})
             await self.repository.commit_boundary()
             raise
+        await self.repository.complete_agent_run(run["id"],result if isinstance(result,dict) else {"result":str(result)})
         await self.repository.append_audit("tool.execution.completed","tool",tool_name,run.get("product_id"),{"run_id":run["id"],"approval_id":approval_id})
         return result
