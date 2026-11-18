@@ -274,6 +274,7 @@ class PostgresWorkforceRepository:
           "employee":usage["employee_id"],"run":usage["run_id"],"provider":usage["provider"],
           "model":usage["model"],"prompt":usage["prompt_tokens"],"completion":usage["completion_tokens"],
           "cost":usage["estimated_cost_inr"],"latency":usage["latency_ms"]})
+        await self.append_audit("model.usage","model_usage",usage["run_id"],usage["product_id"],usage)
 
     async def claim_task(self, worker_id: str, lease_seconds: int, product_id: str | None=None):
         return await self._one("""
