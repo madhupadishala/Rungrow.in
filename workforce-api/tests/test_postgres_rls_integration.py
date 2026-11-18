@@ -68,11 +68,11 @@ async def test_unknown_product_foreign_key_and_unentitled_product_rls():
                   INSERT INTO wf_tasks(id,tenant_id,product_id,department,assignee_role_id,title,description,priority,status,created_by,idempotency_key,created_at)
                   VALUES(gen_random_uuid(),'tenant-a','not-registered','Ops','market-intel','invalid product','','normal','queued','tenant-a','bad-product-fixture',now())
                 """))
-            await conn.execute(text("""
-              INSERT INTO wf_tasks(id,tenant_id,product_id,department,assignee_role_id,title,description,priority,status,created_by,idempotency_key,created_at)
-              VALUES(gen_random_uuid(),'tenant-a','photo-studio-growth-os','Ops','market-intel','unentitled product','','normal','queued','tenant-a','unentitled-fixture',now())
-              ON CONFLICT DO NOTHING
-            """))
+            with pytest.raises(Exception):
+                await conn.execute(text("""
+                  INSERT INTO wf_tasks(id,tenant_id,product_id,department,assignee_role_id,title,description,priority,status,created_by,idempotency_key,created_at)
+                  VALUES(gen_random_uuid(),'tenant-a','photo-studio-growth-os','Ops','market-intel','unentitled product','','normal','queued','tenant-a','unentitled-fixture',now())
+                """))
         async with engine.begin() as conn:
             await conn.execute(text("SELECT set_config('app.current_tenant_id','tenant-a',true)"))
             await conn.execute(text("SELECT set_config('app.product_ids','photo-studio-billing',true)"))
