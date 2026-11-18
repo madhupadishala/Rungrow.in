@@ -157,3 +157,21 @@ async def test_sandbox_model_calls_are_marked_and_prompted_as_simulation_only():
         product_id="photo-studio-growth-os",employee_id="market-intel",run_id="sandbox-run",is_sandbox=True)
     assert "SANDBOX MODE" in provider.calls[0]["messages"][0]["content"]
     assert repo.model_usage[0]["is_sandbox"] is True
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action_type",["payment.refund","webhook.production","database.write","production.deploy","whatsapp.send"])
+async def test_sandbox_blocks_financial_webhook_database_and_deployment_actions_even_if_flagged_allowed(action_type):
+    repo=InMemoryWorkforceRepository(principal(),PRODUCTS)
+    run=await repo.create_agent_run(product_id="photo-studio-growth-os",employee_id="employee-1",
+        task="practice",status="planned",summary="",steps=[],correlation_id=action_type,is_sandbox=True)
+    calls=[]
+    async def handler(**payload):
+        calls.append(payload)
+        return {"accepted":True}
+    registry=ToolRegistry()
+    registry.register(ToolDefinition(action_type,frozenset(),False,True,action_type,handler))
+    employee=SimpleNamespace(id="employee-1",permissions=frozenset(),department="Growth",product_id="photo-studio-growth-os")
+    with pytest.raises(SandboxViolation):
+        await ExecutionBoundaryGuard(repo,registry).execute(tool_name=action_type,principal=repo.principal,
+            employee=employee,run=run,payload={"id":"production-record"})
+    assert calls==[]
