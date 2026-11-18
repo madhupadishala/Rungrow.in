@@ -244,6 +244,36 @@ class PostgresWorkforceRepository:
                "actor": self.principal.user_id, "action": action, "type": resource_type,
                "resource": resource_id, "details": json.dumps(details)})
 
+    async def start_agent_run(self, run_id):
+        item=await self._one("""
+          UPDATE wf_agent_runs SET execution_state='RUNNING',status='running',updated_at=now()
+          WHERE id=:id AND tenant_id=:tenant AND execution_state IN ('QUEUED','AWAITING_APPROVAL')
+          RETURNING *
+        """,{"id":run_id,"tenant":self.principal.tenant_id})
+        if not item: raise PermissionError("Agent run is not in an executable state")
+        await self.append_audit("agent_run.started","agent_run",run_id,item["product_id"],{})
+        return item
+
+    async def complete_agent_run(self, run_id, result):
+        item=await self._one("""
+          UPDATE wf_agent_runs SET execution_state='COMPLETED',status='completed',
+            summary=COALESCE(:summary,summary),updated_at=now()
+          WHERE id=:id AND tenant_id=:tenant AND execution_state='RUNNING' RETURNING *
+        """,{"id":run_id,"tenant":self.principal.tenant_id,"summary":result.get("summary") if isinstance(result,dict) else None})
+        if not item: raise PermissionError("Agent run is not running")
+        await self.append_audit("agent_run.completed","agent_run",run_id,item["product_id"],{})
+        return item
+
+    async def fail_agent_run(self, run_id, error):
+        item=await self._one("""
+          UPDATE wf_agent_runs SET execution_state='DEAD_LETTER',status='failed',
+            summary=:error,updated_at=now()
+          WHERE id=:id AND tenant_id=:tenant AND execution_state='RUNNING' RETURNING *
+        """,{"id":run_id,"tenant":self.principal.tenant_id,"error":error[:4000]})
+        if not item: raise PermissionError("Agent run is not running")
+        await self.append_audit("agent_run.failed","agent_run",run_id,item["product_id"],{"error":error[:1000]})
+        return item
+
     async def commit_boundary(self):
         await self.session.commit()
         await self.session.begin()
@@ -391,6 +421,9 @@ class WorkforceRepositoryProtocol(Protocol):
     async def list_audit(self, product_id=None): ...
     async def record_model_usage(self, **usage): ...
     async def commit_boundary(self): ...
+    async def start_agent_run(self, run_id): ...
+    async def complete_agent_run(self, run_id, result): ...
+    async def fail_agent_run(self, run_id, error): ...
     async def resume_agent_run(self, run_id, approval_id): ...
     async def claim_task(self, worker_id, lease_seconds, product_id=None): ...
     async def finish_task(self, task_id, worker_id, result): ...
@@ -499,6 +532,28 @@ class InMemoryWorkforceRepository:
           sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
         if not __import__("hmac").compare_digest(item["payload_hash"],expected): raise PermissionError("Payload integrity failure")
         return item
+
+    async def start_agent_run(self, run_id):
+        run=await self.get_agent_run(run_id)
+        if not run or run.get("execution_state") not in {"QUEUED","AWAITING_APPROVAL"}:
+            raise PermissionError("Agent run is not in an executable state")
+        run.update(execution_state="RUNNING",status="running")
+        self._audit("agent_run.started","agent_run",run_id,run.get("product_id"))
+        return run
+
+    async def complete_agent_run(self, run_id, result):
+        run=await self.get_agent_run(run_id)
+        if not run or run.get("execution_state")!="RUNNING": raise PermissionError("Agent run is not running")
+        run.update(execution_state="COMPLETED",status="completed",summary=result.get("summary",run.get("summary","")))
+        self._audit("agent_run.completed","agent_run",run_id,run.get("product_id"))
+        return run
+
+    async def fail_agent_run(self, run_id, error):
+        run=await self.get_agent_run(run_id)
+        if not run or run.get("execution_state")!="RUNNING": raise PermissionError("Agent run is not running")
+        run.update(execution_state="DEAD_LETTER",status="failed",summary=error[:4000])
+        self._audit("agent_run.failed","agent_run",run_id,run.get("product_id"),{"error":error[:1000]})
+        return run
 
     async def record_model_usage(self, **usage):
         self._scope(usage.get("product_id"))
