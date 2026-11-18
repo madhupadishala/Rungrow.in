@@ -87,3 +87,47 @@ async def test_unknown_product_foreign_key_and_unentitled_product_rls():
             assert list(rows)==[]
     finally:
         await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_fastapi_records_survive_new_app_instance():
+    from fastapi import FastAPI, Depends
+    from httpx import ASGITransport, AsyncClient
+    from app.main import app as workforce_app, get_workforce_repo
+    from app.policy import Principal
+    from app.repositories import TenantRepository, session_factory
+    from app.security import current_principal
+
+    principal=Principal("durability-user","durability-tenant","founder",frozenset({"*"}),
+                        product_ids=frozenset({"photo-studio-growth-os"}))
+    async def principal_override():
+        return principal
+    async def repository_override(p=Depends(current_principal)):
+        factory=session_factory()
+        async with factory() as session:
+            async with TenantRepository(session,p) as repo:
+                yield repo
+    workforce_app.dependency_overrides[current_principal]=principal_override
+    workforce_app.dependency_overrides[get_workforce_repo]=repository_override
+    first=FastAPI()
+    first.mount("/",workforce_app)
+    second=FastAPI()
+    second.mount("/",workforce_app)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=first),base_url="http://first") as client1:
+            task=await client1.post("/v1/workforce/tasks",headers={"Idempotency-Key":"durability-task-1"},
+                json={"title":"Durability task","assignee_role_id":"market-intel","product_id":"photo-studio-growth-os"})
+            assert task.status_code==200,task.text
+            memory=await client1.post("/v1/workforce/memory",json={"role_id":"market-intel","product_id":"photo-studio-growth-os","content":"durability memory","source_ref":"integration","retention_days":30})
+            assert memory.status_code==200,memory.text
+            run=await client1.post("/v1/workforce/agent-runs",json={"role_id":"market-intel","product_id":"photo-studio-growth-os","task":"Research public photo studio market"})
+            assert run.status_code==200,run.text
+            approval=await client1.post("/v1/workforce/commands",json={"command":"Send campaign to approved contacts","product_id":"photo-studio-growth-os"})
+            assert approval.status_code==200 and approval.json()["approval_id"]
+        async with AsyncClient(transport=ASGITransport(app=second),base_url="http://second") as client2:
+            assert any(x["id"]==task.json()["id"] for x in (await client2.get("/v1/workforce/tasks")).json())
+            assert any(x["id"]==memory.json()["id"] for x in (await client2.get("/v1/workforce/memory")).json())
+            assert any(x["id"]==run.json()["id"] for x in (await client2.get("/v1/workforce/agent-runs")).json())
+            approvals=(await client2.get("/v1/workforce/approvals")).json()
+            assert any(x["id"]==approval.json()["approval_id"] for x in approvals)
+    finally:
+        workforce_app.dependency_overrides.clear()
