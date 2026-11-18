@@ -73,20 +73,21 @@ class PostgresWorkforceRepository:
             raise ValueError("Invalid product scope")
 
     async def create_task(self, *, product_id: str | None, department: str, assignee_role_id: str,
-                          title: str, description: str, priority: str, idempotency_key: str):
+                          title: str, description: str, priority: str, idempotency_key: str,
+                          is_sandbox: bool=False, max_attempts: int=5):
         self._product(product_id)
         item = await self._one("""
           INSERT INTO wf_tasks
             (id, tenant_id, product_id, department, assignee_role_id, title, description,
-             priority, status, created_by, idempotency_key, created_at)
+             priority, status, created_by, idempotency_key, created_at, is_sandbox, max_attempts)
           VALUES (:id, :tenant, :product, :department, :assignee, :title, :description,
-                  :priority, 'queued', :actor, :idem, now())
+                  :priority, 'QUEUED', :actor, :idem, now(), :sandbox, :max_attempts)
           ON CONFLICT (tenant_id, idempotency_key) DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
           RETURNING *
         """, {"id": str(uuid4()), "tenant": self.principal.tenant_id, "product": product_id,
               "department": department, "assignee": assignee_role_id, "title": title,
               "description": description, "priority": priority, "actor": self.principal.user_id,
-              "idem": idempotency_key})
+              "idem": idempotency_key, "sandbox": is_sandbox, "max_attempts": max_attempts})
         if item:
             await self.append_audit("task.create", "task", str(item["id"]), product_id, {"idempotency_key": idempotency_key})
         return item
@@ -100,18 +101,18 @@ class PostgresWorkforceRepository:
         """, {"tenant": self.principal.tenant_id, "product": product_id})
 
     async def create_agent_run(self, *, product_id: str | None, employee_id: str, task: str,
-                               status: str, summary: str, steps: list, correlation_id: str):
+                               status: str, summary: str, steps: list, correlation_id: str, is_sandbox: bool=False):
         self._product(product_id)
         item = await self._one("""
           INSERT INTO wf_agent_runs
             (id, tenant_id, product_id, employee_id, requested_by, task, status, summary,
-             steps, correlation_id, created_at)
+             steps, correlation_id, created_at, is_sandbox, execution_state)
           VALUES (:id,:tenant,:product,:employee,:actor,:task,:status,:summary,
-                  CAST(:steps AS jsonb),:correlation,now()) RETURNING *
+                  CAST(:steps AS jsonb),:correlation,now(),:sandbox,'QUEUED') RETURNING *
         """, {"id": str(uuid4()), "tenant": self.principal.tenant_id, "product": product_id,
               "employee": employee_id, "actor": self.principal.user_id, "task": task,
               "status": status, "summary": summary, "steps": json.dumps(steps),
-              "correlation": correlation_id})
+              "correlation": correlation_id, "sandbox": is_sandbox})
         if item:
             await self.append_audit("agent.run", "agent_run", str(item["id"]), product_id, {"correlation_id": correlation_id})
         return item
@@ -308,6 +309,13 @@ class PostgresWorkforceRepository:
             title=title,description=description,priority=priority,idempotency_key=idempotency_key or str(uuid4()),
             is_sandbox=is_sandbox,max_attempts=max_attempts)
 
+    async def pause_task_for_approval(self, task_id: str, action_type: str, payload: dict):
+        task=await self._one("UPDATE wf_tasks SET status='AWAITING_APPROVAL',locked_by=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=:id AND tenant_id=:tenant RETURNING *",
+            {"id":task_id,"tenant":self.principal.tenant_id})
+        if not task: raise LookupError("Task not found")
+        return await self.create_approval(product_id=task["product_id"],employee_id=task["assignee_role_id"],
+            action_type=action_type,payload=payload,expires_at=datetime.now(timezone.utc)+__import__("datetime").timedelta(minutes=15))
+
     async def pause_run_for_approval(self, run_id: str, action_type: str, payload: dict):
         run=await self._one("UPDATE wf_agent_runs SET status='awaiting_approval',execution_state='AWAITING_APPROVAL',updated_at=now() WHERE id=:id AND tenant_id=:tenant RETURNING *",
             {"id":run_id,"tenant":self.principal.tenant_id})
@@ -408,6 +416,13 @@ class WorkforceRepositoryProtocol(Protocol):
             next_retry_at=datetime.now(timezone.utc)+__import__("datetime").timedelta(seconds=retry_delay))
         self._audit("task."+task["status"].lower(),"task",task_id,task.get("product_id")); return task
 
+    async def pause_task_for_approval(self, task_id, action_type, payload):
+        task=next((x for x in self.tasks if x["id"]==task_id and x["tenant_id"]==self.principal.tenant_id),None)
+        if not task: raise LookupError("Task not found")
+        task.update(status="AWAITING_APPROVAL",locked_by=None,lease_expires_at=None)
+        return await self.create_approval(product_id=task.get("product_id"),employee_id=task["assignee_role_id"],
+            action_type=action_type,payload=payload,expires_at=datetime.now(timezone.utc)+__import__("datetime").timedelta(minutes=15))
+
     async def pause_run_for_approval(self, run_id, action_type, payload):
         run=next((x for x in self.runs if x["id"]==run_id and x["tenant_id"]==self.principal.tenant_id),None)
         if not run: raise LookupError("Agent run not found")
@@ -430,6 +445,7 @@ class WorkforceRepositoryProtocol(Protocol):
     async def fail_task(self, task_id, worker_id, error, retry_delay, max_attempts): ...
     async def enqueue_task(self, **kwargs): ...
     async def pause_run_for_approval(self, run_id, action_type, payload): ...
+    async def pause_task_for_approval(self, task_id, action_type, payload): ...
     async def consume_approval(self, approval_id, **kwargs): ...
 
 
@@ -458,7 +474,8 @@ class InMemoryWorkforceRepository:
         if old: return old
         item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,**kw,"status":"queued",
               "created_by":self.principal.user_id,"created_at":datetime.now(timezone.utc).isoformat()}
-        self.tasks.append(item); self._audit("task.create","task",item["id"],product); return item
+        item.setdefault("attempt_count",0); item.setdefault("max_attempts",int(kw.get("max_attempts",5))); item.setdefault("is_sandbox",bool(kw.get("is_sandbox",False)))
+        item["status"]="QUEUED"; self.tasks.append(item); self._audit("task.create","task",item["id"],product); return item
 
     async def list_tasks(self, product_id=None):
         self._scope(product_id)
@@ -471,6 +488,7 @@ class InMemoryWorkforceRepository:
         self._scope(kw["product_id"])
         item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,"requested_by":self.principal.user_id,
               **kw,"created_at":datetime.now(timezone.utc).isoformat()}
+        item.setdefault("is_sandbox",bool(kw.get("is_sandbox",False))); item.setdefault("execution_state","QUEUED")
         self.runs.append(item); self._audit("agent.run","agent_run",item["id"],kw["product_id"]); return item
 
     async def get_agent_run(self, run_id):
