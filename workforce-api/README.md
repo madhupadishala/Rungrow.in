@@ -6,10 +6,10 @@ A separate service boundary in the existing static RunGrow repository. The marke
 - LiveKit Agents: Apache-2.0. Selected for realtime voice, telephony and agent sessions. Individual turn-detection model assets may have a separate model license; review each model before use.
 - Crawlee: Apache-2.0. Selected for policy-governed public-site crawling and structured extraction.
 - AgentSDR: MIT. Reference for SDR workflow patterns; no full application copied.
-- OpenCloser v2: MIT. Reference for voice sales workflows; desktop application not adopted as backend.
-- OpenOutreach: Apache-2.0. Reference for prospecting workflows; provider data terms still apply.
+- OpenCloser v2: canonical repository and license not verified; not approved for code reuse until verified.
+- OpenOutreach: GPL-3.0 per its repository page. Reference-only pending legal review; do not copy code into the proprietary product by default.
 
-RunGrow owns the workforce hierarchy, orchestration, tenant isolation, permissions, approvals, audit and commercial policy. Do not vendor upstream code without retaining license and NOTICE files.
+RunGrow owns the workforce hierarchy, orchestration, tenant isolation, permissions, approvals, audit and commercial policy. Follow `docs/REPOSITORY-REUSE-AND-INTEGRATION-STANDARD.md`: inspect existing RunGrow code first, pin exact upstream commits, verify licenses and retain required notices. Do not vendor upstream code without retaining license and NOTICE files.
 
 ## Local development
     cd workforce-api
