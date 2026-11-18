@@ -6,6 +6,18 @@ OWNER="${PGUSER:-rungrow_migrator}"
 APP_USER="rungrow_app_user"
 APP_PASSWORD="${RUNGROW_APP_PASSWORD:-rungrow_app_local_only}"
 COMPOSE=(docker compose -f "$ROOT/docker-compose.test.yml")
+ready=false
+for attempt in {1..30}; do
+  if "${COMPOSE[@]}" exec -T postgres pg_isready -U "$OWNER" -d "$DB" >/dev/null 2>&1; then
+    ready=true
+    break
+  fi
+  sleep 1
+done
+if [[ "$ready" != "true" ]]; then
+  echo "PostgreSQL did not become ready within 30 seconds" >&2
+  exit 1
+fi
 PSQL=("${COMPOSE[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "$OWNER" -d "$DB")
 for migration in "$ROOT"/migrations/*.sql; do
   echo "Applying $(basename "$migration")"
