@@ -126,12 +126,21 @@ class PostgresWorkforceRepository:
         return item
 
     async def transition_agent_run(self, run_id: str, expected_status: str, new_status: str):
-        return await self._one("""
-          UPDATE wf_agent_runs SET status=:new_status, updated_at=now()
-          WHERE id=:id AND tenant_id=:tenant AND status=:expected
-          RETURNING *
-        """, {"id": run_id, "tenant": self.principal.tenant_id,
-              "expected": expected_status, "new_status": new_status})
+        expected=expected_status.upper(); target=new_status.upper()
+        transitions={"QUEUED":{"RUNNING","AWAITING_APPROVAL","CANCELLED"},
+            "RUNNING":{"RUNNING","AWAITING_APPROVAL","COMPLETED","RETRY_SCHEDULED","DEAD_LETTER","CANCELLED"},
+            "RETRY_SCHEDULED":{"QUEUED","RUNNING","DEAD_LETTER","CANCELLED"},
+            "AWAITING_APPROVAL":{"QUEUED","RUNNING","CANCELLED"}}
+        if target not in transitions.get(expected,set()): raise ValueError("Invalid agent-run state transition")
+        item=await self._one("""
+          UPDATE wf_agent_runs SET execution_state=:target,status=:status,updated_at=now()
+          WHERE id=:id AND tenant_id=:tenant AND execution_state=:expected RETURNING *
+        """,{"id":run_id,"tenant":self.principal.tenant_id,"expected":expected,
+             "target":target,"status":target.lower()})
+        if not item: raise PermissionError("Agent run state changed or run is unavailable")
+        await self.append_audit("agent_run.state_changed","agent_run",run_id,item["product_id"],
+            {"from":expected,"to":target})
+        return item
 
     async def get_agent_run(self, run_id: str):
         return await self._one("SELECT * FROM wf_agent_runs WHERE id=:id AND tenant_id=:tenant",
@@ -444,6 +453,7 @@ class WorkforceRepositoryProtocol(Protocol):
     async def list_tasks(self, product_id=None): ...
     async def create_agent_run(self, **kwargs): ...
     async def get_agent_run(self, run_id): ...
+    async def transition_agent_run(self, run_id, expected_status, new_status): ...
     async def list_agent_runs(self, product_id=None): ...
     async def write_memory(self, **kwargs): ...
     async def list_memory(self, product_id=None): ...
@@ -516,6 +526,19 @@ class InMemoryWorkforceRepository:
               **kw,"created_at":datetime.now(timezone.utc).isoformat()}
         item.setdefault("is_sandbox",bool(kw.get("is_sandbox",False))); item.setdefault("execution_state","QUEUED")
         self.runs.append(item); self._audit("agent.run","agent_run",item["id"],kw["product_id"]); return item
+
+    async def transition_agent_run(self, run_id, expected_status, new_status):
+        run=await self.get_agent_run(run_id)
+        expected=expected_status.upper(); target=new_status.upper()
+        transitions={"QUEUED":{"RUNNING","AWAITING_APPROVAL","CANCELLED"},
+            "RUNNING":{"RUNNING","AWAITING_APPROVAL","COMPLETED","RETRY_SCHEDULED","DEAD_LETTER","CANCELLED"},
+            "RETRY_SCHEDULED":{"QUEUED","RUNNING","DEAD_LETTER","CANCELLED"},
+            "AWAITING_APPROVAL":{"QUEUED","RUNNING","CANCELLED"}}
+        if target not in transitions.get(expected,set()): raise ValueError("Invalid agent-run state transition")
+        if not run or run.get("execution_state")!=expected: raise PermissionError("Agent run state changed or run is unavailable")
+        run.update(execution_state=target,status=target.lower())
+        self._audit("agent_run.state_changed","agent_run",run_id,run.get("product_id"),{"from":expected,"to":target})
+        return run
 
     async def get_agent_run(self, run_id):
         return next((x for x in self.runs if x["id"]==run_id and x["tenant_id"]==self.principal.tenant_id),None)
