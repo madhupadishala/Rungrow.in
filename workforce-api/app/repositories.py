@@ -220,3 +220,121 @@ async def repository_for(principal: Principal):
     async with SessionFactory() as session:
         async with TenantRepository(session, principal) as repository:
             yield repository
+
+
+from typing import Protocol, runtime_checkable
+
+@runtime_checkable
+class WorkforceRepositoryProtocol(Protocol):
+    async def create_task(self, **kwargs): ...
+    async def list_tasks(self, product_id=None): ...
+    async def create_agent_run(self, **kwargs): ...
+    async def list_agent_runs(self, product_id=None): ...
+    async def write_memory(self, **kwargs): ...
+    async def list_memory(self, product_id=None): ...
+    async def create_approval(self, **kwargs): ...
+    async def list_approvals(self, product_id=None): ...
+    async def decide_approval(self, approval_id, decision, reason): ...
+    async def validate_approval(self, approval_id, **kwargs): ...
+    async def list_audit(self, product_id=None): ...
+
+
+class InMemoryWorkforceRepository:
+    """Explicitly injected, per-app test adapter. Never selected by production."""
+    def __init__(self, principal: Principal, products: set[str]):
+        self.principal, self.products = principal, products
+        self.tasks, self.runs, self.memory, self.approvals, self.audit = [], [], [], [], []
+
+    def _scope(self, product_id):
+        if product_id is not None and product_id not in self.products:
+            raise ValueError("Unknown product scope")
+        if product_id is not None and "*" not in self.principal.permissions and product_id not in self.principal.product_ids:
+            raise PermissionError("Product entitlement denied")
+
+    def _audit(self, action, kind, rid, product_id, details=None):
+        self.audit.append({"id": str(uuid4()), "tenant_id": self.principal.tenant_id,
+            "product_id": product_id, "actor_id": self.principal.user_id, "action": action,
+            "resource_type": kind, "resource_id": rid, "details": details or {},
+            "occurred_at": datetime.now(timezone.utc).isoformat()})
+
+    async def create_task(self, **kw):
+        product=kw["product_id"]; self._scope(product)
+        key=kw["idempotency_key"]
+        old=next((x for x in self.tasks if x["idempotency_key"]==key),None)
+        if old: return old
+        item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,**kw,"status":"queued",
+              "created_by":self.principal.user_id,"created_at":datetime.now(timezone.utc).isoformat()}
+        self.tasks.append(item); self._audit("task.create","task",item["id"],product); return item
+
+    async def list_tasks(self, product_id=None):
+        self._scope(product_id)
+        return [x for x in self.tasks if x["tenant_id"]==self.principal.tenant_id
+                and x.get("product_id") in (product_id,None) if product_id is not None] if product_id is not None else [
+                    x for x in self.tasks if x["tenant_id"]==self.principal.tenant_id
+                    and (x.get("product_id") is None or "*" in self.principal.permissions or x.get("product_id") in self.principal.product_ids)]
+
+    async def create_agent_run(self, **kw):
+        self._scope(kw["product_id"])
+        item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,"requested_by":self.principal.user_id,
+              **kw,"created_at":datetime.now(timezone.utc).isoformat()}
+        self.runs.append(item); self._audit("agent.run","agent_run",item["id"],kw["product_id"]); return item
+
+    async def list_agent_runs(self, product_id=None):
+        self._scope(product_id)
+        return [x for x in self.runs if x["tenant_id"]==self.principal.tenant_id and
+            (x.get("product_id")==product_id if product_id else
+             x.get("product_id") is None or "*" in self.principal.permissions or x.get("product_id") in self.principal.product_ids)]
+
+    async def write_memory(self, **kw):
+        self._scope(kw["product_id"])
+        item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,**kw}
+        self.memory.append(item); self._audit("memory.write","memory",item["id"],kw["product_id"]); return item
+
+    async def list_memory(self, product_id=None):
+        self._scope(product_id)
+        return [x for x in self.memory if x["tenant_id"]==self.principal.tenant_id and
+            (x.get("product_id")==product_id if product_id else
+             x.get("product_id") is None or "*" in self.principal.permissions or x.get("product_id") in self.principal.product_ids)]
+
+    async def create_approval(self, **kw):
+        self._scope(kw["product_id"])
+        digest=hashlib.sha256(json.dumps({"tenant_id":self.principal.tenant_id,"product_id":kw["product_id"],
+          "employee_id":kw["employee_id"],"action_type":kw["action_type"],"payload":kw["payload"]},
+          sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
+        item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,"requester_id":self.principal.user_id,
+          "approver_id":None,"status":"pending","payload_hash":digest,"created_at":datetime.now(timezone.utc).isoformat(),**kw}
+        self.approvals.append(item); self._audit("approval.requested","approval",item["id"],kw["product_id"]); return item
+
+    async def list_approvals(self, product_id=None):
+        self._scope(product_id)
+        return [x for x in self.approvals if x["tenant_id"]==self.principal.tenant_id and
+          (x.get("product_id")==product_id if product_id else
+           x.get("product_id") is None or "*" in self.principal.permissions or x.get("product_id") in self.principal.product_ids)]
+
+    async def decide_approval(self, approval_id, decision, reason):
+        item=next((x for x in self.approvals if x["id"]==approval_id and x["tenant_id"]==self.principal.tenant_id),None)
+        if not item: raise LookupError("Approval not found")
+        if item["requester_id"]==self.principal.user_id: raise PermissionError("Self approval forbidden")
+        if item["status"]!="pending" or item["expires_at"]<=datetime.now(timezone.utc): raise PermissionError("Approval expired or already decided")
+        item.update(status=decision,approver_id=self.principal.user_id,decision_reason=reason,decided_at=datetime.now(timezone.utc))
+        self._audit("approval."+decision,"approval",approval_id,item["product_id"]); return item
+
+    async def validate_approval(self, approval_id, **kw):
+        item=next((x for x in self.approvals if x["id"]==approval_id and x["tenant_id"]==self.principal.tenant_id),None)
+        if not item: raise LookupError("Approval not found")
+        if item["status"]!="approved" or item["expires_at"]<=datetime.now(timezone.utc) or item["approver_id"]==item["requester_id"]:
+            raise PermissionError("Approval validation failed")
+        for k in ("product_id","employee_id","action_type"):
+            if item[k]!=kw[k]: raise PermissionError("Approval binding mismatch")
+        expected=hashlib.sha256(json.dumps({"tenant_id":self.principal.tenant_id,"product_id":kw["product_id"],
+          "employee_id":kw["employee_id"],"action_type":kw["action_type"],"payload":kw["payload"]},
+          sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
+        if not __import__("hmac").compare_digest(item["payload_hash"],expected): raise PermissionError("Payload integrity failure")
+        return item
+
+    async def list_audit(self, product_id=None):
+        self._scope(product_id)
+        return [x for x in self.audit if x["tenant_id"]==self.principal.tenant_id and
+          (x.get("product_id")==product_id if product_id else
+           x.get("product_id") is None or "*" in self.principal.permissions or x.get("product_id") in self.principal.product_ids)]
+
