@@ -50,7 +50,10 @@ class ExecutionBoundaryGuard:
             raise ApprovalBoundaryError("Employee role lacks tool scopes",403)
         if tool.allowed_departments and employee.department not in tool.allowed_departments:
             raise ApprovalBoundaryError("Employee department is not authorised for this tool",403)
-        if employee.product_id and employee.product_id != run.get("product_id"):
+        product_id=run.get("product_id")
+        if product_id is not None and "*" not in principal.permissions and product_id not in principal.product_ids:
+            raise ApprovalBoundaryError("Principal lacks product entitlement for this run",403)
+        if employee.product_id and employee.product_id != product_id:
             raise ApprovalBoundaryError("Employee product boundary mismatch",403)
         if employee.id != run.get("employee_id"):
             raise ApprovalBoundaryError("Employee identity mismatch",403)
