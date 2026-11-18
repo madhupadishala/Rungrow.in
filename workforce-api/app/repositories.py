@@ -244,6 +244,27 @@ class PostgresWorkforceRepository:
                "actor": self.principal.user_id, "action": action, "type": resource_type,
                "resource": resource_id, "details": json.dumps(details)})
 
+    async def commit_boundary(self):
+        await self.session.commit()
+        await self.session.begin()
+        await self.session.execute(text("SELECT set_config('app.current_tenant_id', :tenant, true)"),{"tenant":self.principal.tenant_id})
+        await self.session.execute(text("SELECT set_config('app.product_ids', :products, true)"),{"products":",".join(sorted(self.principal.product_ids))})
+        await self.session.execute(text("SELECT set_config('app.current_principal_id', :principal, true)"),{"principal":self.principal.user_id})
+        await self.session.execute(text("SELECT set_config('app.is_company_admin', :admin, true)"),{"admin":"true" if "*" in self.principal.permissions else "false"})
+
+    async def resume_agent_run(self, run_id, approval_id):
+        item=await self._one("""
+          UPDATE wf_agent_runs r SET status='planned',execution_state='QUEUED',updated_at=now()
+          WHERE r.id=:run AND r.tenant_id=:tenant AND r.execution_state='AWAITING_APPROVAL'
+            AND EXISTS (SELECT 1 FROM wf_approvals a WHERE a.id=:approval AND a.tenant_id=r.tenant_id
+              AND a.product_id IS NOT DISTINCT FROM r.product_id AND a.employee_id=r.employee_id
+              AND a.status='approved' AND a.expires_at>now() AND a.consumed_at IS NULL)
+          RETURNING r.*
+        """,{"run":run_id,"tenant":self.principal.tenant_id,"approval":approval_id})
+        if not item: raise PermissionError("Run cannot resume without matching live approval")
+        await self.append_audit("agent_run.resumed","agent_run",run_id,item["product_id"],{"approval_id":approval_id})
+        return item
+
     async def record_model_usage(self, **usage):
         await self.session.execute(text("""
           INSERT INTO wf_model_usage(id,tenant_id,product_id,employee_id,run_id,provider,model,
@@ -338,6 +359,7 @@ class PostgresWorkforceRepository:
           "employee":employee_id,"action":action_type,"run":run_id,"hash":digest})
         if not item: raise PermissionError("Approval missing, invalid, expired, tampered or already consumed")
         await self.append_audit("approval.consumed","approval",approval_id,product_id,{"run_id":run_id})
+        await self.commit_boundary()
         return item
 
 
@@ -441,6 +463,8 @@ class WorkforceRepositoryProtocol(Protocol):
     async def append_audit(self, action, resource_type, resource_id, product_id, details): ...
     async def list_audit(self, product_id=None): ...
     async def record_model_usage(self, **usage): ...
+    async def commit_boundary(self): ...
+    async def resume_agent_run(self, run_id, approval_id): ...
     async def claim_task(self, worker_id, lease_seconds, product_id=None): ...
     async def finish_task(self, task_id, worker_id, result): ...
     async def fail_task(self, task_id, worker_id, error, retry_delay, max_attempts): ...
