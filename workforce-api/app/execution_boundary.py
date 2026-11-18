@@ -90,3 +90,7 @@ class ExecutionBoundaryGuard:
         await self.repository.complete_agent_run(run["id"],result if isinstance(result,dict) else {"result":str(result)})
         await self.repository.append_audit("tool.execution.completed","tool",tool_name,run.get("product_id"),{"run_id":run["id"],"approval_id":approval_id})
         return result
+
+
+# Explicit alias for integrations that name the approval sub-boundary.
+ApprovalBoundaryGuard = ExecutionBoundaryGuard
