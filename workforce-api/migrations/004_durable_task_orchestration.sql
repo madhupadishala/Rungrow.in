@@ -57,12 +57,14 @@ ALTER TABLE wf_approvals VALIDATE CONSTRAINT wf_approvals_decision_actor_check;
 
 CREATE TABLE IF NOT EXISTS wf_model_usage (
  id uuid PRIMARY KEY, tenant_id text NOT NULL, product_id text REFERENCES wf_product_registry(product_id),
- employee_id text NOT NULL, run_id text NOT NULL, provider text NOT NULL, model text NOT NULL,
+ employee_id text NOT NULL, run_id text NOT NULL, is_sandbox boolean NOT NULL DEFAULT false,
+ provider text NOT NULL, model text NOT NULL,
  prompt_tokens integer NOT NULL CHECK(prompt_tokens>=0),
  completion_tokens integer NOT NULL CHECK(completion_tokens>=0),
  estimated_cost_inr numeric(14,6) NOT NULL CHECK(estimated_cost_inr>=0),
  latency_ms integer NOT NULL CHECK(latency_ms>=0), created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE wf_model_usage ADD COLUMN IF NOT EXISTS is_sandbox boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS wf_model_usage_tenant_product_time ON wf_model_usage(tenant_id,product_id,created_at DESC);
 ALTER TABLE wf_model_usage ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wf_model_usage FORCE ROW LEVEL SECURITY;
