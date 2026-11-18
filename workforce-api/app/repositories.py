@@ -174,7 +174,7 @@ class PostgresWorkforceRepository:
             (id,tenant_id,product_id,employee_id,action_type,payload,payload_hash,
              requester_id,status,expires_at,created_at)
           VALUES (:id,:tenant,:product,:employee,:action,CAST(:payload AS jsonb),:hash,
-                  :requester,'pending',:expires,now()) RETURNING *
+                  :requester,'PENDING',:expires,now()) RETURNING *
         """, {"id": approval_id, "tenant": self.principal.tenant_id, "product": product_id,
               "employee": employee_id, "action": action_type, "payload": json.dumps(payload),
               "hash": digest, "requester": self.principal.user_id, "expires": expires_at})
@@ -205,7 +205,7 @@ class PostgresWorkforceRepository:
         item = await self._one("""
           SELECT * FROM wf_approvals WHERE id=:id AND tenant_id=:tenant
             AND product_id IS NOT DISTINCT FROM :product AND employee_id=:employee
-            AND action_type=:action AND status='approved' AND expires_at > now()
+            AND action_type=:action AND status='APPROVED' AND expires_at > now()
             AND approver_id IS NOT NULL AND approver_id <> requester_id
           FOR UPDATE
         """, {"id": approval_id, "tenant": self.principal.tenant_id, "product": product_id,
@@ -483,7 +483,7 @@ class InMemoryWorkforceRepository:
         if item["product_id"] != product_id: raise PermissionError("Approval product scope mismatch")
         if item["requester_id"]==self.principal.user_id: raise PermissionError("Self approval forbidden")
         if item["status"]!="pending" or item["expires_at"]<=datetime.now(timezone.utc): raise PermissionError("Approval expired or already decided")
-        item.update(status=decision,approver_id=self.principal.user_id,decision_reason=reason,decided_at=datetime.now(timezone.utc))
+        item.update(status=decision.upper(),approver_id=self.principal.user_id,decision_reason=reason,decided_at=datetime.now(timezone.utc))
         self._audit("approval."+decision,"approval",approval_id,item["product_id"]); return item
 
     async def validate_approval(self, approval_id, **kw):
@@ -510,7 +510,7 @@ class InMemoryWorkforceRepository:
     async def resume_agent_run(self, run_id, approval_id):
         run=await self.get_agent_run(run_id)
         approval=next((x for x in self.approvals if x["id"]==approval_id and x["tenant_id"]==self.principal.tenant_id),None)
-        if not run or run.get("execution_state")!="AWAITING_APPROVAL" or not approval or approval["status"]!="approved" or approval["expires_at"]<=datetime.now(timezone.utc) or approval["product_id"]!=run.get("product_id") or approval["employee_id"]!=run["employee_id"] or approval.get("consumed_at"):
+        if not run or run.get("execution_state")!="AWAITING_APPROVAL" or not approval or approval["status"]!="APPROVED" or approval["expires_at"]<=datetime.now(timezone.utc) or approval["product_id"]!=run.get("product_id") or approval["employee_id"]!=run["employee_id"] or approval.get("consumed_at"):
             raise PermissionError("Run cannot resume without matching live approval")
         run.update(status="planned",execution_state="QUEUED")
         self._audit("agent_run.resumed","agent_run",run_id,run.get("product_id"),{"approval_id":approval_id})
