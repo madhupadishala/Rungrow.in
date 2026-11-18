@@ -4,6 +4,8 @@ class Settings(BaseSettings):
     app_env:str="development"
     database_url:str="postgresql+asyncpg://workforce:workforce@localhost:5432/rungrow_workforce"
     jwt_secret:str="local-development-secret-change-before-deploy"
+    jwt_public_key:str=""
+    jwt_audience:str="rungrow-workforce-api"
     jwt_issuer:str="https://rungrow.in"
     access_token_minutes:int=30
     cors_origins:str="http://localhost:3000,https://rungrow.in"
