@@ -101,7 +101,7 @@ class ModelGateway:
             response=await self._call(provider,model,messages)
         prompt=response.prompt_tokens; completion=response.completion_tokens
         try:
-            parsed=output_model.model_validate_json(response.content) if hasattr(output_model,"model_validate_json") else output_model.parse_raw(response.content)
+            parsed=output_model.model_validate_json(response.content, strict=True) if hasattr(output_model,"model_validate_json") else output_model.parse_raw(response.content)
         except (ValidationError,ValueError,json.JSONDecodeError):
             repair=[*messages,{"role":"assistant","content":response.content},
                     {"role":"user","content":"Repair the previous response. Return ONLY valid JSON matching this schema: "+json.dumps(output_model.model_json_schema() if hasattr(output_model,"model_json_schema") else output_model.schema())}]
