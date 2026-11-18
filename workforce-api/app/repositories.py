@@ -166,17 +166,17 @@ class TenantRepository:
                                 {"payload_hash": digest})
         return item
 
-    async def decide_approval(self, approval_id: str, decision: str, reason: str):
+    async def decide_approval(self, approval_id: str, decision: str, reason: str, product_id: str | None = None):
         if decision not in {"approved", "rejected"}:
             raise ValueError("Invalid approval decision")
         item = await self._one("""
           UPDATE wf_approvals SET status=:decision, approver_id=:approver,
                  decision_reason=:reason, decided_at=now()
-          WHERE id=:id AND tenant_id=:tenant AND status='pending'
-            AND requester_id <> :approver AND expires_at > now()
+          WHERE id=:id AND tenant_id=:tenant AND product_id IS NOT DISTINCT FROM :product
+            AND status='pending' AND requester_id <> :approver AND expires_at > now()
           RETURNING *
         """, {"decision": decision, "approver": self.principal.user_id, "reason": reason,
-              "id": approval_id, "tenant": self.principal.tenant_id})
+              "id": approval_id, "tenant": self.principal.tenant_id, "product": product_id})
         if not item:
             raise PermissionError("Approval is unavailable, expired, already decided, or separation of duties failed")
         await self.append_audit("approval." + decision, "approval", approval_id,
@@ -248,7 +248,7 @@ class WorkforceRepositoryProtocol(Protocol):
     async def list_memory(self, product_id=None): ...
     async def create_approval(self, **kwargs): ...
     async def list_approvals(self, product_id=None): ...
-    async def decide_approval(self, approval_id, decision, reason): ...
+    async def decide_approval(self, approval_id, decision, reason, product_id=None): ...
     async def validate_approval(self, approval_id, **kwargs): ...
     async def list_audit(self, product_id=None): ...
 
@@ -328,6 +328,7 @@ class InMemoryWorkforceRepository:
     async def decide_approval(self, approval_id, decision, reason):
         item=next((x for x in self.approvals if x["id"]==approval_id and x["tenant_id"]==self.principal.tenant_id),None)
         if not item: raise LookupError("Approval not found")
+        if item["product_id"] != product_id: raise PermissionError("Approval product scope mismatch")
         if item["requester_id"]==self.principal.user_id: raise PermissionError("Self approval forbidden")
         if item["status"]!="pending" or item["expires_at"]<=datetime.now(timezone.utc): raise PermissionError("Approval expired or already decided")
         item.update(status=decision,approver_id=self.principal.user_id,decision_reason=reason,decided_at=datetime.now(timezone.utc))
