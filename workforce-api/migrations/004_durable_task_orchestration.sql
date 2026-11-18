@@ -61,3 +61,27 @@ CREATE POLICY wf_tenant_product_scope ON wf_model_usage FOR ALL
  WITH CHECK (tenant_id=current_setting('app.current_tenant_id',true)
    AND (product_id IS NULL OR COALESCE(current_setting('app.is_company_admin',true),'false')='true'
     OR product_id=ANY(string_to_array(COALESCE(current_setting('app.product_ids',true),''),','))));
+
+-- Approval payload and hash are immutable after request creation. Decisions only
+-- change decision metadata; execution consumption only changes consumption metadata.
+CREATE OR REPLACE FUNCTION wf_reject_approval_payload_mutation() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+ IF NEW.payload IS DISTINCT FROM OLD.payload OR NEW.payload_hash IS DISTINCT FROM OLD.payload_hash THEN
+   RAISE EXCEPTION 'approval payload and digest are immutable';
+ END IF;
+ RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS wf_approval_payload_immutable ON wf_approvals;
+CREATE TRIGGER wf_approval_payload_immutable BEFORE UPDATE OF payload,payload_hash ON wf_approvals
+FOR EACH ROW EXECUTE FUNCTION wf_reject_approval_payload_mutation();
+
+DO $$
+BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='wf_agent_runs_execution_state_check') THEN
+  ALTER TABLE wf_agent_runs ADD CONSTRAINT wf_agent_runs_execution_state_check
+   CHECK(execution_state IN ('QUEUED','RUNNING','AWAITING_APPROVAL','COMPLETED','RETRY_SCHEDULED','DEAD_LETTER','CANCELLED')) NOT VALID;
+ END IF;
+END $$;
+ALTER TABLE wf_agent_runs VALIDATE CONSTRAINT wf_agent_runs_execution_state_check;
