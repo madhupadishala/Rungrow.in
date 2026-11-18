@@ -306,6 +306,19 @@ class PostgresWorkforceRepository:
           "cost":usage["estimated_cost_inr"],"latency":usage["latency_ms"]})
         await self.append_audit("model.usage","model_usage",usage["run_id"],usage["product_id"],usage)
 
+    async def resume_task(self, task_id, approval_id):
+        item=await self._one("""
+          UPDATE wf_tasks t SET status='QUEUED',next_retry_at=now(),updated_at=now()
+          WHERE t.id=:task AND t.tenant_id=:tenant AND t.status='AWAITING_APPROVAL'
+            AND EXISTS (SELECT 1 FROM wf_approvals a WHERE a.id=:approval AND a.tenant_id=t.tenant_id
+              AND a.product_id IS NOT DISTINCT FROM t.product_id AND a.employee_id=t.assignee_role_id
+              AND a.status='APPROVED' AND a.expires_at>now() AND a.consumed_at IS NULL)
+          RETURNING t.*
+        """,{"task":task_id,"tenant":self.principal.tenant_id,"approval":approval_id})
+        if not item: raise PermissionError("Task cannot resume without a matching live approval")
+        await self.append_audit("task.resumed","task",task_id,item["product_id"],{"approval_id":approval_id})
+        return item
+
     async def claim_task(self, worker_id: str, lease_seconds: int, product_id: str | None=None):
         params={"tenant":self.principal.tenant_id,"products":",".join(self.principal.product_ids),
             "admin":"true" if "*" in self.principal.permissions else "false","requested_product":product_id}
@@ -438,6 +451,7 @@ class WorkforceRepositoryProtocol(Protocol):
     async def fail_agent_run(self, run_id, error): ...
     async def resume_agent_run(self, run_id, approval_id): ...
     async def claim_task(self, worker_id, lease_seconds, product_id=None): ...
+    async def resume_task(self, task_id, approval_id): ...
     async def finish_task(self, task_id, worker_id, result): ...
     async def fail_task(self, task_id, worker_id, error, retry_delay, max_attempts): ...
     async def enqueue_task(self, **kwargs): ...
@@ -544,6 +558,15 @@ class InMemoryWorkforceRepository:
           sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
         if not __import__("hmac").compare_digest(item["payload_hash"],expected): raise PermissionError("Payload integrity failure")
         return item
+
+    async def resume_task(self, task_id, approval_id):
+        task=next((x for x in self.tasks if x["id"]==task_id and x["tenant_id"]==self.principal.tenant_id),None)
+        approval=next((x for x in self.approvals if x["id"]==approval_id and x["tenant_id"]==self.principal.tenant_id),None)
+        if not task or task.get("status")!="AWAITING_APPROVAL" or not approval or approval["status"]!="APPROVED" or approval["expires_at"]<=datetime.now(timezone.utc) or approval["product_id"]!=task.get("product_id") or approval["employee_id"]!=task["assignee_role_id"] or approval.get("consumed_at"):
+            raise PermissionError("Task cannot resume without matching live approval")
+        task.update(status="QUEUED",next_retry_at=datetime.now(timezone.utc))
+        self._audit("task.resumed","task",task_id,task.get("product_id"),{"approval_id":approval_id})
+        return task
 
     async def enqueue_task(self, *, product_id, department, assignee_role_id, title, description="", priority="normal", is_sandbox=False, max_attempts=5, idempotency_key=None):
         item=await self.create_task(product_id=product_id,department=department,assignee_role_id=assignee_role_id,
