@@ -113,7 +113,7 @@ BEGIN
    (OLD.execution_state='QUEUED' AND NEW.execution_state IN ('RUNNING','AWAITING_APPROVAL','CANCELLED')) OR
    (OLD.execution_state='RUNNING' AND NEW.execution_state IN ('RUNNING','AWAITING_APPROVAL','COMPLETED','RETRY_SCHEDULED','DEAD_LETTER','CANCELLED')) OR
    (OLD.execution_state='RETRY_SCHEDULED' AND NEW.execution_state IN ('QUEUED','RUNNING','DEAD_LETTER','CANCELLED')) OR
-   (OLD.execution_state='AWAITING_APPROVAL' AND NEW.execution_state IN ('QUEUED','CANCELLED'))
+   (OLD.execution_state='AWAITING_APPROVAL' AND NEW.execution_state IN ('QUEUED','RUNNING','CANCELLED'))
  ) THEN
    RAISE EXCEPTION 'invalid workforce agent-run state transition: % -> %',OLD.execution_state,NEW.execution_state;
  END IF;
