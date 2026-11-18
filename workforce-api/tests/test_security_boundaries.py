@@ -223,3 +223,25 @@ async def test_approval_execution_rejects_employee_or_action_binding_mismatch(em
             json={"product_id":"photo-studio-growth-os", "employee_id":employee_id,
                   "action_type":action_type, "payload":{"campaign_id":"campaign-1"}})
     assert execution.status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "collection,endpoint",
+    [
+        ("tasks", "/v1/workforce/tasks"),
+        ("memory", "/v1/workforce/memory"),
+        ("runs", "/v1/workforce/agent-runs"),
+        ("approvals", "/v1/workforce/approvals"),
+    ],
+)
+async def test_unknown_legacy_product_rows_are_hidden(collection, endpoint):
+    STATE[collection].append({
+        "id": "legacy-unknown-product",
+        "tenant_id": "tenant-a",
+        "product_id": "retired-or-forged-product",
+    })
+    async with await client_for(principal()) as client:
+        response = await client.get(endpoint)
+    assert response.status_code == 200
+    assert response.json() == []
