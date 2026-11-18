@@ -30,7 +30,7 @@ async def command(body:CommandRequest,p:Principal=Depends(current_principal)):
     if permission not in p.permissions and "*" not in p.permissions:
         audit(p,"command.route","command",cid,"denied")
         return {"status":"denied","message":"Your workspace role is not authorised for this department data.","command_id":cid}
-    if re.search(r"\\b(send|launch|activate|charge|refund|delete|export|deploy|sign|purchase|discount|change price)\\b",body.command,re.I):
+    if re.search(r"\b(send|launch|activate|charge|refund|delete|export|deploy|sign|purchase|discount|change price)\b",body.command,re.I):
         aid=str(uuid4()); STATE["approvals"].append({"id":aid,"tenant_id":p.tenant_id,"requested_by":p.user_id,"action":"command.execution","payload":{"command":body.command,"role_id":role_id},"status":"pending"})
         audit(p,"command.approval_requested","approval",aid,"pending")
         return {"status":"approval_required","message":role.title+" is the proposed owner. Human approval is required before execution.","command_id":cid,"approval_id":aid,"routed_department":dept}
@@ -50,6 +50,7 @@ async def decide(approval_id:str,body:ApprovalDecision,p:Principal=Depends(requi
     item=next((x for x in STATE["approvals"] if x["id"]==approval_id and x["tenant_id"]==p.tenant_id),None)
     if not item: raise HTTPException(404,"Approval not found")
     if item["status"]!="pending": raise HTTPException(409,"Approval already decided")
+    if item["requested_by"]==p.user_id: raise HTTPException(403,"Separation of duties: requester cannot approve their own request")
     item.update({"status":body.decision,"decided_by":p.user_id,"reason":body.reason,"decided_at":datetime.now(timezone.utc).isoformat()})
     audit(p,"approval.decision","approval",approval_id,body.decision)
     return {"id":approval_id,"status":item["status"],"execution":"not_started"}
