@@ -16,3 +16,8 @@ class MemoryWrite(BaseModel):
     content:str=Field(min_length=1,max_length=10000)
     source_ref:str
     retention_days:int=Field(default=90,ge=1,le=3650)
+
+class AgentRunRequest(BaseModel):
+    role_id:str
+    task:str=Field(min_length=3,max_length=5000)
+    source_refs:list[str]=Field(default_factory=list,max_length=30)
