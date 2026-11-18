@@ -12,7 +12,12 @@ ALTER TABLE wf_tasks ALTER COLUMN status SET DEFAULT 'QUEUED';
 UPDATE wf_tasks SET status=upper(status);
 ALTER TABLE wf_tasks ADD CONSTRAINT wf_tasks_status_check CHECK(status IN
  ('QUEUED','RUNNING','AWAITING_APPROVAL','COMPLETED','RETRY_SCHEDULED','DEAD_LETTER','CANCELLED'));
-ALTER TABLE wf_tasks ADD CONSTRAINT wf_tasks_attempt_bounds CHECK(attempt_count >= 0 AND max_attempts > 0) NOT VALID;
+DO $
+BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='wf_tasks_attempt_bounds') THEN
+  ALTER TABLE wf_tasks ADD CONSTRAINT wf_tasks_attempt_bounds CHECK(attempt_count >= 0 AND max_attempts > 0) NOT VALID;
+ END IF;
+END $;
 ALTER TABLE wf_tasks VALIDATE CONSTRAINT wf_tasks_attempt_bounds;
 CREATE INDEX IF NOT EXISTS wf_tasks_claim_idx ON wf_tasks(status,next_retry_at,lease_expires_at,created_at);
 
