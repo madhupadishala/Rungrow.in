@@ -111,13 +111,13 @@ async def test_fastapi_records_survive_new_app_instance():
         async with factory() as session:
             async with PostgresWorkforceRepository(session,p) as repo:
                 yield repo
-    for instance in (first,second):
-        instance.dependency_overrides[current_principal]=principal_override
-        instance.dependency_overrides[get_workforce_repo]=repository_override
     first=FastAPI()
     first.include_router(workforce_app.router)
     second=FastAPI()
     second.include_router(workforce_app.router)
+    for instance in (first,second):
+        instance.dependency_overrides[current_principal]=principal_override
+        instance.dependency_overrides[get_workforce_repo]=repository_override
     try:
         async with AsyncClient(transport=ASGITransport(app=first),base_url="http://first") as client1:
             task=await client1.post("/v1/workforce/tasks",headers={"Idempotency-Key":"durability-task-1"},
@@ -138,7 +138,10 @@ async def test_fastapi_records_survive_new_app_instance():
     finally:
         first.dependency_overrides.clear()
         second.dependency_overrides.clear()
+        factory=session_factory()
+        await factory.kw["bind"].dispose()
         session_factory.cache_clear()
+        settings.database_url=""
 
 @pytest.mark.asyncio
 async def test_task_lease_recovery_and_dead_letter_state_machine():
