@@ -142,3 +142,18 @@ async def test_approval_cannot_be_used_by_another_tenant():
         response = await client.post(f"/v1/workforce/approvals/{approval['id']}/decision",
             json={"decision":"approved", "reason":"Reviewed", "product_id":"photo-studio-growth-os"})
     assert response.status_code == 404
+
+@pytest.mark.asyncio
+async def test_signed_product_scope_claim_is_required_for_product_operations():
+    scoped = Principal("product-user", "tenant-a", "sales", frozenset({"work.assign"}), product_ids=frozenset({"photo-studio-billing"}))
+    async with await client_for(scoped) as client:
+        denied = await client.post("/v1/workforce/tasks", json={
+            "title":"Growth OS task", "assignee_role_id":"market-intel",
+            "product_id":"photo-studio-growth-os"
+        })
+        allowed = await client.post("/v1/workforce/tasks", json={
+            "title":"Billing task", "assignee_role_id":"market-intel",
+            "product_id":"photo-studio-billing"
+        })
+    assert denied.status_code == 403
+    assert allowed.status_code == 200
