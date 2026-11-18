@@ -172,6 +172,7 @@ class PostgresWorkforceRepository:
     async def create_approval(self, *, product_id: str | None, employee_id: str, action_type: str,
                               payload: dict, expires_at: datetime):
         self._product(product_id)
+        if expires_at <= datetime.now(timezone.utc): raise ValueError("Approval expiry must be in the future")
         digest = hashlib.sha256(json.dumps(
             {"tenant_id": self.principal.tenant_id, "product_id": product_id,
              "employee_id": employee_id, "action_type": action_type, "payload": payload},
@@ -213,7 +214,7 @@ class PostgresWorkforceRepository:
         item = await self._one("""
           SELECT * FROM wf_approvals WHERE id=:id AND tenant_id=:tenant
             AND product_id IS NOT DISTINCT FROM :product AND employee_id=:employee
-            AND action_type=:action AND status='APPROVED' AND expires_at > now()
+            AND action_type=:action AND status='APPROVED' AND expires_at > now() AND consumed_at IS NULL
             AND approver_id IS NOT NULL AND approver_id <> requester_id
           FOR UPDATE
         """, {"id": approval_id, "tenant": self.principal.tenant_id, "product": product_id,
@@ -538,6 +539,7 @@ class InMemoryWorkforceRepository:
 
     async def create_approval(self, **kw):
         self._scope(kw["product_id"])
+        if kw["expires_at"] <= datetime.now(timezone.utc): raise ValueError("Approval expiry must be in the future")
         digest=hashlib.sha256(json.dumps({"tenant_id":self.principal.tenant_id,"product_id":kw["product_id"],
           "employee_id":kw["employee_id"],"action_type":kw["action_type"],"payload":kw["payload"]},
           sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
