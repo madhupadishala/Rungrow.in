@@ -73,7 +73,7 @@ class TenantRepository:
     async def create_task(self, *, product_id: str | None, department: str, assignee_role_id: str,
                           title: str, description: str, priority: str, idempotency_key: str):
         self._product(product_id)
-        return await self._one("""
+        item = await self._one("""
           INSERT INTO wf_tasks
             (id, tenant_id, product_id, department, assignee_role_id, title, description,
              priority, status, created_by, idempotency_key, created_at)
@@ -100,7 +100,7 @@ class TenantRepository:
     async def create_agent_run(self, *, product_id: str | None, employee_id: str, task: str,
                                status: str, summary: str, steps: list, correlation_id: str):
         self._product(product_id)
-        return await self._one("""
+        item = await self._one("""
           INSERT INTO wf_agent_runs
             (id, tenant_id, product_id, employee_id, requested_by, task, status, summary,
              steps, correlation_id, created_at)
@@ -133,7 +133,7 @@ class TenantRepository:
                            content: str, source_ref: str, retention_days: int, embedding: list[float] | None = None):
         self._product(product_id)
         vector = "[" + ",".join(str(float(v)) for v in embedding) + "]" if embedding else None
-        return await self._one("""
+        item = await self._one("""
           INSERT INTO wf_memory
             (id, tenant_id, product_id, role_id, department, content, source_ref,
              retention_days, embedding, created_at)
