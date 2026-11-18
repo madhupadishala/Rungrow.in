@@ -1,332 +1,238 @@
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
-import hashlib
-import hmac
 import json
 import re
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from .agent_runtime import AgentInput, AgentOrchestrator
 from .config import settings
 from .policy import Principal
 from .registry import BY_ID, DEPARTMENTS, EMPLOYEES, public_registry
+from .repositories import WorkforceRepositoryProtocol, TenantRepository, session_factory
 from .schemas import ApprovalDecision, ApprovalExecutionValidation, AgentRunRequest, CommandRequest, MemoryWrite, TaskCreate
 from .security import current_principal, require_permission
 
-app = FastAPI(title="RunGrow Workforce API", version="0.2.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.allowed_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
-)
-
-# Local-only adapter. Production must replace this with tenant-scoped PostgreSQL
-# repositories and a durable outbox before multi-worker deployment.
-STATE = {"approvals": [], "tasks": [], "audit": [], "memory": [], "runs": []}
+app = FastAPI(title="RunGrow Workforce API", version="0.3.0")
+app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins,
+    allow_credentials=True, allow_methods=["GET","POST"],
+    allow_headers=["Authorization","Content-Type","Idempotency-Key"])
 
 _PORTFOLIO_PATH = Path(__file__).resolve().parents[2] / "data" / "workforce" / "product-portfolio.json"
-with _PORTFOLIO_PATH.open("r", encoding="utf-8") as portfolio_file:
-    _portfolio = json.load(portfolio_file)
-PRODUCTS = {
-    item["product_id"]: item
-    for item in _portfolio.get("products", [])
-    if isinstance(item, dict) and isinstance(item.get("product_id"), str)
-}
-PRODUCT_ROLE_IDS = {employee.product_id: employee.id for employee in EMPLOYEES if employee.product_id}
+with _PORTFOLIO_PATH.open("r", encoding="utf-8") as f:
+    _portfolio = json.load(f)
+PRODUCTS = {x["product_id"]: x for x in _portfolio.get("products", [])}
+PRODUCT_ROLE_IDS = {e.product_id:e.id for e in EMPLOYEES if e.product_id}
 if set(PRODUCT_ROLE_IDS) != set(PRODUCTS):
-    raise RuntimeError("Product portfolio registry and Product Growth Manager registry do not match")
+    raise RuntimeError("Product portfolio and Product Growth Manager registries do not match")
 
 
-def validate_product_id(product_id: str | None) -> None:
+@app.on_event("startup")
+async def require_database_configuration():
+    if not settings.database_url and settings.app_env != "test":
+        raise RuntimeError("DATABASE_URL is required; Workforce API refuses volatile in-memory production storage")
+
+
+async def get_workforce_repo(p: Principal = Depends(current_principal)):
+    if not settings.database_url:
+        raise HTTPException(503, "DATABASE_URL is not configured")
+    factory = session_factory()
+    async with factory() as session:
+        async with TenantRepository(session, p) as repository:
+            yield repository
+
+
+def validate_product_id(product_id: str | None):
     if product_id is not None and product_id not in PRODUCTS:
-        raise HTTPException(status_code=404, detail="Unknown product scope")
+        raise HTTPException(404, "Unknown product scope")
 
 
-def authorize_product_access(principal: Principal, product_id: str | None) -> None:
+def authorize_product_access(p: Principal, product_id: str | None):
     validate_product_id(product_id)
-    if product_id is not None and "*" not in principal.permissions and product_id not in principal.product_ids:
-        raise HTTPException(status_code=403, detail="Principal is not authorised for this product")
+    if product_id is not None and "*" not in p.permissions and product_id not in p.product_ids:
+        raise HTTPException(403, "Principal is not authorised for this product")
 
 
-def filter_product_scope(principal: Principal, rows: list[dict]) -> list[dict]:
-    # Fail closed for legacy or malformed records whose product is not in the
-    # authoritative portfolio registry, including company-wide reads.
-    known_rows = [
-        row for row in rows
-        if row.get("product_id") is None or row.get("product_id") in PRODUCTS
-    ]
-    if "*" in principal.permissions:
-        return known_rows
-    return [
-        row for row in known_rows
-        if row.get("product_id") is None or row.get("product_id") in principal.product_ids
-    ]
-
-
-def enforce_product_scope(employee, product_id: str | None) -> None:
+def enforce_product_scope(employee, product_id):
     validate_product_id(product_id)
-    if employee.product_id and product_id != employee.product_id:
-        raise HTTPException(status_code=403, detail="Product-scoped employee requires its exact assigned product_id")
-
-
-def _payload_hash(tenant_id: str, product_id: str | None, employee_id: str, action_type: str, payload: dict) -> str:
-    canonical = json.dumps(
-        {"tenant_id": tenant_id, "product_id": product_id, "employee_id": employee_id,
-         "action_type": action_type, "payload": payload},
-        sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def create_approval(
-    principal: Principal, *, product_id: str | None, employee_id: str,
-    action_type: str, payload: dict, ttl: timedelta = timedelta(minutes=15),
-) -> dict:
-    authorize_product_access(principal, product_id)
-    now = datetime.now(timezone.utc)
-    item = {
-        "id": str(uuid4()), "tenant_id": principal.tenant_id, "product_id": product_id,
-        "employee_id": employee_id, "action_type": action_type, "payload": payload,
-        "payload_hash": _payload_hash(principal.tenant_id, product_id, employee_id, action_type, payload),
-        "requester_id": principal.user_id, "requested_by": principal.user_id,
-        "approver_id": None, "status": "pending",
-        "expires_at": (now + ttl).isoformat(), "created_at": now.isoformat(),
-        "action": action_type,
-    }
-    STATE["approvals"].append(item)
-    return item
-
-
-def validate_approval_for_execution(
-    principal: Principal, approval_id: str, *, product_id: str | None,
-    employee_id: str, action_type: str, payload: dict,
-) -> dict:
-    item = next((row for row in STATE["approvals"]
-                 if row["id"] == approval_id and row["tenant_id"] == principal.tenant_id), None)
-    if item is None:
-        raise HTTPException(status_code=404, detail="Approval not found")
-    authorize_product_access(principal, product_id)
-    if item["product_id"] != product_id:
-        raise HTTPException(status_code=403, detail="Approval product scope mismatch")
-    if item["employee_id"] != employee_id or item["action_type"] != action_type:
-        raise HTTPException(status_code=403, detail="Approval action binding mismatch")
-    expires_at = datetime.fromisoformat(item["expires_at"])
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if expires_at <= datetime.now(timezone.utc):
-        raise HTTPException(status_code=409, detail="Approval has expired")
-    if item["status"] != "approved":
-        raise HTTPException(status_code=409, detail="Approval is not approved")
-    if not item.get("approver_id") or item["approver_id"] == item["requester_id"]:
-        raise HTTPException(status_code=403, detail="Invalid approval separation of duties")
-    stored_hash = _payload_hash(item["tenant_id"], item["product_id"], item["employee_id"], item["action_type"], item["payload"])
-    supplied_hash = _payload_hash(item["tenant_id"], product_id, employee_id, action_type, payload)
-    if not hmac.compare_digest(item["payload_hash"], stored_hash) or not hmac.compare_digest(item["payload_hash"], supplied_hash):
-        raise HTTPException(status_code=409, detail="Approved payload integrity check failed")
-    return item
-
-
-def audit(principal: Principal, action: str, kind: str, resource_id: str, outcome: str, product_id: str | None = None) -> None:
-    STATE["audit"].append({
-        "id": str(uuid4()), "tenant_id": principal.tenant_id, "product_id": product_id,
-        "actor_id": principal.user_id, "actor_type": principal.actor_type,
-        "action": action, "resource_type": kind, "resource_id": resource_id,
-        "outcome": outcome, "at": datetime.now(timezone.utc).isoformat(),
-    })
+    if employee.product_id and employee.product_id != product_id:
+        raise HTTPException(403, "Product-scoped employee requires its exact assigned product_id")
 
 
 def route(command_text: str):
-    text = command_text.lower()
-    mapping = [
-        (("sales", "pipeline", "lead", "prospect", "deal"), ("Sales & Revenue", "sales-ops", "crm.read")),
-        (("campaign", "seo", "content", "market"), ("Growth & Marketing", "market-intel", "research.public")),
-        (("customer", "onboarding", "renewal", "adoption"), ("Customer Success", "cs-director", "customer.read")),
-        (("support", "ticket", "issue"), ("Customer Support", "support-lead", "support.read")),
-        (("product", "roadmap", "feature"), ("Product & Design", "pm", "product.read")),
-        (("code", "engineering", "deploy", "bug"), ("Engineering & IT", "cto", "engineering.read")),
-        (("invoice", "finance", "billing", "vendor"), ("Finance & Administration", "finance", "finance.read")),
-        (("hiring", "candidate", "employee"), ("People & Culture", "people-ops", "people.read")),
-        (("process", "operations"), ("Business Operations", "bizops", "operations.read")),
-        (("contract", "privacy", "compliance", "legal"), ("Legal, Risk & Compliance", "legal", "compliance.read")),
+    value=command_text.lower()
+    mapping=[
+      (("sales","pipeline","lead","prospect","deal"),("Sales & Revenue","sales-ops","crm.read")),
+      (("campaign","seo","content","market"),("Growth & Marketing","market-intel","research.public")),
+      (("customer","onboarding","renewal","adoption"),("Customer Success","cs-director","customer.read")),
+      (("support","ticket","issue"),("Customer Support","support-lead","support.read")),
+      (("product","roadmap","feature"),("Product & Design","pm","product.read")),
+      (("code","engineering","deploy","bug"),("Engineering & IT","cto","engineering.read")),
+      (("invoice","finance","billing","vendor"),("Finance & Administration","finance","finance.read")),
+      (("hiring","candidate","employee"),("People & Culture","people-ops","people.read")),
+      (("process","operations"),("Business Operations","bizops","operations.read")),
+      (("contract","privacy","compliance","legal"),("Legal, Risk & Compliance","legal","compliance.read")),
     ]
-    for words, result in mapping:
-        if any(word in text for word in words):
-            return result
-    return ("Executive Office", "chief-staff", "reports.read")
+    return next((result for words,result in mapping if any(w in value for w in words)),
+                ("Executive Office","chief-staff","reports.read"))
+
+
+def translate_repo_error(exc):
+    if isinstance(exc, PermissionError): raise HTTPException(403,str(exc)) from exc
+    if isinstance(exc, LookupError): raise HTTPException(404,str(exc)) from exc
+    if isinstance(exc, ValueError): raise HTTPException(422,str(exc)) from exc
+    raise exc
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "rungrow-workforce-api", "adapter": "local-memory"}
+    return {"status":"ok","service":"rungrow-workforce-api","adapter":"postgresql"}
 
 
 @app.get("/v1/workforce/registry")
 async def registry(p: Principal = Depends(require_permission("workforce.read"))):
-    return {"departments": list(DEPARTMENTS), "employees": public_registry(), "count": len(EMPLOYEES)}
+    return {"departments":list(DEPARTMENTS),"employees":public_registry(),"count":len(EMPLOYEES)}
 
 
 @app.post("/v1/workforce/commands")
-async def command(body: CommandRequest, p: Principal = Depends(current_principal)):
-    authorize_product_access(p, body.product_id)
-    department, role_id, permission = route(body.command)
-    if body.product_id:
-        role_id = PRODUCT_ROLE_IDS[body.product_id]
-    role = BY_ID[role_id]
-    enforce_product_scope(role, body.product_id)
-    command_id = str(uuid4())
+async def command(body: CommandRequest, p: Principal = Depends(current_principal),
+                  repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo)):
+    authorize_product_access(p,body.product_id)
+    department,role_id,permission=route(body.command)
+    if body.product_id: role_id=PRODUCT_ROLE_IDS[body.product_id]
+    role=BY_ID[role_id]; enforce_product_scope(role,body.product_id)
+    command_id=str(uuid4())
     if permission not in p.permissions and "*" not in p.permissions:
-        audit(p, "command.route", "command", command_id, "denied", body.product_id)
-        return {"status": "denied", "message": "Your workspace role is not authorised for this department data.", "command_id": command_id}
-    if re.search(r"\b(send|launch|activate|charge|refund|delete|export|deploy|sign|purchase|discount|change price)\b", body.command, re.I):
-        approval = create_approval(p, product_id=body.product_id, employee_id=role.id,
-                                   action_type="command.execution",
-                                   payload={"command": body.command, "role_id": role_id})
-        audit(p, "command.approval_requested", "approval", approval["id"], "pending", body.product_id)
-        return {"status": "approval_required", "message": role.title + " is the proposed owner. Human approval is required before execution.",
-                "command_id": command_id, "approval_id": approval["id"], "routed_department": department}
-    audit(p, "command.accepted", "command", command_id, "accepted", body.product_id)
-    return {"status": "accepted", "message": "Routed to " + role.title + " in " + department + ". Accepted for planning; no external action has been performed.",
-            "command_id": command_id, "routed_department": department, "routed_role_id": role_id}
+        return {"status":"denied","message":"Workspace role is not authorised.","command_id":command_id}
+    if re.search(r"\\b(send|launch|activate|charge|refund|delete|export|deploy|sign|purchase|discount|change price)\\b",body.command,re.I):
+        try:
+            approval=await repo.create_approval(product_id=body.product_id,employee_id=role.id,
+                action_type="command.execution",payload={"command":body.command,"role_id":role_id},
+                expires_at=datetime.now(timezone.utc)+timedelta(minutes=15))
+        except Exception as exc: translate_repo_error(exc)
+        return {"status":"approval_required","command_id":command_id,"approval_id":approval["id"],
+                "routed_department":department,"execution":"not_started"}
+    return {"status":"accepted","message":"Accepted for planning; no external action performed.",
+            "command_id":command_id,"routed_department":department,"routed_role_id":role_id}
 
 
 @app.post("/v1/workforce/tasks")
-async def create_task(body: TaskCreate, p: Principal = Depends(require_permission("work.assign"))):
-    authorize_product_access(p, body.product_id)
-    if body.assignee_role_id not in BY_ID:
-        raise HTTPException(status_code=404, detail="Unknown employee role")
-    assignee = BY_ID[body.assignee_role_id]
-    enforce_product_scope(assignee, body.product_id)
-    item = {"id": str(uuid4()), "tenant_id": p.tenant_id, "title": body.title,
-            "description": body.description, "assignee_role_id": body.assignee_role_id,
-            "product_id": body.product_id, "priority": body.priority, "status": "queued",
-            "created_by": p.user_id}
-    STATE["tasks"].append(item)
-    audit(p, "task.create", "task", item["id"], "created", body.product_id)
-    return item
+async def create_task(body: TaskCreate, p: Principal = Depends(require_permission("work.assign")),
+                      repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo),
+                      idempotency_key: str | None = Header(default=None,alias="Idempotency-Key")):
+    authorize_product_access(p,body.product_id)
+    if body.assignee_role_id not in BY_ID: raise HTTPException(404,"Unknown employee role")
+    employee=BY_ID[body.assignee_role_id]; enforce_product_scope(employee,body.product_id)
+    try:
+        return await repo.create_task(product_id=body.product_id,department=employee.department,
+            assignee_role_id=body.assignee_role_id,title=body.title,description=body.description,
+            priority=body.priority,idempotency_key=idempotency_key or str(uuid4()))
+    except Exception as exc: translate_repo_error(exc)
 
 
 @app.get("/v1/workforce/tasks")
-async def tasks(product_id: str | None = None, p: Principal = Depends(require_permission("work.read"))):
-    authorize_product_access(p, product_id)
-    rows = [row for row in STATE["tasks"] if row["tenant_id"] == p.tenant_id]
-    rows = filter_product_scope(p, rows)
-    return [row for row in rows if row.get("product_id") == product_id] if product_id else rows
+async def tasks(product_id: str | None=None,p: Principal=Depends(require_permission("work.read")),
+                repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    authorize_product_access(p,product_id)
+    try: return await repo.list_tasks(product_id)
+    except Exception as exc: translate_repo_error(exc)
 
 
 @app.get("/v1/workforce/approvals")
-async def approvals(product_id: str | None = None, p: Principal = Depends(require_permission("approval.read"))):
-    authorize_product_access(p, product_id)
-    rows = [row for row in STATE["approvals"] if row["tenant_id"] == p.tenant_id]
-    rows = filter_product_scope(p, rows)
-    return [row for row in rows if row.get("product_id") == product_id] if product_id else rows
+async def approvals(product_id: str | None=None,p: Principal=Depends(require_permission("approval.read")),
+                    repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    authorize_product_access(p,product_id)
+    try: return await repo.list_approvals(product_id)
+    except Exception as exc: translate_repo_error(exc)
 
 
 @app.post("/v1/workforce/approvals/{approval_id}/decision")
-async def decide(approval_id: str, body: ApprovalDecision, p: Principal = Depends(require_permission("approval.decide"))):
-    item = next((row for row in STATE["approvals"]
-                 if row["id"] == approval_id and row["tenant_id"] == p.tenant_id), None)
-    if item is None:
-        raise HTTPException(status_code=404, detail="Approval not found")
-    authorize_product_access(p, item["product_id"])
-    if body.product_id != item["product_id"]:
-        raise HTTPException(status_code=403, detail="Approval product scope mismatch")
-    if item["status"] != "pending":
-        raise HTTPException(status_code=409, detail="Approval already decided")
-    if item["requester_id"] == p.user_id:
-        raise HTTPException(status_code=403, detail="Separation of duties: requester cannot approve their own request")
-    expires_at = datetime.fromisoformat(item["expires_at"])
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if expires_at <= datetime.now(timezone.utc):
-        raise HTTPException(status_code=409, detail="Approval has expired")
-    item.update({"status": body.decision, "approver_id": p.user_id, "decided_by": p.user_id,
-                 "reason": body.reason, "decided_at": datetime.now(timezone.utc).isoformat()})
-    audit(p, "approval.decision", "approval", approval_id, body.decision, item["product_id"])
-    return {"id": approval_id, "status": item["status"], "execution": "not_started"}
+async def decide(approval_id: str,body: ApprovalDecision,p: Principal=Depends(require_permission("approval.decide")),
+                 repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    authorize_product_access(p,body.product_id)
+    try:
+        item=await repo.decide_approval(approval_id,body.decision,body.reason)
+        if item.get("product_id") != body.product_id: raise HTTPException(403,"Approval product scope mismatch")
+        return {"id":approval_id,"status":item["status"],"execution":"not_started"}
+    except Exception as exc: translate_repo_error(exc)
 
 
 @app.post("/v1/workforce/approvals/{approval_id}/validate-execution")
-async def validate_execution(approval_id: str, body: ApprovalExecutionValidation,
-                             p: Principal = Depends(require_permission("approval.execute"))):
-    authorize_product_access(p, body.product_id)
-    item = validate_approval_for_execution(p, approval_id, product_id=body.product_id,
-                                           employee_id=body.employee_id, action_type=body.action_type,
-                                           payload=body.payload)
-    audit(p, "approval.execution_validated", "approval", approval_id, "authorised", body.product_id)
-    return {"approval_id": item["id"], "authorised": True, "execution": "not_started"}
+async def validate_execution(approval_id: str,body: ApprovalExecutionValidation,
+    p: Principal=Depends(require_permission("approval.execute")),
+    repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    authorize_product_access(p,body.product_id)
+    try:
+        item=await repo.validate_approval(approval_id,product_id=body.product_id,
+            employee_id=body.employee_id,action_type=body.action_type,payload=body.payload)
+        return {"approval_id":item["id"],"authorised":True,"execution":"not_started"}
+    except Exception as exc: translate_repo_error(exc)
 
 
 @app.post("/v1/workforce/memory")
-async def memory(body: MemoryWrite, p: Principal = Depends(require_permission("memory.write"))):
-    authorize_product_access(p, body.product_id)
-    if body.role_id not in BY_ID:
-        raise HTTPException(status_code=404, detail="Unknown role")
-    employee = BY_ID[body.role_id]
-    enforce_product_scope(employee, body.product_id)
-    item = {"id": str(uuid4()), "tenant_id": p.tenant_id, "role_id": body.role_id,
-            "product_id": body.product_id, "department": employee.department,
-            "content": body.content, "source_ref": body.source_ref, "retention_days": body.retention_days}
-    STATE["memory"].append(item)
-    audit(p, "memory.write", "memory", item["id"], "created", body.product_id)
-    return {"id": item["id"], "scope": "tenant+department+role"}
+async def memory(body: MemoryWrite,p: Principal=Depends(require_permission("memory.write")),
+                 repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    authorize_product_access(p,body.product_id)
+    employee=BY_ID.get(body.role_id)
+    if employee is None: raise HTTPException(404,"Unknown role")
+    enforce_product_scope(employee,body.product_id)
+    try:
+        item=await repo.write_memory(product_id=body.product_id,role_id=body.role_id,
+            department=employee.department,content=body.content,source_ref=body.source_ref,
+            retention_days=body.retention_days)
+        return {"id":str(item["id"]),"scope":"tenant+department+role"}
+    except Exception as exc: translate_repo_error(exc)
 
 
 @app.get("/v1/workforce/memory")
-async def read_memory(product_id: str | None = None, p: Principal = Depends(require_permission("memory.read"))):
-    authorize_product_access(p, product_id)
-    rows = [row for row in STATE["memory"] if row["tenant_id"] == p.tenant_id]
-    rows = filter_product_scope(p, rows)
-    return [row for row in rows if row.get("product_id") == product_id] if product_id else rows
+async def read_memory(product_id: str | None=None,p: Principal=Depends(require_permission("memory.read")),
+                      repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    authorize_product_access(p,product_id)
+    try: return await repo.list_memory(product_id)
+    except Exception as exc: translate_repo_error(exc)
 
 
 @app.get("/v1/workforce/audit")
-async def audit_events(product_id: str | None = None, p: Principal = Depends(require_permission("audit.read"))):
-    authorize_product_access(p, product_id)
-    rows = [row for row in STATE["audit"] if row["tenant_id"] == p.tenant_id]
-    rows = filter_product_scope(p, rows)
-    if product_id is not None:
-        rows = [row for row in rows if row.get("product_id") == product_id]
-    return rows[-500:]
+async def audit_events(product_id: str | None=None,p: Principal=Depends(require_permission("audit.read")),
+                       repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    authorize_product_access(p,product_id)
+    try: return (await repo.list_audit(product_id))[-500:]
+    except Exception as exc: translate_repo_error(exc)
 
 
 @app.get("/v1/workforce/agent-runs")
-async def agent_runs(product_id: str | None = None, p: Principal = Depends(require_permission("work.read"))):
-    authorize_product_access(p, product_id)
-    rows = [row for row in STATE["runs"] if row["tenant_id"] == p.tenant_id]
-    rows = filter_product_scope(p, rows)
-    return [row for row in rows if row.get("product_id") == product_id] if product_id else rows
+async def agent_runs(product_id: str | None=None,p: Principal=Depends(require_permission("work.read")),
+                     repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    authorize_product_access(p,product_id)
+    try: return await repo.list_agent_runs(product_id)
+    except Exception as exc: translate_repo_error(exc)
 
 
 @app.post("/v1/workforce/agent-runs")
-async def run_employee(body: AgentRunRequest, p: Principal = Depends(require_permission("agent.run"))):
-    authorize_product_access(p, body.product_id)
-    employee = BY_ID.get(body.role_id)
-    if employee is None:
-        raise HTTPException(status_code=404, detail="Unknown workforce employee")
-    enforce_product_scope(employee, body.product_id)
-    missing = set(employee.permissions) - p.permissions
+async def run_employee(body: AgentRunRequest,p: Principal=Depends(require_permission("agent.run")),
+                       repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    authorize_product_access(p,body.product_id)
+    employee=BY_ID.get(body.role_id)
+    if employee is None: raise HTTPException(404,"Unknown workforce employee")
+    enforce_product_scope(employee,body.product_id)
+    missing=set(employee.permissions)-p.permissions
     if "*" not in p.permissions and missing:
-        raise HTTPException(status_code=403, detail="Invoker does not hold the employee tool scopes required for this run")
-    plan = await AgentOrchestrator().run(employee, AgentInput(p.tenant_id, p.user_id, body.task, tuple(body.source_refs)))
-    product_id = employee.product_id or body.product_id
-    record = {"id": str(uuid4()), "tenant_id": p.tenant_id, "employee_id": employee.id,
-              "product_id": product_id, "requested_by": p.user_id, "task": body.task,
-              "status": plan.status, "summary": plan.summary, "steps": list(plan.steps),
-              "approval_required": plan.approval_required, "runtime_mode": plan.runtime_mode,
-              "created_at": datetime.now(timezone.utc).isoformat()}
-    STATE["runs"].append(record)
-    if plan.approval_required:
-        approval = create_approval(
-            p, product_id=product_id, employee_id=employee.id, action_type="agent.proposed_action",
-            payload={"agent_run_id": record["id"], "employee_id": employee.id, "product_id": product_id,
-                     "task": body.task, "proposed_actions": list(plan.proposed_actions)},
-        )
-        record["approval_id"] = approval["id"]
-        audit(p, "agent.approval_requested", "approval", approval["id"], "pending", product_id)
-    audit(p, "agent.run.plan", "agent_run", record["id"], plan.status, product_id)
-    return record
+        raise HTTPException(403,"Invoker lacks employee tool scopes")
+    plan=await AgentOrchestrator().run(employee,AgentInput(p.tenant_id,p.user_id,body.task,tuple(body.source_refs)))
+    product_id=employee.product_id or body.product_id
+    try:
+        record=await repo.create_agent_run(product_id=product_id,employee_id=employee.id,task=body.task,
+            status=plan.status,summary=plan.summary,steps=list(plan.steps),correlation_id=str(uuid4()))
+        if plan.approval_required:
+            approval=await repo.create_approval(product_id=product_id,employee_id=employee.id,
+                action_type="agent.proposed_action",payload={"agent_run_id":str(record["id"]),
+                "employee_id":employee.id,"product_id":product_id,"task":body.task,
+                "proposed_actions":list(plan.proposed_actions)},
+                expires_at=datetime.now(timezone.utc)+timedelta(minutes=15))
+            record["approval_id"]=approval["id"]
+        return record
+    except Exception as exc: translate_repo_error(exc)
