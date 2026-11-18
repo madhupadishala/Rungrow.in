@@ -396,14 +396,14 @@ class PostgresWorkforceRepository:
             is_sandbox=is_sandbox,max_attempts=max_attempts)
 
     async def pause_task_for_approval(self, task_id: str, action_type: str, payload: dict):
-        task=await self._one("UPDATE wf_tasks SET status='AWAITING_APPROVAL',locked_by=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=:id AND tenant_id=:tenant RETURNING *",
+        task=await self._one("UPDATE wf_tasks SET status='AWAITING_APPROVAL',locked_by=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=:id AND tenant_id=:tenant AND status='RUNNING' RETURNING *",
             {"id":task_id,"tenant":self.principal.tenant_id})
         if not task: raise LookupError("Task not found or not RUNNING")
         return await self.create_approval(product_id=task["product_id"],employee_id=task["assignee_role_id"],
             action_type=action_type,payload=payload,expires_at=datetime.now(timezone.utc)+__import__("datetime").timedelta(minutes=15))
 
     async def pause_run_for_approval(self, run_id: str, action_type: str, payload: dict):
-        run=await self._one("UPDATE wf_agent_runs SET status='awaiting_approval',execution_state='AWAITING_APPROVAL',updated_at=now() WHERE id=:id AND tenant_id=:tenant RETURNING *",
+        run=await self._one("UPDATE wf_agent_runs SET status='awaiting_approval',execution_state='AWAITING_APPROVAL',updated_at=now() WHERE id=:id AND tenant_id=:tenant AND execution_state IN ('QUEUED','RUNNING') RETURNING *",
             {"id":run_id,"tenant":self.principal.tenant_id})
         if not run: raise LookupError("Agent run not found or not resumable")
         return await self.create_approval(product_id=run["product_id"],employee_id=run["employee_id"],
