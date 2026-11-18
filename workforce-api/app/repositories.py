@@ -82,14 +82,22 @@ class PostgresWorkforceRepository:
              priority, status, created_by, idempotency_key, created_at, is_sandbox, max_attempts)
           VALUES (:id, :tenant, :product, :department, :assignee, :title, :description,
                   :priority, 'QUEUED', :actor, :idem, now(), :sandbox, :max_attempts)
-          ON CONFLICT (tenant_id, idempotency_key) DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
+          ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
           RETURNING *
         """, {"id": str(uuid4()), "tenant": self.principal.tenant_id, "product": product_id,
               "department": department, "assignee": assignee_role_id, "title": title,
               "description": description, "priority": priority, "actor": self.principal.user_id,
               "idem": idempotency_key, "sandbox": is_sandbox, "max_attempts": max_attempts})
-        if item:
-            await self.append_audit("task.create", "task", str(item["id"]), product_id, {"idempotency_key": idempotency_key})
+        if not item:
+            item=await self._one("SELECT * FROM wf_tasks WHERE tenant_id=:tenant AND idempotency_key=:idem",
+                {"tenant":self.principal.tenant_id,"idem":idempotency_key})
+            if not item: raise RuntimeError("Idempotent task insert conflict could not be resolved")
+            expected={"product_id":product_id,"department":department,"assignee_role_id":assignee_role_id,
+                "title":title,"description":description,"priority":priority,"is_sandbox":is_sandbox}
+            if any(item.get(key)!=value for key,value in expected.items()):
+                raise ValueError("Idempotency key was already used for a different task payload")
+            return item
+        await self.append_audit("task.create", "task", str(item["id"]), product_id, {"idempotency_key": idempotency_key})
         return item
 
     async def list_tasks(self, product_id: str | None = None):
@@ -481,8 +489,14 @@ class InMemoryWorkforceRepository:
     async def create_task(self, **kw):
         product=kw["product_id"]; self._scope(product)
         key=kw["idempotency_key"]
-        old=next((x for x in self.tasks if x["idempotency_key"]==key),None)
-        if old: return old
+        old=next((x for x in self.tasks if x["idempotency_key"]==key and x["tenant_id"]==self.principal.tenant_id),None)
+        if old:
+            expected={"product_id":product,"department":kw["department"],"assignee_role_id":kw["assignee_role_id"],
+                "title":kw["title"],"description":kw["description"],"priority":kw["priority"],
+                "is_sandbox":bool(kw.get("is_sandbox",False))}
+            if any(old.get(field)!=value for field,value in expected.items()):
+                raise ValueError("Idempotency key was already used for a different task payload")
+            return old
         item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,**kw,"status":"queued",
               "created_by":self.principal.user_id,"created_at":datetime.now(timezone.utc).isoformat()}
         item.setdefault("attempt_count",0); item.setdefault("max_attempts",int(kw.get("max_attempts",5))); item.setdefault("is_sandbox",bool(kw.get("is_sandbox",False)))
