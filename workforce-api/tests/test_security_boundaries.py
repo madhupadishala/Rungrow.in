@@ -170,3 +170,37 @@ async def test_product_scoped_principal_cannot_list_other_products_without_filte
         response = await client.get("/v1/workforce/tasks")
     assert response.status_code == 200
     assert {row["id"] for row in response.json()} == {"billing-task", "shared-task"}
+
+@pytest.mark.asyncio
+async def test_tenant_spoofing_cannot_write_memory_or_agent_run_into_another_tenant():
+    async with await client_for(principal("tenant-a-user", "tenant-a")) as client:
+        memory_response = await client.post("/v1/workforce/memory", json={
+            "role_id":"market-intel", "content":"Tenant A note", "source_ref":"fixture",
+            "tenant_id":"tenant-b"
+        })
+        run_response = await client.post("/v1/workforce/agent-runs", json={
+            "role_id":"outbound-sdr", "task":"Send this campaign to approved contacts",
+            "tenant_id":"tenant-b"
+        })
+    assert memory_response.status_code == 200
+    assert run_response.status_code == 200
+    assert STATE["memory"][-1]["tenant_id"] == "tenant-a"
+    assert STATE["runs"][-1]["tenant_id"] == "tenant-a"
+    assert STATE["approvals"][-1]["tenant_id"] == "tenant-a"
+
+
+@pytest.mark.asyncio
+async def test_expired_approval_is_rejected_at_execution_boundary():
+    requester = principal("requester")
+    approval = create_approval(requester, product_id="photo-studio-growth-os",
+        employee_id="pgm-photo-studio-growth-os", action_type="campaign.activate",
+        payload={"campaign_id":"campaign-1"})
+    async with await client_for(principal("independent-approver")) as client:
+        decision = await client.post(f"/v1/workforce/approvals/{approval['id']}/decision",
+            json={"decision":"approved", "reason":"Reviewed", "product_id":"photo-studio-growth-os"})
+        assert decision.status_code == 200
+        approval["expires_at"] = (datetime.now(timezone.utc)-timedelta(seconds=1)).isoformat()
+        execution = await client.post(f"/v1/workforce/approvals/{approval['id']}/validate-execution",
+            json={"product_id":"photo-studio-growth-os", "employee_id":"pgm-photo-studio-growth-os",
+                  "action_type":"campaign.activate", "payload":{"campaign_id":"campaign-1"}})
+    assert execution.status_code == 409
