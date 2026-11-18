@@ -7,11 +7,11 @@ from .config import settings
 from .registry import EMPLOYEES,BY_ID,DEPARTMENTS,public_registry
 from .policy import Principal,evaluate
 from .security import current_principal,require_permission
-from .schemas import CommandRequest,TaskCreate,ApprovalDecision,MemoryWrite
+from .schemas import CommandRequest,TaskCreate,ApprovalDecision,MemoryWrite,AgentRunRequest\nfrom .agent_runtime import AgentInput,AgentOrchestrator
 app=FastAPI(title="RunGrow Workforce API",version="0.1.0")
 app.add_middleware(CORSMiddleware,allow_origins=settings.allowed_origins,allow_credentials=True,allow_methods=["GET","POST"],allow_headers=["Authorization","Content-Type","Idempotency-Key"])
 # Local adapter only. Production deployment must replace this with PostgreSQL repositories and a durable outbox.
-STATE={"approvals":[],"tasks":[],"audit":[],"memory":[]}
+STATE={"approvals":[],"tasks":[],"audit":[],"memory":[],"runs":[]}
 def audit(p:Principal,action:str,kind:str,rid:str,outcome:str):
     STATE["audit"].append({"id":str(uuid4()),"tenant_id":p.tenant_id,"actor_id":p.user_id,"actor_type":p.actor_type,"action":action,"resource_type":kind,"resource_id":rid,"outcome":outcome,"at":datetime.now(timezone.utc).isoformat()})
 def route(text:str):
@@ -61,3 +61,16 @@ async def memory(body:MemoryWrite,p:Principal=Depends(require_permission("memory
     STATE["memory"].append(item); audit(p,"memory.write","memory",item["id"],"created"); return {"id":item["id"],"scope":"tenant+department+role"}
 @app.get("/v1/workforce/audit")
 async def audit_events(p:Principal=Depends(require_permission("audit.read"))): return [x for x in STATE["audit"] if x["tenant_id"]==p.tenant_id][-500:]
+
+@app.post("/v1/workforce/agent-runs")
+async def run_employee(body:AgentRunRequest,p:Principal=Depends(require_permission("agent.run"))):
+    employee=BY_ID.get(body.role_id)
+    if not employee: raise HTTPException(404,"Unknown workforce employee")
+    missing=set(employee.permissions)-p.permissions
+    if "*" not in p.permissions and missing:
+        raise HTTPException(403,"Invoker does not hold the employee tool scopes required for this run")
+    plan=await AgentOrchestrator().run(employee,AgentInput(p.tenant_id,p.user_id,body.task,tuple(body.source_refs)))
+    record={"id":str(uuid4()),"tenant_id":p.tenant_id,"employee_id":employee.id,"requested_by":p.user_id,"task":body.task,"status":plan.status,"summary":plan.summary,"steps":list(plan.steps),"approval_required":plan.approval_required,"runtime_mode":plan.runtime_mode,"created_at":datetime.now(timezone.utc).isoformat()}
+    STATE["runs"].append(record)
+    audit(p,"agent.run.plan","agent_run",record["id"],plan.status)
+    return record
