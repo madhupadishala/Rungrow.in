@@ -304,9 +304,9 @@ async def orchestrator_dispatch(body: OrchestratorDispatchRequest,
             raise HTTPException(403,"Claimed task is outside requested product scope")
         gateway=get_model_gateway(repo)
         planned,telemetry=await gateway.generate_structured(
-            messages=[{"role":"user","content":"Plan this workforce task without performing external side effects. Task: "+task["title"]+" Description: "+task.get("description","")}],
+            messages=[{"role":"user","content":("SANDBOX MODE: simulate only. " if task.get("is_sandbox") else "")+"Plan this workforce task without performing external side effects. Task: "+task["title"]+" Description: "+task.get("description","")}],
             output_model=_WorkItemPlan,tenant_id=p.tenant_id,product_id=task.get("product_id"),
-            employee_id=task["assignee_role_id"],run_id=str(task["id"]))
+            employee_id=task["assignee_role_id"],run_id=str(task["id"]),is_sandbox=bool(task.get("is_sandbox",False)))
         if planned.requires_approval:
             approval=await repo.pause_task_for_approval(str(task["id"]),planned.action_type or "task.sensitive_action",
                 planned.action_payload or {"task_id":str(task["id"]),"summary":planned.summary})
