@@ -7,8 +7,8 @@ from .policy import SENSITIVE
 import hashlib,json
 
 class ApprovalBoundaryError(PermissionError):
-    def __init__(self,message,status_code=403):
-        super().__init__(message); self.status_code=status_code
+    def __init__(self,message,status_code=403,approval_id=None):
+        super().__init__(message); self.status_code=status_code; self.approval_id=approval_id
 
 class SandboxViolation(PermissionError): pass
 
@@ -57,9 +57,9 @@ class ExecutionBoundaryGuard:
         approval_required=tool.requires_human_approval or tool.action_type in SENSITIVE
         if approval_required:
             if not approval_id:
-                await self.repository.pause_run_for_approval(run["id"],tool.action_type,payload)
+                approval=await self.repository.pause_run_for_approval(run["id"],tool.action_type,payload)
                 await self.repository.commit_boundary()
-                raise ApprovalBoundaryError("Run paused: human approval required",409)
+                raise ApprovalBoundaryError("Run paused: human approval required",409,approval_id=approval["id"])
             try:
                 consumed=await self.repository.consume_approval(approval_id,product_id=run.get("product_id"),
                     employee_id=employee.id,action_type=tool.action_type,payload=payload,run_id=run["id"])
