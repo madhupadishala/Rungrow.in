@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0.0",
+  "as_of_date": "2026-11-18",
+  "status": "awaiting_source_reconciliation",
+  "reporting_currency": "INR",
+  "company_targets": {
+    "annual_recognised_revenue": 50000000,
+    "annual_investment_capital_received": 50000000
+  },
+  "definitions": {
+    "recognised_revenue": "Revenue recognised under the applicable accounting policy; not bookings or cash receipts by default.",
+    "invoiced_revenue": "Invoices issued in the reporting period, net of credit notes as separately reported.",
+    "cash_collected": "Customer cash receipts reconciled to bank/payment records.",
+    "investment_capital_received": "Investment funds actually received and reconciled; not pipeline, verbal interest or unsigned term sheets.",
+    "qualified_pipeline": "Open opportunities meeting documented ICP, need, authority, timing and next-step criteria."
+  },
+  "company_metrics": {
+    "active_customers": {"value": null, "unit": "customers", "source": null, "owner_role_id": "sales-ops", "status": "not_reconciled"},
+    "paying_customers": {"value": null, "unit": "customers", "source": null, "owner_role_id": "billing", "status": "not_reconciled"},
+    "recognised_revenue_ytd": {"value": null, "unit": "INR", "source": null, "owner_role_id": "finance", "status": "not_reconciled"},
+    "invoiced_revenue_ytd": {"value": null, "unit": "INR", "source": null, "owner_role_id": "billing", "status": "not_reconciled"},
+    "cash_collected_ytd": {"value": null, "unit": "INR", "source": null, "owner_role_id": "finance", "status": "not_reconciled"},
+    "monthly_recurring_revenue": {"value": null, "unit": "INR", "source": null, "owner_role_id": "finance", "status": "not_reconciled"},
+    "gross_margin_pct": {"value": null, "unit": "percent", "source": null, "owner_role_id": "finance", "status": "not_reconciled"},
+    "monthly_operating_expenses": {"value": null, "unit": "INR", "source": null, "owner_role_id": "finance", "status": "not_reconciled"},
+    "cash_runway_months": {"value": null, "unit": "months", "source": null, "owner_role_id": "finance", "status": "not_reconciled"},
+    "qualified_sales_pipeline": {"value": null, "unit": "INR", "source": null, "owner_role_id": "cro", "status": "not_reconciled"},
+    "investment_pipeline": {"value": null, "unit": "INR", "source": null, "owner_role_id": "digital-ceo", "status": "not_reconciled"},
+    "investment_capital_received": {"value": null, "unit": "INR", "source": null, "owner_role_id": "finance", "status": "not_reconciled"}
+  },
+  "product_metrics": [
+    {"product_id": "photo-studio-growth-os", "status": "not_reconciled", "paid_customers": null, "recognised_revenue": null, "cash_collected": null, "price_book_ref": null, "crm_source": null},
+    {"product_id": "photo-studio-billing", "status": "not_reconciled", "paid_customers": null, "recognised_revenue": null, "cash_collected": null, "price_book_ref": null, "crm_source": null},
+    {"product_id": "clinics-counter", "status": "not_reconciled", "paid_customers": null, "recognised_revenue": null, "cash_collected": null, "price_book_ref": null, "crm_source": null},
+    {"product_id": "entrepreneur-instagram-tools", "status": "not_reconciled", "paid_customers": null, "recognised_revenue": null, "cash_collected": null, "price_book_ref": null, "crm_source": null},
+    {"product_id": "pharma-software-utilities", "status": "not_reconciled", "paid_customers": null, "recognised_revenue": null, "cash_collected": null, "price_book_ref": null, "crm_source": null},
+    {"product_id": "artists-business-tools", "status": "not_reconciled", "paid_customers": null, "recognised_revenue": null, "cash_collected": null, "price_book_ref": null, "crm_source": null},
+    {"product_id": "growtoys", "status": "not_reconciled", "paid_customers": null, "recognised_revenue": null, "cash_collected": null, "price_book_ref": null, "crm_source": null}
+  ]
+}
