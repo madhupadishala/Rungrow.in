@@ -1,4 +1,5 @@
 import pytest
+import pytest_asyncio
 from fastapi import Depends
 from httpx import ASGITransport, AsyncClient
 from app.main import app, get_workforce_repo, PRODUCTS
@@ -22,7 +23,7 @@ def install_test_repository(principal):
     app.dependency_overrides.clear()
     if hasattr(app.state,"test_repository"): delattr(app.state,"test_repository")
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(install_test_repository):
     async with AsyncClient(transport=ASGITransport(app=app),base_url="http://test") as c:
         yield c
