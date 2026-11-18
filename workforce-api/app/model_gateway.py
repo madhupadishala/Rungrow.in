@@ -74,8 +74,11 @@ class ModelGateway:
 
     @staticmethod
     def with_ai_identity(messages: list[dict[str,str]], outbound: bool=False):
-        system=AI_DISCLOSURE if outbound else "You are an AI employee. Be transparent that you are AI; never impersonate a human."
-        return [{"role":"system","content":system},*messages]
+        mandatory=AI_DISCLOSURE if outbound else "You are an AI employee. Be transparent that you are AI; never impersonate a human."
+        existing=[m["content"] for m in messages if m.get("role")=="system"]
+        non_system=[m for m in messages if m.get("role")!="system"]
+        # Place the non-overridable identity rule after caller-provided system context.
+        return [{"role":"system","content":"\\n\\n".join([*existing,mandatory])},*non_system]
 
     async def _call(self, provider_name, model, messages):
         return await self.providers[provider_name].generate(model=model,messages=messages,temperature=0)
