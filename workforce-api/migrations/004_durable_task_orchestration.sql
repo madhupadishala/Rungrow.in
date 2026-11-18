@@ -136,3 +136,12 @@ $$;
 DROP TRIGGER IF EXISTS wf_agent_run_state_transition ON wf_agent_runs;
 CREATE TRIGGER wf_agent_run_state_transition BEFORE UPDATE OF execution_state ON wf_agent_runs
 FOR EACH ROW EXECUTE FUNCTION wf_enforce_agent_run_state_transition();
+
+DO $$
+BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='wf_approvals_expiry_after_creation') THEN
+  ALTER TABLE wf_approvals ADD CONSTRAINT wf_approvals_expiry_after_creation
+   CHECK(expires_at > created_at) NOT VALID;
+ END IF;
+END $$;
+ALTER TABLE wf_approvals VALIDATE CONSTRAINT wf_approvals_expiry_after_creation;
