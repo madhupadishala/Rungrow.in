@@ -19,6 +19,7 @@ class ToolDefinition:
     allowed_in_sandbox: bool
     action_type: str
     handler: Callable[...,Awaitable[Any]]
+    allowed_departments: frozenset[str] = frozenset()
 
 class ToolRegistry:
     def __init__(self): self._tools={}
@@ -36,6 +37,11 @@ class ExecutionBoundaryGuard:
         missing=tool.required_scopes-set(principal.permissions)
         if "*" not in principal.permissions and missing:
             raise ApprovalBoundaryError("Principal lacks required tool scopes",403)
+        employee_missing=tool.required_scopes-set(employee.permissions)
+        if "*" not in employee.permissions and employee_missing:
+            raise ApprovalBoundaryError("Employee role lacks tool scopes",403)
+        if tool.allowed_departments and employee.department not in tool.allowed_departments:
+            raise ApprovalBoundaryError("Employee department is not authorised for this tool",403)
         if employee.product_id and employee.product_id != run.get("product_id"):
             raise ApprovalBoundaryError("Employee product boundary mismatch",403)
         if employee.id != run.get("employee_id"):
@@ -44,6 +50,7 @@ class ExecutionBoundaryGuard:
             raise ApprovalBoundaryError("Tenant boundary mismatch",403)
         if run.get("is_sandbox") and not tool.allowed_in_sandbox:
             await self.repository.append_audit("sandbox.violation","tool",tool_name,run.get("product_id"),{"run_id":run.get("id")})
+            await self.repository.commit_boundary()
             raise SandboxViolation("Tool is prohibited in sandbox mode")
         consumed=None
         if tool.requires_human_approval:
@@ -55,8 +62,10 @@ class ExecutionBoundaryGuard:
                     employee_id=employee.id,action_type=tool.action_type,payload=payload,run_id=run["id"])
             except Exception as exc:
                 await self.repository.append_audit("approval.execution_denied","tool",tool_name,run.get("product_id"),{"run_id":run.get("id"),"reason":str(exc)})
+                await self.repository.commit_boundary()
                 raise ApprovalBoundaryError(str(exc),409) from exc
         await self.repository.append_audit("tool.execution.started","tool",tool_name,run.get("product_id"),{"run_id":run["id"],"approval_id":approval_id})
+        await self.repository.commit_boundary()
         try:
             result=await tool.handler(**payload)
         except Exception as exc:
