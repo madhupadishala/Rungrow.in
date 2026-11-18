@@ -255,3 +255,35 @@ async def test_approval_single_use_and_payload_immutability_are_database_enforce
             assert replay.rowcount==0
     finally:
         await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_model_usage_ledger_is_tenant_product_scoped_and_state_machine_is_enforced():
+    engine=create_async_engine(URL)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','usage-tenant-a',true)"))
+            await conn.execute(text("SELECT set_config('app.product_ids','photo-studio-growth-os',true)"))
+            await conn.execute(text("""
+              INSERT INTO wf_model_usage(id,tenant_id,product_id,employee_id,run_id,provider,model,
+                prompt_tokens,completion_tokens,estimated_cost_inr,latency_ms)
+              VALUES(gen_random_uuid(),'usage-tenant-a','photo-studio-growth-os','market-intel','usage-run',
+                'mock','fixture',10,20,0.01,15)
+            """))
+            task_id=(await conn.execute(text("""
+              INSERT INTO wf_tasks(id,tenant_id,product_id,department,assignee_role_id,title,description,
+                priority,status,created_by,idempotency_key,created_at)
+              VALUES(gen_random_uuid(),'usage-tenant-a','photo-studio-growth-os','Growth','market-intel',
+                'state machine','','normal','COMPLETED','tester','terminal-state-fixture',now()) RETURNING id
+            """))).scalar_one()
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','usage-tenant-b',true)"))
+            await conn.execute(text("SELECT set_config('app.product_ids','photo-studio-growth-os',true)"))
+            rows=await conn.execute(text("SELECT * FROM wf_model_usage WHERE tenant_id='usage-tenant-a'"))
+            assert list(rows)==[]
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','usage-tenant-a',true)"))
+            with pytest.raises(Exception):
+                async with conn.begin_nested():
+                    await conn.execute(text("UPDATE wf_tasks SET status='RUNNING' WHERE id=:id"),{"id":str(task_id)})
+    finally:
+        await engine.dispose()
