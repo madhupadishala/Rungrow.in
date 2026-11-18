@@ -293,7 +293,7 @@ class InMemoryWorkforceRepository:
     async def list_tasks(self, product_id=None):
         self._scope(product_id)
         return [x for x in self.tasks if x["tenant_id"]==self.principal.tenant_id
-                and x.get("product_id") in (product_id,None) if product_id is not None] if product_id is not None else [
+                and x.get("product_id")==product_id] if product_id is not None else [
                     x for x in self.tasks if x["tenant_id"]==self.principal.tenant_id
                     and (x.get("product_id") is None or "*" in self.principal.permissions or x.get("product_id") in self.principal.product_ids)]
 
