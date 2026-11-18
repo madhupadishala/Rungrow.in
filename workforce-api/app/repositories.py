@@ -27,7 +27,7 @@ def session_factory():
     return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
-class TenantRepository:
+class PostgresWorkforceRepository:
     def __init__(self, session: AsyncSession, principal: Principal):
         self.session = session
         self.principal = principal
@@ -243,7 +243,7 @@ class TenantRepository:
 async def repository_for(principal: Principal):
     SessionFactory = session_factory()
     async with SessionFactory() as session:
-        async with TenantRepository(session, principal) as repository:
+        async with PostgresWorkforceRepository(session, principal) as repository:
             yield repository
 
 
@@ -369,3 +369,7 @@ class InMemoryWorkforceRepository:
           (x.get("product_id")==product_id if product_id else
            x.get("product_id") is None or "*" in self.principal.permissions or x.get("product_id") in self.principal.product_ids)]
 
+
+
+# Backwards-compatible internal alias; production dependencies use the explicit name.
+TenantRepository = PostgresWorkforceRepository
