@@ -307,27 +307,39 @@ class PostgresWorkforceRepository:
         await self.append_audit("model.usage","model_usage",usage["run_id"],usage["product_id"],usage)
 
     async def claim_task(self, worker_id: str, lease_seconds: int, product_id: str | None=None):
-        return await self._one("""
+        params={"tenant":self.principal.tenant_id,"products":",".join(self.principal.product_ids),
+            "admin":"true" if "*" in self.principal.permissions else "false","requested_product":product_id}
+        exhausted=await self.session.execute(text("""
+          UPDATE wf_tasks SET status='DEAD_LETTER',locked_by=NULL,lease_expires_at=NULL,updated_at=now()
+          WHERE tenant_id=:tenant AND attempt_count>=max_attempts
+            AND ((status IN ('QUEUED','RETRY_SCHEDULED') AND next_retry_at<=now())
+              OR (status='RUNNING' AND lease_expires_at<=now()))
+            AND (:requested_product IS NULL OR product_id=:requested_product)
+            AND (product_id IS NULL OR product_id=ANY(string_to_array(:products,',')) OR :admin='true')
+          RETURNING id,product_id
+        """),params)
+        for row in exhausted.mappings().all():
+            await self.append_audit("task.dead_letter","task",str(row["id"]),row["product_id"],{"reason":"max_attempts_exhausted"})
+        item=await self._one("""
           WITH candidate AS (
             SELECT id FROM wf_tasks
-            WHERE ((status IN ('QUEUED','RETRY_SCHEDULED') AND next_retry_at <= now())
-              OR (status='RUNNING' AND lease_expires_at <= now()))
-              AND tenant_id=:tenant AND (:requested_product IS NULL OR product_id=:requested_product)
+            WHERE ((status IN ('QUEUED','RETRY_SCHEDULED') AND next_retry_at<=now())
+              OR (status='RUNNING' AND lease_expires_at<=now()))
+              AND attempt_count<max_attempts AND tenant_id=:tenant
+              AND (:requested_product IS NULL OR product_id=:requested_product)
               AND (product_id IS NULL OR product_id=ANY(string_to_array(:products,',')) OR :admin='true')
             ORDER BY next_retry_at,created_at
             FOR UPDATE SKIP LOCKED LIMIT 1
           )
-          UPDATE wf_tasks t SET
-            status=CASE WHEN t.attempt_count >= t.max_attempts THEN 'DEAD_LETTER' ELSE 'RUNNING' END,
-            locked_by=CASE WHEN t.attempt_count >= t.max_attempts THEN NULL ELSE :worker END,
-            lease_expires_at=CASE WHEN t.attempt_count >= t.max_attempts THEN NULL ELSE now()+make_interval(secs=>:lease) END,
-            attempt_count=CASE WHEN t.attempt_count >= t.max_attempts THEN t.attempt_count ELSE t.attempt_count+1 END,
-            updated_at=now()
+          UPDATE wf_tasks t SET status='RUNNING',locked_by=:worker,
+            lease_expires_at=now()+make_interval(secs=>:lease),
+            attempt_count=t.attempt_count+1,updated_at=now()
           FROM candidate c WHERE t.id=c.id AND t.tenant_id=:tenant
           RETURNING t.*
-        """,{"tenant":self.principal.tenant_id,"products":",".join(self.principal.product_ids),
-             "admin":"true" if "*" in self.principal.permissions else "false",
-             "worker":worker_id,"lease":lease_seconds,"requested_product":product_id})
+        """,{**params,"worker":worker_id,"lease":lease_seconds})
+        if item:
+            await self.append_audit("task.claimed","task",str(item["id"]),item["product_id"],{"worker_id":worker_id})
+        return item
 
     async def finish_task(self, task_id: str, worker_id: str, result: Any):
         item=await self._one("""
