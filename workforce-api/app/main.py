@@ -7,7 +7,8 @@ from .config import settings
 from .registry import EMPLOYEES,BY_ID,DEPARTMENTS,public_registry
 from .policy import Principal,evaluate
 from .security import current_principal,require_permission
-from .schemas import CommandRequest,TaskCreate,ApprovalDecision,MemoryWrite,AgentRunRequest\nfrom .agent_runtime import AgentInput,AgentOrchestrator
+from .schemas import CommandRequest,TaskCreate,ApprovalDecision,MemoryWrite,AgentRunRequest
+from .agent_runtime import AgentInput,AgentOrchestrator
 app=FastAPI(title="RunGrow Workforce API",version="0.1.0")
 app.add_middleware(CORSMiddleware,allow_origins=settings.allowed_origins,allow_credentials=True,allow_methods=["GET","POST"],allow_headers=["Authorization","Content-Type","Idempotency-Key"])
 # Local adapter only. Production deployment must replace this with PostgreSQL repositories and a durable outbox.
