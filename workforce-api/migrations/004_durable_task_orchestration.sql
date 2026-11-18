@@ -30,6 +30,7 @@ ALTER TABLE wf_agent_runs ADD COLUMN IF NOT EXISTS attempt_count integer NOT NUL
 ALTER TABLE wf_approvals ADD COLUMN IF NOT EXISTS consumed_at timestamptz;
 ALTER TABLE wf_approvals ADD COLUMN IF NOT EXISTS execution_run_id uuid;
 ALTER TABLE wf_approvals DROP CONSTRAINT IF EXISTS wf_approvals_status_check;
+ALTER TABLE wf_approvals DROP CONSTRAINT IF EXISTS wf_approvals_check1;
 UPDATE wf_approvals SET status=upper(status);
 ALTER TABLE wf_approvals ALTER COLUMN status SET DEFAULT 'PENDING';
 ALTER TABLE wf_approvals ADD CONSTRAINT wf_approvals_status_check CHECK(status IN ('PENDING','APPROVED','REJECTED'));
@@ -41,6 +42,18 @@ BEGIN
  END IF;
 END $;
 ALTER TABLE wf_approvals VALIDATE CONSTRAINT wf_approval_consumption_binding;
+
+DO $
+BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='wf_approvals_decision_actor_check') THEN
+  ALTER TABLE wf_approvals ADD CONSTRAINT wf_approvals_decision_actor_check CHECK(
+   (status='PENDING' AND approver_id IS NULL AND decided_at IS NULL) OR
+   (status IN ('APPROVED','REJECTED') AND approver_id IS NOT NULL AND decided_at IS NOT NULL)
+  ) NOT VALID;
+ END IF;
+END $;
+ALTER TABLE wf_approvals VALIDATE CONSTRAINT wf_approvals_decision_actor_check;
+
 
 CREATE TABLE IF NOT EXISTS wf_model_usage (
  id uuid PRIMARY KEY, tenant_id text NOT NULL, product_id text REFERENCES wf_product_registry(product_id),
