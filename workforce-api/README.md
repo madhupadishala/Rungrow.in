@@ -35,3 +35,7 @@ Memory is scoped by tenant, department and role, with source references and rete
 
 ## Lead sourcing and outreach
 Crawling must use allowlisted public sources, rate limits, robots/terms checks, provenance and suppression checks. A public phone number is not consent to call. Outreach requires channel-specific permission and applicable Indian DND/UCC, messaging and privacy checks. Use official WhatsApp Business APIs or an authorised provider, never consumer WhatsApp Web automation.
+
+
+## Identity provider integration
+In production set APP_ENV=production, configure the OIDC issuer, audience and RS256 verification public key, and map trusted identity-provider groups/roles to server-managed permissions. Never let a browser choose its own tenant ID or permission claims. The local HS256 token helper is for development only; production decoding rejects HS256 tokens.
