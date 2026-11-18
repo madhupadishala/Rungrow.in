@@ -306,11 +306,11 @@ class PostgresWorkforceRepository:
 
     async def record_model_usage(self, **usage):
         await self.session.execute(text("""
-          INSERT INTO wf_model_usage(id,tenant_id,product_id,employee_id,run_id,provider,model,
+          INSERT INTO wf_model_usage(id,tenant_id,product_id,employee_id,run_id,is_sandbox,provider,model,
             prompt_tokens,completion_tokens,estimated_cost_inr,latency_ms,created_at)
-          VALUES(:id,:tenant,:product,:employee,:run,:provider,:model,:prompt,:completion,:cost,:latency,now())
+          VALUES(:id,:tenant,:product,:employee,:run,:sandbox,:provider,:model,:prompt,:completion,:cost,:latency,now())
         """),{"id":str(uuid4()),"tenant":self.principal.tenant_id,"product":usage["product_id"],
-          "employee":usage["employee_id"],"run":usage["run_id"],"provider":usage["provider"],
+          "employee":usage["employee_id"],"run":usage["run_id"],"sandbox":bool(usage.get("is_sandbox",False)),"provider":usage["provider"],
           "model":usage["model"],"prompt":usage["prompt_tokens"],"completion":usage["completion_tokens"],
           "cost":usage["estimated_cost_inr"],"latency":usage["latency_ms"]})
         await self.append_audit("model.usage","model_usage",usage["run_id"],usage["product_id"],usage)
