@@ -124,6 +124,10 @@ class PostgresWorkforceRepository:
         """, {"id": run_id, "tenant": self.principal.tenant_id,
               "expected": expected_status, "new_status": new_status})
 
+    async def get_agent_run(self, run_id: str):
+        return await self._one("SELECT * FROM wf_agent_runs WHERE id=:id AND tenant_id=:tenant",
+            {"id":run_id,"tenant":self.principal.tenant_id})
+
     async def list_agent_runs(self, product_id: str | None = None):
         self._product(product_id)
         return await self._rows("""
@@ -345,6 +349,7 @@ class WorkforceRepositoryProtocol(Protocol):
     async def list_tasks(self, product_id=None): ...
     async def create_agent_run(self, **kwargs): ...
     async def list_agent_runs(self, product_id=None): ...
+    async def get_agent_run(self, run_id): ...
     async def write_memory(self, **kwargs): ...
     async def list_memory(self, product_id=None): ...
     async def create_approval(self, **kwargs): ...
@@ -468,6 +473,9 @@ class InMemoryWorkforceRepository:
               **kw,"created_at":datetime.now(timezone.utc).isoformat()}
         self.runs.append(item); self._audit("agent.run","agent_run",item["id"],kw["product_id"]); return item
 
+    async def get_agent_run(self, run_id):
+        return next((x for x in self.runs if x["id"]==run_id and x["tenant_id"]==self.principal.tenant_id),None)
+
     async def list_agent_runs(self, product_id=None):
         self._scope(product_id)
         return [x for x in self.runs if x["tenant_id"]==self.principal.tenant_id and
@@ -512,7 +520,7 @@ class InMemoryWorkforceRepository:
     async def validate_approval(self, approval_id, **kw):
         item=next((x for x in self.approvals if x["id"]==approval_id and x["tenant_id"]==self.principal.tenant_id),None)
         if not item: raise LookupError("Approval not found")
-        if item["status"]!="approved" or item["expires_at"]<=datetime.now(timezone.utc) or item["approver_id"]==item["requester_id"]:
+        if item["status"]!="approved" or item["expires_at"]<=datetime.now(timezone.utc) or item["approver_id"]==item["requester_id"] or item.get("consumed_at") is not None:
             raise PermissionError("Approval validation failed")
         for k in ("product_id","employee_id","action_type"):
             if item[k]!=kw[k]: raise PermissionError("Approval binding mismatch")
