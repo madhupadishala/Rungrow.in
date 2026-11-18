@@ -204,6 +204,20 @@ class TenantRepository:
             raise PermissionError("Approved payload does not match execution payload")
         return item
 
+    async def list_approvals(self, product_id: str | None = None):
+        self._product(product_id)
+        return await self._rows("""
+          SELECT * FROM wf_approvals WHERE tenant_id=:tenant
+          AND (:product IS NULL OR product_id=:product) ORDER BY created_at DESC
+        """, {"tenant": self.principal.tenant_id, "product": product_id})
+
+    async def list_audit(self, product_id: str | None = None):
+        self._product(product_id)
+        return await self._rows("""
+          SELECT * FROM wf_audit_events WHERE tenant_id=:tenant
+          AND (:product IS NULL OR product_id=:product) ORDER BY occurred_at DESC
+        """, {"tenant": self.principal.tenant_id, "product": product_id})
+
     async def append_audit(self, action: str, resource_type: str, resource_id: str,
                            product_id: str | None, details: dict):
         await self.session.execute(text("""
