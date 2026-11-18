@@ -185,7 +185,7 @@ async def command(body: CommandRequest, p: Principal = Depends(current_principal
 
 @app.post("/v1/workforce/tasks")
 async def create_task(body: TaskCreate, p: Principal = Depends(require_permission("work.assign"))):
-    validate_product_id(body.product_id)
+    authorize_product_access(p, body.product_id)
     if body.assignee_role_id not in BY_ID:
         raise HTTPException(status_code=404, detail="Unknown employee role")
     assignee = BY_ID[body.assignee_role_id]
@@ -242,7 +242,7 @@ async def decide(approval_id: str, body: ApprovalDecision, p: Principal = Depend
 @app.post("/v1/workforce/approvals/{approval_id}/validate-execution")
 async def validate_execution(approval_id: str, body: ApprovalExecutionValidation,
                              p: Principal = Depends(require_permission("approval.execute"))):
-    validate_product_id(body.product_id)
+    authorize_product_access(p, body.product_id)
     item = validate_approval_for_execution(p, approval_id, product_id=body.product_id,
                                            employee_id=body.employee_id, action_type=body.action_type,
                                            payload=body.payload)
@@ -252,7 +252,7 @@ async def validate_execution(approval_id: str, body: ApprovalExecutionValidation
 
 @app.post("/v1/workforce/memory")
 async def memory(body: MemoryWrite, p: Principal = Depends(require_permission("memory.write"))):
-    validate_product_id(body.product_id)
+    authorize_product_access(p, body.product_id)
     if body.role_id not in BY_ID:
         raise HTTPException(status_code=404, detail="Unknown role")
     employee = BY_ID[body.role_id]
@@ -293,7 +293,7 @@ async def agent_runs(product_id: str | None = None, p: Principal = Depends(requi
 
 @app.post("/v1/workforce/agent-runs")
 async def run_employee(body: AgentRunRequest, p: Principal = Depends(require_permission("agent.run"))):
-    validate_product_id(body.product_id)
+    authorize_product_access(p, body.product_id)
     employee = BY_ID.get(body.role_id)
     if employee is None:
         raise HTTPException(status_code=404, detail="Unknown workforce employee")
