@@ -63,9 +63,13 @@ async def create_task(body:TaskCreate,p:Principal=Depends(require_permission("wo
     item={"id":str(uuid4()),"tenant_id":p.tenant_id,"title":body.title,"description":body.description,"assignee_role_id":body.assignee_role_id,"product_id":body.product_id,"priority":body.priority,"status":"queued","created_by":p.user_id}
     STATE["tasks"].append(item); audit(p,"task.create","task",item["id"],"created"); return item
 @app.get("/v1/workforce/tasks")
-async def tasks(p:Principal=Depends(require_permission("work.read"))): return [x for x in STATE["tasks"] if x["tenant_id"]==p.tenant_id]
+async def tasks(product_id:str|None=None,p:Principal=Depends(require_permission("work.read"))):
+    items=[x for x in STATE["tasks"] if x["tenant_id"]==p.tenant_id]
+    return [x for x in items if x.get("product_id")==product_id] if product_id else items
 @app.get("/v1/workforce/approvals")
-async def approvals(p:Principal=Depends(require_permission("approval.read"))): return [x for x in STATE["approvals"] if x["tenant_id"]==p.tenant_id]
+async def approvals(product_id:str|None=None,p:Principal=Depends(require_permission("approval.read"))):
+    items=[x for x in STATE["approvals"] if x["tenant_id"]==p.tenant_id]
+    return [x for x in items if x.get("payload",{}).get("product_id")==product_id] if product_id else items
 @app.post("/v1/workforce/approvals/{approval_id}/decision")
 async def decide(approval_id:str,body:ApprovalDecision,p:Principal=Depends(require_permission("approval.decide"))):
     item=next((x for x in STATE["approvals"] if x["id"]==approval_id and x["tenant_id"]==p.tenant_id),None)
@@ -84,6 +88,11 @@ async def memory(body:MemoryWrite,p:Principal=Depends(require_permission("memory
     STATE["memory"].append(item); audit(p,"memory.write","memory",item["id"],"created"); return {"id":item["id"],"scope":"tenant+department+role"}
 @app.get("/v1/workforce/audit")
 async def audit_events(p:Principal=Depends(require_permission("audit.read"))): return [x for x in STATE["audit"] if x["tenant_id"]==p.tenant_id][-500:]
+
+@app.get("/v1/workforce/agent-runs")
+async def agent_runs(product_id:str|None=None,p:Principal=Depends(require_permission("work.read"))):
+    items=[x for x in STATE["runs"] if x["tenant_id"]==p.tenant_id]
+    return [x for x in items if x.get("product_id")==product_id] if product_id else items
 
 @app.post("/v1/workforce/agent-runs")
 async def run_employee(body:AgentRunRequest,p:Principal=Depends(require_permission("agent.run"))):
