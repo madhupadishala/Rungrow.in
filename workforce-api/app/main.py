@@ -155,8 +155,7 @@ async def decide(approval_id: str,body: ApprovalDecision,p: Principal=Depends(re
                  repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
     authorize_product_access(p,body.product_id)
     try:
-        item=await repo.decide_approval(approval_id,body.decision,body.reason)
-        if item.get("product_id") != body.product_id: raise HTTPException(403,"Approval product scope mismatch")
+        item=await repo.decide_approval(approval_id,body.decision,body.reason,body.product_id)
         return {"id":approval_id,"status":item["status"],"execution":"not_started"}
     except Exception as exc: translate_repo_error(exc)
 
