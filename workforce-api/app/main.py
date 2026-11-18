@@ -13,6 +13,18 @@ app=FastAPI(title="RunGrow Workforce API",version="0.1.0")
 app.add_middleware(CORSMiddleware,allow_origins=settings.allowed_origins,allow_credentials=True,allow_methods=["GET","POST"],allow_headers=["Authorization","Content-Type","Idempotency-Key"])
 # Local adapter only. Production deployment must replace this with PostgreSQL repositories and a durable outbox.
 STATE={"approvals":[],"tasks":[],"audit":[],"memory":[],"runs":[]}
+PRODUCT_ROLE_IDS={
+    "photo-studio-growth-os":"pgm-photo-studio-growth-os",
+    "photo-studio-billing":"pgm-photo-studio-billing",
+    "clinics-counter":"pgm-clinics-counter",
+    "entrepreneur-instagram-tools":"pgm-entrepreneur-tools",
+    "pharma-software-utilities":"pgm-pharma",
+    "artists-business-tools":"pgm-artists-tools",
+    "growtoys":"pgm-growtoys",
+}
+def enforce_product_scope(employee,product_id:str|None):
+    if employee.product_id and product_id != employee.product_id:
+        raise HTTPException(403,"Product-scoped employee requires its exact assigned product_id")
 def audit(p:Principal,action:str,kind:str,rid:str,outcome:str):
     STATE["audit"].append({"id":str(uuid4()),"tenant_id":p.tenant_id,"actor_id":p.user_id,"actor_type":p.actor_type,"action":action,"resource_type":kind,"resource_id":rid,"outcome":outcome,"at":datetime.now(timezone.utc).isoformat()})
 def route(text:str):
@@ -27,7 +39,11 @@ async def health(): return {"status":"ok","service":"rungrow-workforce-api","ada
 async def registry(p:Principal=Depends(require_permission("workforce.read"))): return {"departments":list(DEPARTMENTS),"employees":public_registry(),"count":len(EMPLOYEES)}
 @app.post("/v1/workforce/commands")
 async def command(body:CommandRequest,p:Principal=Depends(current_principal)):
-    dept,role_id,permission=route(body.command); role=BY_ID[role_id]; cid=str(uuid4())
+    dept,role_id,permission=route(body.command)
+    if body.product_id:
+        role_id=PRODUCT_ROLE_IDS.get(body.product_id)
+        if not role_id: raise HTTPException(404,"Unknown product scope")
+    role=BY_ID[role_id]; enforce_product_scope(role,body.product_id); cid=str(uuid4())
     if permission not in p.permissions and "*" not in p.permissions:
         audit(p,"command.route","command",cid,"denied")
         return {"status":"denied","message":"Your workspace role is not authorised for this department data.","command_id":cid}
@@ -40,7 +56,9 @@ async def command(body:CommandRequest,p:Principal=Depends(current_principal)):
 @app.post("/v1/workforce/tasks")
 async def create_task(body:TaskCreate,p:Principal=Depends(require_permission("work.assign"))):
     if body.assignee_role_id not in BY_ID: raise HTTPException(404,"Unknown employee role")
-    item={"id":str(uuid4()),"tenant_id":p.tenant_id,"title":body.title,"description":body.description,"assignee_role_id":body.assignee_role_id,"priority":body.priority,"status":"queued","created_by":p.user_id}
+    assignee=BY_ID[body.assignee_role_id]
+    enforce_product_scope(assignee,body.product_id)
+    item={"id":str(uuid4()),"tenant_id":p.tenant_id,"title":body.title,"description":body.description,"assignee_role_id":body.assignee_role_id,"product_id":body.product_id,"priority":body.priority,"status":"queued","created_by":p.user_id}
     STATE["tasks"].append(item); audit(p,"task.create","task",item["id"],"created"); return item
 @app.get("/v1/workforce/tasks")
 async def tasks(p:Principal=Depends(require_permission("work.read"))): return [x for x in STATE["tasks"] if x["tenant_id"]==p.tenant_id]
@@ -58,7 +76,9 @@ async def decide(approval_id:str,body:ApprovalDecision,p:Principal=Depends(requi
 @app.post("/v1/workforce/memory")
 async def memory(body:MemoryWrite,p:Principal=Depends(require_permission("memory.write"))):
     if body.role_id not in BY_ID: raise HTTPException(404,"Unknown role")
-    item={"id":str(uuid4()),"tenant_id":p.tenant_id,"role_id":body.role_id,"department":BY_ID[body.role_id].department,"content":body.content,"source_ref":body.source_ref,"retention_days":body.retention_days}
+    employee=BY_ID[body.role_id]
+    enforce_product_scope(employee,body.product_id)
+    item={"id":str(uuid4()),"tenant_id":p.tenant_id,"role_id":body.role_id,"product_id":body.product_id,"department":employee.department,"content":body.content,"source_ref":body.source_ref,"retention_days":body.retention_days}
     STATE["memory"].append(item); audit(p,"memory.write","memory",item["id"],"created"); return {"id":item["id"],"scope":"tenant+department+role"}
 @app.get("/v1/workforce/audit")
 async def audit_events(p:Principal=Depends(require_permission("audit.read"))): return [x for x in STATE["audit"] if x["tenant_id"]==p.tenant_id][-500:]
@@ -67,11 +87,24 @@ async def audit_events(p:Principal=Depends(require_permission("audit.read"))): r
 async def run_employee(body:AgentRunRequest,p:Principal=Depends(require_permission("agent.run"))):
     employee=BY_ID.get(body.role_id)
     if not employee: raise HTTPException(404,"Unknown workforce employee")
+    enforce_product_scope(employee,body.product_id)
     missing=set(employee.permissions)-p.permissions
     if "*" not in p.permissions and missing:
         raise HTTPException(403,"Invoker does not hold the employee tool scopes required for this run")
     plan=await AgentOrchestrator().run(employee,AgentInput(p.tenant_id,p.user_id,body.task,tuple(body.source_refs)))
-    record={"id":str(uuid4()),"tenant_id":p.tenant_id,"employee_id":employee.id,"requested_by":p.user_id,"task":body.task,"status":plan.status,"summary":plan.summary,"steps":list(plan.steps),"approval_required":plan.approval_required,"runtime_mode":plan.runtime_mode,"created_at":datetime.now(timezone.utc).isoformat()}
+    record={"id":str(uuid4()),"tenant_id":p.tenant_id,"employee_id":employee.id,"product_id":employee.product_id or body.product_id,"requested_by":p.user_id,"task":body.task,"status":plan.status,"summary":plan.summary,"steps":list(plan.steps),"approval_required":plan.approval_required,"runtime_mode":plan.runtime_mode,"created_at":datetime.now(timezone.utc).isoformat()}
     STATE["runs"].append(record)
+    if plan.approval_required:
+        approval_id=str(uuid4())
+        STATE["approvals"].append({
+            "id":approval_id,"tenant_id":p.tenant_id,"requested_by":p.user_id,
+            "action":"agent.proposed_action",
+            "payload":{"agent_run_id":record["id"],"employee_id":employee.id,
+                       "product_id":employee.product_id or body.product_id,
+                       "task":body.task,"proposed_actions":list(plan.proposed_actions)},
+            "status":"pending",
+        })
+        record["approval_id"]=approval_id
+        audit(p,"agent.approval_requested","approval",approval_id,"pending")
     audit(p,"agent.run.plan","agent_run",record["id"],plan.status)
     return record
