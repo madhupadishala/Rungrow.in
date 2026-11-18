@@ -60,6 +60,8 @@ async def test_audit_is_append_only_for_restricted_role():
             """))
             with pytest.raises(Exception):
                 await conn.execute(text("UPDATE wf_audit_events SET action='tampered' WHERE resource_id='audit-fixture'"))
+            with pytest.raises(Exception):
+                await conn.execute(text("DELETE FROM wf_audit_events WHERE resource_id='audit-fixture'"))
     finally:
         await engine.dispose()
 
