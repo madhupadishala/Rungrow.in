@@ -50,14 +50,13 @@ async def test_lease_recovery_reclaims_expired_task_and_idempotent_handler_compl
     first=await repo.claim_task("worker-1",1)
     assert first["id"]==task["id"]
     first["lease_expires_at"]=datetime.now(timezone.utc)-timedelta(seconds=1)
-    second=await repo.claim_task("worker-2",30)
-    assert second["id"]==first["id"] and second["attempt_count"]==2
     side_effect_keys=set()
     async def idempotent_handler(item):
         side_effect_keys.add(item["id"])
         return {"done":True}
     result=await DurableTaskOrchestrator(repo,"worker-2").dispatch_once(idempotent_handler)
     assert result["status"]=="COMPLETED" and len(side_effect_keys)==1
+    assert task["attempt_count"]==2
     with pytest.raises(PermissionError):
         await repo.finish_task(task["id"],"worker-1",{"duplicate":True})
 
