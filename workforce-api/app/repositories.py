@@ -85,6 +85,9 @@ class TenantRepository:
               "department": department, "assignee": assignee_role_id, "title": title,
               "description": description, "priority": priority, "actor": self.principal.user_id,
               "idem": idempotency_key})
+        if item:
+            await self.append_audit("task.create", "task", str(item["id"]), product_id, {"idempotency_key": idempotency_key})
+        return item
 
     async def list_tasks(self, product_id: str | None = None):
         self._product(product_id)
@@ -107,6 +110,9 @@ class TenantRepository:
               "employee": employee_id, "actor": self.principal.user_id, "task": task,
               "status": status, "summary": summary, "steps": json.dumps(steps),
               "correlation": correlation_id})
+        if item:
+            await self.append_audit("agent.run", "agent_run", str(item["id"]), product_id, {"correlation_id": correlation_id})
+        return item
 
     async def transition_agent_run(self, run_id: str, expected_status: str, new_status: str):
         return await self._one("""
@@ -136,6 +142,9 @@ class TenantRepository:
         """, {"id": str(uuid4()), "tenant": self.principal.tenant_id, "product": product_id,
               "role": role_id, "department": department, "content": content,
               "source": source_ref, "retention": retention_days, "embedding": vector})
+        if item:
+            await self.append_audit("memory.write", "memory", str(item["id"]), product_id, {"source_ref": source_ref})
+        return item
 
     async def list_memory(self, product_id: str | None = None):
         self._product(product_id)
