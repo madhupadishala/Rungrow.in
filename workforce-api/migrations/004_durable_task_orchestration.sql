@@ -24,8 +24,17 @@ ALTER TABLE wf_agent_runs ADD COLUMN IF NOT EXISTS attempt_count integer NOT NUL
 
 ALTER TABLE wf_approvals ADD COLUMN IF NOT EXISTS consumed_at timestamptz;
 ALTER TABLE wf_approvals ADD COLUMN IF NOT EXISTS execution_run_id uuid;
-ALTER TABLE wf_approvals ADD CONSTRAINT wf_approval_consumption_binding CHECK
- ((consumed_at IS NULL AND execution_run_id IS NULL) OR (consumed_at IS NOT NULL AND execution_run_id IS NOT NULL)) NOT VALID;
+ALTER TABLE wf_approvals DROP CONSTRAINT IF EXISTS wf_approvals_status_check;
+UPDATE wf_approvals SET status=upper(status);
+ALTER TABLE wf_approvals ALTER COLUMN status SET DEFAULT 'PENDING';
+ALTER TABLE wf_approvals ADD CONSTRAINT wf_approvals_status_check CHECK(status IN ('PENDING','APPROVED','REJECTED'));
+DO $
+BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='wf_approval_consumption_binding') THEN
+  ALTER TABLE wf_approvals ADD CONSTRAINT wf_approval_consumption_binding CHECK
+   ((consumed_at IS NULL AND execution_run_id IS NULL) OR (consumed_at IS NOT NULL AND execution_run_id IS NOT NULL)) NOT VALID;
+ END IF;
+END $;
 ALTER TABLE wf_approvals VALIDATE CONSTRAINT wf_approval_consumption_binding;
 
 CREATE TABLE IF NOT EXISTS wf_model_usage (
