@@ -51,6 +51,12 @@ def authorize_product_access(principal: Principal, product_id: str | None) -> No
         raise HTTPException(status_code=403, detail="Principal is not authorised for this product")
 
 
+def filter_product_scope(principal: Principal, rows: list[dict]) -> list[dict]:
+    if "*" in principal.permissions:
+        return rows
+    return [row for row in rows if row.get("product_id") is None or row.get("product_id") in principal.product_ids]
+
+
 def enforce_product_scope(employee, product_id: str | None) -> None:
     validate_product_id(product_id)
     if employee.product_id and product_id != employee.product_id:
@@ -197,6 +203,7 @@ async def create_task(body: TaskCreate, p: Principal = Depends(require_permissio
 async def tasks(product_id: str | None = None, p: Principal = Depends(require_permission("work.read"))):
     authorize_product_access(p, product_id)
     rows = [row for row in STATE["tasks"] if row["tenant_id"] == p.tenant_id]
+    rows = filter_product_scope(p, rows)
     return [row for row in rows if row.get("product_id") == product_id] if product_id else rows
 
 
@@ -204,6 +211,7 @@ async def tasks(product_id: str | None = None, p: Principal = Depends(require_pe
 async def approvals(product_id: str | None = None, p: Principal = Depends(require_permission("approval.read"))):
     authorize_product_access(p, product_id)
     rows = [row for row in STATE["approvals"] if row["tenant_id"] == p.tenant_id]
+    rows = filter_product_scope(p, rows)
     return [row for row in rows if row.get("product_id") == product_id] if product_id else rows
 
 
@@ -261,18 +269,25 @@ async def memory(body: MemoryWrite, p: Principal = Depends(require_permission("m
 async def read_memory(product_id: str | None = None, p: Principal = Depends(require_permission("memory.read"))):
     authorize_product_access(p, product_id)
     rows = [row for row in STATE["memory"] if row["tenant_id"] == p.tenant_id]
+    rows = filter_product_scope(p, rows)
     return [row for row in rows if row.get("product_id") == product_id] if product_id else rows
 
 
 @app.get("/v1/workforce/audit")
-async def audit_events(p: Principal = Depends(require_permission("audit.read"))):
-    return [row for row in STATE["audit"] if row["tenant_id"] == p.tenant_id][-500:]
+async def audit_events(product_id: str | None = None, p: Principal = Depends(require_permission("audit.read"))):
+    authorize_product_access(p, product_id)
+    rows = [row for row in STATE["audit"] if row["tenant_id"] == p.tenant_id]
+    rows = filter_product_scope(p, rows)
+    if product_id is not None:
+        rows = [row for row in rows if row.get("product_id") == product_id]
+    return rows[-500:]
 
 
 @app.get("/v1/workforce/agent-runs")
 async def agent_runs(product_id: str | None = None, p: Principal = Depends(require_permission("work.read"))):
     authorize_product_access(p, product_id)
     rows = [row for row in STATE["runs"] if row["tenant_id"] == p.tenant_id]
+    rows = filter_product_scope(p, rows)
     return [row for row in rows if row.get("product_id") == product_id] if product_id else rows
 
 
