@@ -9,6 +9,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Any
+from functools import lru_cache
 from uuid import uuid4
 
 from sqlalchemy import text
@@ -17,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from .config import settings
 from .policy import Principal
 
+@lru_cache(maxsize=1)
 def session_factory():
     if not settings.database_url:
         raise RuntimeError("DATABASE_URL is required for Workforce API runtime")
