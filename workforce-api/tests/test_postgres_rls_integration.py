@@ -133,3 +133,110 @@ async def test_fastapi_records_survive_new_app_instance():
             assert any(x["id"]==approval.json()["approval_id"] for x in approvals)
     finally:
         workforce_app.dependency_overrides.clear()
+
+@pytest.mark.asyncio
+async def test_task_lease_recovery_and_dead_letter_state_machine():
+    engine=create_async_engine(URL)
+    task_id=None
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','lease-tenant',true)"))
+            await conn.execute(text("SELECT set_config('app.product_ids','photo-studio-growth-os',true)"))
+            row=(await conn.execute(text("""
+              INSERT INTO wf_tasks(id,tenant_id,product_id,department,assignee_role_id,title,description,priority,status,
+                created_by,idempotency_key,created_at,attempt_count,max_attempts,lease_expires_at)
+              VALUES(gen_random_uuid(),'lease-tenant','photo-studio-growth-os','Growth','market-intel','lease test','','normal',
+                'RUNNING','lease-user','lease-recovery-once',now(),1,3,now()-interval '5 seconds')
+              RETURNING id
+            """))).one()
+            task_id=str(row.id)
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','lease-tenant',true)"))
+            await conn.execute(text("SELECT set_config('app.product_ids','photo-studio-growth-os',true)"))
+            row=(await conn.execute(text("""
+              WITH candidate AS (
+                SELECT id FROM wf_tasks WHERE id=:id AND status='RUNNING' AND lease_expires_at<=now()
+                FOR UPDATE SKIP LOCKED LIMIT 1
+              )
+              UPDATE wf_tasks t SET status='RUNNING',locked_by='worker-two',
+                lease_expires_at=now()+interval '30 seconds',attempt_count=attempt_count+1
+              FROM candidate c WHERE t.id=c.id RETURNING t.id,t.attempt_count,t.locked_by
+            """),{"id":task_id})).one()
+            assert row.attempt_count==2 and row.locked_by=="worker-two"
+            completed=await conn.execute(text("""
+              UPDATE wf_tasks SET status='COMPLETED',locked_by=NULL,lease_expires_at=NULL
+              WHERE id=:id AND status='RUNNING' AND locked_by='worker-two' AND lease_expires_at>now()
+            """),{"id":task_id})
+            assert completed.rowcount==1
+            duplicate=await conn.execute(text("""
+              INSERT INTO wf_tasks(id,tenant_id,product_id,department,assignee_role_id,title,description,priority,status,
+                created_by,idempotency_key,created_at)
+              VALUES(gen_random_uuid(),'lease-tenant','photo-studio-growth-os','Growth','market-intel','duplicate','','normal',
+                'QUEUED','lease-user','lease-recovery-once',now()) ON CONFLICT(tenant_id,idempotency_key) DO NOTHING
+            """))
+            assert duplicate.rowcount==0
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','lease-tenant',true)"))
+            await conn.execute(text("SELECT set_config('app.product_ids','photo-studio-growth-os',true)"))
+            dead=(await conn.execute(text("""
+              INSERT INTO wf_tasks(id,tenant_id,product_id,department,assignee_role_id,title,description,priority,status,
+                created_by,idempotency_key,created_at,attempt_count,max_attempts,lease_expires_at)
+              VALUES(gen_random_uuid(),'lease-tenant','photo-studio-growth-os','Growth','market-intel','dead letter','','normal',
+                'RUNNING','lease-user','lease-dead-letter',now(),3,3,now()-interval '5 seconds') RETURNING id
+            """))).scalar_one()
+            moved=await conn.execute(text("""
+              UPDATE wf_tasks SET status='DEAD_LETTER',locked_by=NULL,lease_expires_at=NULL
+              WHERE id=:id AND status='RUNNING' AND lease_expires_at<=now() AND attempt_count>=max_attempts
+            """),{"id":str(dead)})
+            assert moved.rowcount==1
+    finally:
+        await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_approval_single_use_and_payload_immutability_are_database_enforced():
+    engine=create_async_engine(URL)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','approval-tenant',true)"))
+            await conn.execute(text("SELECT set_config('app.product_ids','photo-studio-growth-os',true)"))
+            payload='{"message":"hello"}'
+            digest=__import__("hashlib").sha256(b'{"action_type":"message.send","employee_id":"employee-1","payload":{"message":"hello"},"product_id":"photo-studio-growth-os","tenant_id":"approval-tenant"}').hexdigest()
+            approval=(await conn.execute(text("""
+              INSERT INTO wf_approvals(id,tenant_id,product_id,employee_id,action_type,payload,payload_hash,
+                requester_id,status,expires_at,created_at)
+              VALUES(gen_random_uuid(),'approval-tenant','photo-studio-growth-os','employee-1','message.send',
+                CAST(:payload AS jsonb),:digest,'requester','PENDING',now()+interval '5 minutes',now()) RETURNING id
+            """),{"payload":payload,"digest":digest})).scalar_one()
+            with pytest.raises(Exception):
+                await conn.execute(text("UPDATE wf_approvals SET status='APPROVED',approver_id=requester_id,decided_at=now() WHERE id=:id"),{"id":str(approval)})
+            with pytest.raises(Exception):
+                await conn.execute(text("UPDATE wf_approvals SET payload=CAST('{\\"message\\":\\"tampered\\"}' AS jsonb) WHERE id=:id"),{"id":str(approval)})
+            expired=(await conn.execute(text("""
+              INSERT INTO wf_approvals(id,tenant_id,product_id,employee_id,action_type,payload,payload_hash,
+                requester_id,approver_id,status,expires_at,decided_at,created_at)
+              VALUES(gen_random_uuid(),'approval-tenant','photo-studio-growth-os','employee-1','message.send',
+                CAST(:payload AS jsonb),:digest,'requester','approver','APPROVED',now()-interval '1 second',now(),now()) RETURNING id
+            """),{"payload":payload,"digest":digest})).scalar_one()
+            rejected=await conn.execute(text("""
+              UPDATE wf_approvals SET consumed_at=now(),execution_run_id=gen_random_uuid()
+              WHERE id=:id AND status='APPROVED' AND expires_at>now() AND consumed_at IS NULL
+            """),{"id":str(expired)})
+            assert rejected.rowcount==0
+            valid=(await conn.execute(text("""
+              INSERT INTO wf_approvals(id,tenant_id,product_id,employee_id,action_type,payload,payload_hash,
+                requester_id,approver_id,status,expires_at,decided_at,created_at)
+              VALUES(gen_random_uuid(),'approval-tenant','photo-studio-growth-os','employee-1','message.send',
+                CAST(:payload AS jsonb),:digest,'requester','approver','APPROVED',now()+interval '5 minutes',now(),now()) RETURNING id
+            """),{"payload":payload,"digest":digest})).scalar_one()
+            consumed=await conn.execute(text("""
+              UPDATE wf_approvals SET consumed_at=now(),execution_run_id=gen_random_uuid()
+              WHERE id=:id AND status='APPROVED' AND expires_at>now() AND consumed_at IS NULL
+            """),{"id":str(valid)})
+            assert consumed.rowcount==1
+            replay=await conn.execute(text("""
+              UPDATE wf_approvals SET consumed_at=now(),execution_run_id=gen_random_uuid()
+              WHERE id=:id AND status='APPROVED' AND expires_at>now() AND consumed_at IS NULL
+            """),{"id":str(valid)})
+            assert replay.rowcount==0
+    finally:
+        await engine.dispose()
