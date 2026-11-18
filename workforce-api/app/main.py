@@ -54,9 +54,18 @@ def authorize_product_access(principal: Principal, product_id: str | None) -> No
 
 
 def filter_product_scope(principal: Principal, rows: list[dict]) -> list[dict]:
+    # Fail closed for legacy or malformed records whose product is not in the
+    # authoritative portfolio registry, including company-wide reads.
+    known_rows = [
+        row for row in rows
+        if row.get("product_id") is None or row.get("product_id") in PRODUCTS
+    ]
     if "*" in principal.permissions:
-        return rows
-    return [row for row in rows if row.get("product_id") is None or row.get("product_id") in principal.product_ids]
+        return known_rows
+    return [
+        row for row in known_rows
+        if row.get("product_id") is None or row.get("product_id") in principal.product_ids
+    ]
 
 
 def enforce_product_scope(employee, product_id: str | None) -> None:
