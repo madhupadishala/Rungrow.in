@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "registry_version": "1.0.0",
+  "effective_date": "2026-11-18",
+  "currency": "INR",
+  "company_revenue_target": 50000000,
+  "investment_capital_target": 50000000,
+  "target_type": "management_planning_allocation_not_forecast",
+  "products": [
+    {
+      "product_id": "photo-studio-growth-os",
+      "name": "Photo Studio Growth OS / Growth Pro",
+      "market_segment": "Photo Studios",
+      "annual_revenue_allocation": 12500000,
+      "readiness_assertion": "founder_stated_built",
+      "commercial_validation": "pending",
+      "pricing_validation": "pending",
+      "owner_role_id": "pgm-photo-studio-growth-os"
+    },
+    {
+      "product_id": "photo-studio-billing",
+      "name": "Photo Studio Billing Software",
+      "market_segment": "Photo Studios",
+      "annual_revenue_allocation": 8500000,
+      "readiness_assertion": "founder_stated_built",
+      "commercial_validation": "pending",
+      "pricing_validation": "pending",
+      "owner_role_id": "pgm-photo-studio-billing"
+    },
+    {
+      "product_id": "clinics-counter",
+      "name": "Clinics / Counter Software",
+      "market_segment": "Clinics",
+      "annual_revenue_allocation": 9000000,
+      "readiness_assertion": "founder_stated_built",
+      "commercial_validation": "pending",
+      "pricing_validation": "pending",
+      "owner_role_id": "pgm-clinics-counter"
+    },
+    {
+      "product_id": "entrepreneur-instagram-tools",
+      "name": "Entrepreneur / Instagram Business Tools",
+      "market_segment": "Entrepreneurs",
+      "annual_revenue_allocation": 6500000,
+      "readiness_assertion": "founder_stated_built",
+      "commercial_validation": "pending",
+      "pricing_validation": "pending",
+      "owner_role_id": "pgm-entrepreneur-tools"
+    },
+    {
+      "product_id": "pharma-software-utilities",
+      "name": "Pharma Software & Utilities",
+      "market_segment": "Pharma",
+      "annual_revenue_allocation": 6000000,
+      "readiness_assertion": "founder_stated_built",
+      "commercial_validation": "pending",
+      "pricing_validation": "pending",
+      "owner_role_id": "pgm-pharma"
+    },
+    {
+      "product_id": "artists-business-tools",
+      "name": "Artists' Business Tools",
+      "market_segment": "Artists",
+      "annual_revenue_allocation": 3500000,
+      "readiness_assertion": "founder_stated_built",
+      "commercial_validation": "pending",
+      "pricing_validation": "pending",
+      "owner_role_id": "pgm-artists-tools"
+    },
+    {
+      "product_id": "growtoys",
+      "name": "Growtoys",
+      "market_segment": "Unclassified pending product discovery",
+      "annual_revenue_allocation": 4000000,
+      "readiness_assertion": "founder_stated_built",
+      "commercial_validation": "pending",
+      "pricing_validation": "pending",
+      "owner_role_id": "pgm-growtoys"
+    }
+  ],
+  "controls": {
+    "revenue_and_investment_must_be_reported_separately": true,
+    "investment_is_not_revenue": true,
+    "allocation_is_not_a_forecast": true,
+    "no_external_product_claim_without_validation": true,
+    "no_cross_tenant_customer_data_learning": true
+  }
+}
