@@ -468,7 +468,7 @@ class InMemoryWorkforceRepository:
           "employee_id":kw["employee_id"],"action_type":kw["action_type"],"payload":kw["payload"]},
           sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
         item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,"requester_id":self.principal.user_id,
-          "approver_id":None,"status":"pending","payload_hash":digest,"created_at":datetime.now(timezone.utc).isoformat(),**kw}
+          "approver_id":None,"status":"PENDING","payload_hash":digest,"created_at":datetime.now(timezone.utc).isoformat(),**kw}
         self.approvals.append(item); self._audit("approval.requested","approval",item["id"],kw["product_id"]); return item
 
     async def list_approvals(self, product_id=None):
@@ -482,14 +482,14 @@ class InMemoryWorkforceRepository:
         if not item: raise LookupError("Approval not found")
         if item["product_id"] != product_id: raise PermissionError("Approval product scope mismatch")
         if item["requester_id"]==self.principal.user_id: raise PermissionError("Self approval forbidden")
-        if item["status"]!="pending" or item["expires_at"]<=datetime.now(timezone.utc): raise PermissionError("Approval expired or already decided")
+        if item["status"]!="PENDING" or item["expires_at"]<=datetime.now(timezone.utc): raise PermissionError("Approval expired or already decided")
         item.update(status=decision.upper(),approver_id=self.principal.user_id,decision_reason=reason,decided_at=datetime.now(timezone.utc))
         self._audit("approval."+decision,"approval",approval_id,item["product_id"]); return item
 
     async def validate_approval(self, approval_id, **kw):
         item=next((x for x in self.approvals if x["id"]==approval_id and x["tenant_id"]==self.principal.tenant_id),None)
         if not item: raise LookupError("Approval not found")
-        if item["status"]!="approved" or item["expires_at"]<=datetime.now(timezone.utc) or item["approver_id"]==item["requester_id"] or item.get("consumed_at") is not None:
+        if item["status"]!="APPROVED" or item["expires_at"]<=datetime.now(timezone.utc) or item["approver_id"]==item["requester_id"] or item.get("consumed_at") is not None:
             raise PermissionError("Approval validation failed")
         for k in ("product_id","employee_id","action_type"):
             if item[k]!=kw[k]: raise PermissionError("Approval binding mismatch")
