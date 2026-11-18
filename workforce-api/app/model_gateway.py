@@ -82,9 +82,12 @@ class ModelGateway:
 
     async def generate_structured(self, *, messages: list[dict[str,str]], output_model: Type[BaseModel],
         tenant_id: str, product_id: str | None, employee_id: str, run_id: str,
-        outbound: bool=False, estimated_input_cost_inr_per_1k: float=0.0,
+        outbound: bool=False, is_sandbox: bool=False,
+        estimated_input_cost_inr_per_1k: float=0.0,
         estimated_output_cost_inr_per_1k: float=0.0):
         messages=self.with_ai_identity(messages,outbound)
+        if is_sandbox:
+            messages=[{"role":"system","content":"SANDBOX MODE: simulate and practise only. Never contact real customers, call production webhooks, trigger financial actions, or mutate production customer records."},*messages]
         started=time.perf_counter(); provider=self.primary_provider; model=self.primary_model
         try:
             response=await self._call(provider,model,messages)
@@ -110,7 +113,7 @@ class ModelGateway:
         cost=(prompt*estimated_input_cost_inr_per_1k+completion*estimated_output_cost_inr_per_1k)/1000
         telemetry={"prompt_tokens":prompt,"completion_tokens":completion,"estimated_cost_inr":cost,
             "latency_ms":latency,"provider":response.provider,"model":response.model,
-            "tenant_id":tenant_id,"product_id":product_id,"employee_id":employee_id,"run_id":run_id}
+            "tenant_id":tenant_id,"product_id":product_id,"employee_id":employee_id,"run_id":run_id,"is_sandbox":is_sandbox}
         if self.repository is not None:
             await self.repository.record_model_usage(**telemetry)
         return parsed,telemetry
