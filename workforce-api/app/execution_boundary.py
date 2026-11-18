@@ -71,6 +71,7 @@ class ExecutionBoundaryGuard:
             result=await tool.handler(**payload)
         except Exception as exc:
             await self.repository.append_audit("tool.execution.failed","tool",tool_name,run.get("product_id"),{"run_id":run["id"],"error":str(exc)})
+            await self.repository.commit_boundary()
             raise
         await self.repository.append_audit("tool.execution.completed","tool",tool_name,run.get("product_id"),{"run_id":run["id"],"approval_id":approval_id})
         return result
