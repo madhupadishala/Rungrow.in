@@ -11,8 +11,8 @@ async def test_postgres_role_is_restricted_and_rls_is_forced():
     engine=create_async_engine(URL)
     try:
         async with engine.connect() as conn:
-            role=(await conn.execute(text("SELECT rolsuper, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname=current_user"))).one()
-            assert role == (False,False,False)
+            role=(await conn.execute(text("SELECT current_user, rolsuper, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname=current_user"))).one()
+            assert role == ("rungrow_app_user",False,False,False)
             forced=await conn.execute(text("""
               SELECT c.relname,c.relforcerowsecurity
               FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -22,6 +22,13 @@ async def test_postgres_role_is_restricted_and_rls_is_forced():
             rows=list(forced)
             assert len(rows)==5
             assert all(row.relforcerowsecurity for row in rows)
+            owners=await conn.execute(text("""
+              SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+              WHERE n.nspname='public' AND c.relname IN
+                ('wf_tasks','wf_agent_runs','wf_memory','wf_approvals','wf_audit_events')
+                AND c.relowner=(SELECT oid FROM pg_roles WHERE rolname=current_user)
+            """))
+            assert owners.scalar_one()==0
     finally:
         await engine.dispose()
 
