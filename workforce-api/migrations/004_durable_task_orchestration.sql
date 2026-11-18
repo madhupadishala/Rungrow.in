@@ -9,7 +9,7 @@ ALTER TABLE wf_tasks ADD COLUMN IF NOT EXISTS result jsonb;
 ALTER TABLE wf_tasks ADD COLUMN IF NOT EXISTS last_error text;
 ALTER TABLE wf_tasks DROP CONSTRAINT IF EXISTS wf_tasks_status_check;
 ALTER TABLE wf_tasks ALTER COLUMN status SET DEFAULT 'QUEUED';
-UPDATE wf_tasks SET status=upper(status);
+UPDATE wf_tasks SET status=CASE upper(status) WHEN 'FAILED' THEN 'DEAD_LETTER' ELSE upper(status) END;
 ALTER TABLE wf_tasks ADD CONSTRAINT wf_tasks_status_check CHECK(status IN
  ('QUEUED','RUNNING','AWAITING_APPROVAL','COMPLETED','RETRY_SCHEDULED','DEAD_LETTER','CANCELLED'));
 DO $
