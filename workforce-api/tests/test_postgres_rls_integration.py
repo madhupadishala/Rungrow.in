@@ -253,6 +253,9 @@ async def test_approval_single_use_and_payload_immutability_are_database_enforce
               WHERE id=:id AND status='APPROVED' AND expires_at>now() AND consumed_at IS NULL
             """),{"id":str(valid)})
             assert replay.rowcount==0
+            with pytest.raises(Exception):
+                async with conn.begin_nested():
+                    await conn.execute(text("UPDATE wf_approvals SET consumed_at=NULL,execution_run_id=NULL WHERE id=:id"),{"id":str(valid)})
     finally:
         await engine.dispose()
 
