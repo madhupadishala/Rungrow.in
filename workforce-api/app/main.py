@@ -235,11 +235,9 @@ async def run_employee(body: AgentRunRequest,p: Principal=Depends(require_permis
         record=await repo.create_agent_run(product_id=product_id,employee_id=employee.id,task=body.task,
             status=plan.status,summary=plan.summary,steps=list(plan.steps),correlation_id=str(uuid4()),is_sandbox=body.is_sandbox)
         if plan.approval_required:
-            approval=await repo.create_approval(product_id=product_id,employee_id=employee.id,
-                action_type="agent.proposed_action",payload={"agent_run_id":str(record["id"]),
-                "employee_id":employee.id,"product_id":product_id,"task":body.task,
-                "proposed_actions":list(plan.proposed_actions)},
-                expires_at=datetime.now(timezone.utc)+timedelta(minutes=15))
+            approval=await repo.pause_run_for_approval(str(record["id"]),"agent.proposed_action",
+                {"agent_run_id":str(record["id"]),"employee_id":employee.id,"product_id":product_id,
+                 "task":body.task,"proposed_actions":list(plan.proposed_actions)})
             record["approval_id"]=approval["id"]
         return record
     except Exception as exc: translate_repo_error(exc)
