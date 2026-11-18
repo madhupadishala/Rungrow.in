@@ -1,4 +1,4 @@
-import { PlaywrightCrawler, type PlaywrightCrawlingContext } from "crawlee";
+import { PlaywrightCrawler } from "crawlee";
 
 export type CrawlPolicy = {
   allowedHosts: string[];
@@ -25,21 +25,6 @@ function assertAllowed(url: string, hosts: string[]): void {
   if (!hosts.map((host) => host.toLowerCase().replace(/^www\./, "")).includes(normaliseHost(url))) {
     throw new Error("Source host is not on the tenant-approved allowlist");
   }
-}
-
-function extractEvidence(context: PlaywrightCrawlingContext): BusinessEvidence {
-  const { page, request } = context;
-  const title = page.locator("title").first();
-  const description = page.locator('meta[name="description"]').first();
-  return {
-    url: request.url,
-    title: undefined,
-    description: undefined,
-    publicBusinessEmails: [],
-    publicBusinessPhones: [],
-    observedAt: new Date().toISOString(),
-    contactPermission: false,
-  };
 }
 
 export async function collectPublicBusinessEvidence(
