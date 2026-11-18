@@ -1,8 +1,8 @@
 import pytest
 import pytest_asyncio
-from fastapi import Depends
+from fastapi import FastAPI, Depends
 from httpx import ASGITransport, AsyncClient
-from app.main import app, get_workforce_repo, PRODUCTS
+from app.main import app as route_source_app, get_workforce_repo, PRODUCTS
 from app.policy import Principal
 from app.repositories import InMemoryWorkforceRepository
 from app.security import current_principal
@@ -12,18 +12,25 @@ def principal():
     return Principal("test-user","tenant-test","founder",frozenset({"*"}))
 
 @pytest.fixture
-def install_test_repository(principal):
+def test_app(principal):
     repository=InMemoryWorkforceRepository(principal,set(PRODUCTS))
+    instance=FastAPI()
+    instance.include_router(route_source_app.router)
+    async def override_principal():
+        return principal
     async def override_repo(p=Depends(current_principal)):
         return repository
-    app.dependency_overrides[get_workforce_repo]=override_repo
-    app.dependency_overrides[current_principal]=lambda: principal
-    app.state.test_repository=repository
-    yield repository
-    app.dependency_overrides.clear()
-    if hasattr(app.state,"test_repository"): delattr(app.state,"test_repository")
+    instance.dependency_overrides[current_principal]=override_principal
+    instance.dependency_overrides[get_workforce_repo]=override_repo
+    instance.state.test_repository=repository
+    yield instance
+    instance.dependency_overrides.clear()
+
+@pytest.fixture
+def install_test_repository(test_app):
+    return test_app.state.test_repository
 
 @pytest_asyncio.fixture
-async def client(install_test_repository):
-    async with AsyncClient(transport=ASGITransport(app=app),base_url="http://test") as c:
+async def client(test_app):
+    async with AsyncClient(transport=ASGITransport(app=test_app),base_url="http://test") as c:
         yield c
