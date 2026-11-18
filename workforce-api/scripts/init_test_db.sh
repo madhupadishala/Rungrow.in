@@ -1,19 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HOST="${PGHOST:-localhost}"
-PORT="${PGPORT:-55432}"
 DB="${PGDATABASE:-rungrow_workforce_test}"
 OWNER="${PGUSER:-rungrow_migrator}"
-OWNER_PASSWORD="${PGPASSWORD:-rungrow_migrator_local_only}"
 APP_USER="rungrow_app_user"
 APP_PASSWORD="${RUNGROW_APP_PASSWORD:-rungrow_app_local_only}"
-export PGPASSWORD="$OWNER_PASSWORD"
-PSQL=(psql -v ON_ERROR_STOP=1 -h "$HOST" -p "$PORT" -U "$OWNER" -d "$DB")
-"${PSQL[@]}" -c "CREATE EXTENSION IF NOT EXISTS vector;"
+COMPOSE=(docker compose -f "$ROOT/docker-compose.test.yml")
+PSQL=("${COMPOSE[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "$OWNER" -d "$DB")
 for migration in "$ROOT"/migrations/*.sql; do
   echo "Applying $(basename "$migration")"
-  "${PSQL[@]}" -f "$migration"
+  "${PSQL[@]}" -f - < "$migration"
 done
 "${PSQL[@]}" <<SQL
 DO \$\$
@@ -35,6 +31,5 @@ ALTER DEFAULT PRIVILEGES FOR ROLE $OWNER IN SCHEMA public
 ALTER DEFAULT PRIVILEGES FOR ROLE $OWNER IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO $APP_USER;
 SQL
-unset PGPASSWORD
 echo "Migration bootstrap complete. App role: $APP_USER (NOSUPERUSER NOCREATEDB NOCREATEROLE)."
-echo "RUNGROW_TEST_DATABASE_URL=postgresql+asyncpg://$APP_USER:$APP_PASSWORD@$HOST:$PORT/$DB"
+echo "RUNGROW_TEST_DATABASE_URL=postgresql+asyncpg://$APP_USER:$APP_PASSWORD@localhost:55432/$DB"
