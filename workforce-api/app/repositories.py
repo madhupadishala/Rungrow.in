@@ -398,14 +398,14 @@ class PostgresWorkforceRepository:
     async def pause_task_for_approval(self, task_id: str, action_type: str, payload: dict):
         task=await self._one("UPDATE wf_tasks SET status='AWAITING_APPROVAL',locked_by=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=:id AND tenant_id=:tenant RETURNING *",
             {"id":task_id,"tenant":self.principal.tenant_id})
-        if not task: raise LookupError("Task not found")
+        if not task: raise LookupError("Task not found or not RUNNING")
         return await self.create_approval(product_id=task["product_id"],employee_id=task["assignee_role_id"],
             action_type=action_type,payload=payload,expires_at=datetime.now(timezone.utc)+__import__("datetime").timedelta(minutes=15))
 
     async def pause_run_for_approval(self, run_id: str, action_type: str, payload: dict):
         run=await self._one("UPDATE wf_agent_runs SET status='awaiting_approval',execution_state='AWAITING_APPROVAL',updated_at=now() WHERE id=:id AND tenant_id=:tenant RETURNING *",
             {"id":run_id,"tenant":self.principal.tenant_id})
-        if not run: raise LookupError("Agent run not found")
+        if not run: raise LookupError("Agent run not found or not resumable")
         return await self.create_approval(product_id=run["product_id"],employee_id=run["employee_id"],
             action_type=action_type,payload=payload,expires_at=datetime.now(timezone.utc)+__import__("datetime").timedelta(minutes=15))
 
@@ -638,14 +638,14 @@ class InMemoryWorkforceRepository:
 
     async def pause_task_for_approval(self, task_id, action_type, payload):
         task=next((x for x in self.tasks if x["id"]==task_id and x["tenant_id"]==self.principal.tenant_id),None)
-        if not task: raise LookupError("Task not found")
+        if not task or task.get("status")!="RUNNING": raise LookupError("Task not found or not RUNNING")
         task.update(status="AWAITING_APPROVAL",locked_by=None,lease_expires_at=None)
         return await self.create_approval(product_id=task.get("product_id"),employee_id=task["assignee_role_id"],
             action_type=action_type,payload=payload,expires_at=datetime.now(timezone.utc)+__import__("datetime").timedelta(minutes=15))
 
     async def pause_run_for_approval(self, run_id, action_type, payload):
         run=await self.get_agent_run(run_id)
-        if not run: raise LookupError("Agent run not found")
+        if not run or run.get("execution_state") not in {"QUEUED","RUNNING"}: raise LookupError("Agent run not found or not resumable")
         run.update(status="awaiting_approval",execution_state="AWAITING_APPROVAL")
         return await self.create_approval(product_id=run.get("product_id"),employee_id=run["employee_id"],
             action_type=action_type,payload=payload,expires_at=datetime.now(timezone.utc)+__import__("datetime").timedelta(minutes=15))
