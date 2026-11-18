@@ -38,6 +38,8 @@ PRODUCTS = {
     if isinstance(item, dict) and isinstance(item.get("product_id"), str)
 }
 PRODUCT_ROLE_IDS = {employee.product_id: employee.id for employee in EMPLOYEES if employee.product_id}
+if set(PRODUCT_ROLE_IDS) != set(PRODUCTS):
+    raise RuntimeError("Product portfolio registry and Product Growth Manager registry do not match")
 
 
 def validate_product_id(product_id: str | None) -> None:
