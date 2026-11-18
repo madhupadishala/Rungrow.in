@@ -39,3 +39,22 @@ Crawling must use allowlisted public sources, rate limits, robots/terms checks, 
 
 ## Identity provider integration
 In production set APP_ENV=production, configure the OIDC issuer, audience and RS256 verification public key, and map trusted identity-provider groups/roles to server-managed permissions and a signed `products` claim containing the principal's permitted product IDs. The API derives tenant and product scope only from verified JWT claims; request schemas reject caller-supplied tenant or permission fields. Never let a browser choose its own tenant ID or permission claims. The local HS256 token helper is for development only; production decoding rejects HS256 tokens.
+
+
+## Priority 3: model gateway and durable execution
+
+The provider-independent `ModelGateway` supports `mock`, OpenAI-compatible endpoints (OpenAI, OpenRouter, llama.cpp, Ollama-compatible `/v1` endpoints), and Anthropic Messages over async HTTP. Select with `WORKFORCE_MODEL_PROVIDER=mock|openai-compatible|anthropic`, `WORKFORCE_PRIMARY_MODEL`, optional `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and optional `WORKFORCE_FALLBACK_PROVIDER` / `WORKFORCE_FALLBACK_MODEL`. Tests use `MockModelProvider` and never require provider credentials. Structured output is Pydantic-validated with one schema-repair retry. Model usage and estimated INR cost are stored in the tenant/product-scoped `wf_model_usage` ledger and audit stream.
+
+Apply migration 004 after migrations 001–003. It adds lease metadata, uppercase task/run execution states, sandbox flags, single-use approval consumption, immutable approval payloads, and the model usage ledger. Claims use `FOR UPDATE SKIP LOCKED`; expired leases are reclaimable and max-attempt exhaustion is terminal `DEAD_LETTER`.
+
+Run a standalone worker from `workforce-api/`:
+
+```bash
+DATABASE_URL=postgresql+asyncpg://rungrow_app_user:***@localhost:55432/rungrow_workforce_test \
+WORKFORCE_WORKER_TENANT_ID=your-tenant-id \
+WORKFORCE_WORKER_PRODUCT_IDS=photo-studio-growth-os \
+WORKFORCE_MODEL_PROVIDER=mock \
+python -m app.worker
+``
+
+The worker only creates plans. External communication, financial, investor, access-control, export and deployment actions must be registered as tools and pass `ExecutionBoundaryGuard`. Sensitive action types always require human approval even if a tool is incorrectly registered with `requires_human_approval=False`. Approval consumption and the pre-execution audit commit before the handler is invoked. A consumed approval cannot be replayed. Sandbox runs cannot invoke tools with `allowed_in_sandbox=False`.
