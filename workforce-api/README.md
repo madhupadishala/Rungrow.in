@@ -23,7 +23,21 @@ RunGrow owns the workforce hierarchy, orchestration, tenant isolation, permissio
 The API exposes /health and /docs. Protected endpoints require a JWT issued by the trusted identity provider. No production bootstrap account or default credentials are included.
 
 ## Runtime boundary
-The API currently uses an in-memory adapter for local policy prototyping. It does not survive restarts and is not suitable for multi-worker or production customer data. The SQL migrations define tenant and product-scoped RLS plus approval binding constraints. The API currently remains on the local in-memory adapter; wire PostgreSQL repositories, transaction-local `app.tenant_id` / `app.product_ids` / `app.is_company_admin`, transactional outbox and durable workers before production data is enabled. Approval decisions are recorded but deliberately do not execute actions. Product-bound approvals include tenant, product, employee, action type, canonical payload hash and expiry; execution must call the approval validation boundary again.
+Production startup requires `DATABASE_URL` and fails closed without it. Production operational routes use `PostgresWorkforceRepository`; no process-global in-memory state exists. Every repository transaction installs verified tenant, product, principal and company-admin context using transaction-local settings. `InMemoryWorkforceRepository` is an explicit per-test dependency override only.
+
+The root RunGrow marketing site and existing product repositories remain separate. Workforce stores company-level tasks, agent runs, approvals, memory metadata, audit and model usage; it does not duplicate product CRM, billing, booking or conversion records. Approval decisions never execute the approved action.
+
+## Local PostgreSQL and test harness
+From the repository root:
+
+```bash
+docker compose -f workforce-api/docker-compose.test.yml up -d
+bash ./workforce-api/scripts/init_test_db.sh
+RUNGROW_TEST_DATABASE_URL=postgresql+asyncpg://rungrow_app_user:rungrow_app_local_only@localhost:55432/rungrow_workforce_test pytest -v workforce-api/tests
+```
+
+The bootstrap applies migrations 001–004 as the database owner and creates `rungrow_app_user` with `NOSUPERUSER NOCREATEDB NOCREATEROLE`, no table ownership and no DELETE grants. PostgreSQL integration tests skip only when `RUNGROW_TEST_DATABASE_URL` is unset; a configured but unreachable database fails the test.
+
 
 ## Controlled autonomy
 Agents may research, classify, draft, summarise, prepare work and update explicitly permitted records. Outbound contact, proposal dispatch, price/discount changes, contract commitments, payments, exports, access changes, production deployments, campaign activation and destructive actions require human approval. The worker must re-check approval, tenant, consent and policy at execution time.
@@ -31,7 +45,7 @@ Agents may research, classify, draft, summarise, prepare work and update explici
 Voice and text share one authenticated command API. Browser speech recognition is an input adapter; production realtime voice and telephony use LiveKit Agents behind the API. Provider secrets never belong in browser code.
 
 ## Memory
-Memory is scoped by tenant, department and role, with source references and retention metadata. SQL stores encrypted memory bytes, not plaintext. Avoid sensitive personal information by default.
+Memory is scoped by tenant, department and role, with source references and retention metadata. Memory records are tenant/product/role scoped with source references and retention metadata. Apply the organisation's encryption-at-rest and key-management controls to the PostgreSQL volume and backups. Avoid sensitive personal information by default.
 
 ## Lead sourcing and outreach
 Crawling must use allowlisted public sources, rate limits, robots/terms checks, provenance and suppression checks. A public phone number is not consent to call. Outreach requires channel-specific permission and applicable Indian DND/UCC, messaging and privacy checks. Use official WhatsApp Business APIs or an authorised provider, never consumer WhatsApp Web automation.
