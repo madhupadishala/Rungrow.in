@@ -416,7 +416,7 @@ class PostgresWorkforceRepository:
         item=await self._one("""
           UPDATE wf_approvals SET consumed_at=now(),execution_run_id=:run
           WHERE id=:id AND tenant_id=:tenant AND product_id IS NOT DISTINCT FROM :product
-            AND employee_id=:employee AND action_type=:action AND status='approved'
+            AND employee_id=:employee AND action_type=:action AND status='APPROVED'
             AND approver_id IS NOT NULL AND approver_id<>requester_id
             AND expires_at>now() AND consumed_at IS NULL AND payload_hash=:hash
           RETURNING *
