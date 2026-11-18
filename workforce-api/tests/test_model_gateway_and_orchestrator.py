@@ -175,3 +175,27 @@ async def test_sandbox_blocks_financial_webhook_database_and_deployment_actions_
         await ExecutionBoundaryGuard(repo,registry).execute(tool_name=action_type,principal=repo.principal,
             employee=employee,run=run,payload={"id":"production-record"})
     assert calls==[]
+
+@pytest.mark.asyncio
+async def test_execution_boundary_checks_principal_employee_product_and_department_scopes():
+    repo=InMemoryWorkforceRepository(principal(),PRODUCTS)
+    run=await repo.create_agent_run(product_id="photo-studio-growth-os",employee_id="employee-1",
+        task="read",status="planned",summary="",steps=[],correlation_id="scope-check")
+    calls=[]
+    async def handler(**payload):
+        calls.append(payload)
+        return {"ok":True}
+    registry=ToolRegistry()
+    registry.register(ToolDefinition("analytics.read",frozenset({"analytics.read"}),False,True,
+        "analytics.read",handler,frozenset({"Finance"})))
+    employee=SimpleNamespace(id="employee-1",permissions=frozenset({"analytics.read"}),
+        department="Growth",product_id="photo-studio-growth-os")
+    with pytest.raises(ApprovalBoundaryError):
+        await ExecutionBoundaryGuard(repo,registry).execute(tool_name="analytics.read",
+            principal=repo.principal,employee=employee,run=run,payload={})
+    employee.department="Finance"
+    denied=Principal("no-product","tenant-a","analyst",frozenset({"analytics.read"}),product_ids=frozenset())
+    with pytest.raises(ApprovalBoundaryError):
+        await ExecutionBoundaryGuard(repo,registry).execute(tool_name="analytics.read",
+            principal=denied,employee=employee,run=run,payload={})
+    assert calls==[]
