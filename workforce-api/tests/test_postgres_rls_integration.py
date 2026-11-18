@@ -59,9 +59,11 @@ async def test_audit_is_append_only_for_restricted_role():
               VALUES(gen_random_uuid(),'tenant-a','tester','fixture','test','audit-fixture','{}'::jsonb,now())
             """))
             with pytest.raises(Exception):
-                await conn.execute(text("UPDATE wf_audit_events SET action='tampered' WHERE resource_id='audit-fixture'"))
+                async with conn.begin_nested():
+                    await conn.execute(text("UPDATE wf_audit_events SET action='tampered' WHERE resource_id='audit-fixture'"))
             with pytest.raises(Exception):
-                await conn.execute(text("DELETE FROM wf_audit_events WHERE resource_id='audit-fixture'"))
+                async with conn.begin_nested():
+                    await conn.execute(text("DELETE FROM wf_audit_events WHERE resource_id='audit-fixture'"))
     finally:
         await engine.dispose()
 
@@ -73,15 +75,17 @@ async def test_unknown_product_foreign_key_and_unentitled_product_rls():
             await conn.execute(text("SELECT set_config('app.current_tenant_id','tenant-a',true)"))
             await conn.execute(text("SELECT set_config('app.product_ids','photo-studio-billing',true)"))
             with pytest.raises(Exception):
-                await conn.execute(text("""
-                  INSERT INTO wf_tasks(id,tenant_id,product_id,department,assignee_role_id,title,description,priority,status,created_by,idempotency_key,created_at)
-                  VALUES(gen_random_uuid(),'tenant-a','not-registered','Ops','market-intel','invalid product','','normal','queued','tenant-a','bad-product-fixture',now())
-                """))
+                async with conn.begin_nested():
+                    await conn.execute(text("""
+                      INSERT INTO wf_tasks(id,tenant_id,product_id,department,assignee_role_id,title,description,priority,status,created_by,idempotency_key,created_at)
+                      VALUES(gen_random_uuid(),'tenant-a','not-registered','Ops','market-intel','invalid product','','normal','QUEUED','tenant-a','bad-product-fixture',now())
+                    """))
             with pytest.raises(Exception):
-                await conn.execute(text("""
-                  INSERT INTO wf_tasks(id,tenant_id,product_id,department,assignee_role_id,title,description,priority,status,created_by,idempotency_key,created_at)
-                  VALUES(gen_random_uuid(),'tenant-a','photo-studio-growth-os','Ops','market-intel','unentitled product','','normal','queued','tenant-a','unentitled-fixture',now())
-                """))
+                async with conn.begin_nested():
+                    await conn.execute(text("""
+                      INSERT INTO wf_tasks(id,tenant_id,product_id,department,assignee_role_id,title,description,priority,status,created_by,idempotency_key,created_at)
+                      VALUES(gen_random_uuid(),'tenant-a','photo-studio-growth-os','Ops','market-intel','unentitled product','','normal','QUEUED','tenant-a','unentitled-fixture',now())
+                    """))
         async with engine.begin() as conn:
             await conn.execute(text("SELECT set_config('app.current_tenant_id','tenant-a',true)"))
             await conn.execute(text("SELECT set_config('app.product_ids','photo-studio-billing',true)"))
