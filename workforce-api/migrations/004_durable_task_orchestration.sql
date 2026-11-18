@@ -12,12 +12,12 @@ ALTER TABLE wf_tasks ALTER COLUMN status SET DEFAULT 'QUEUED';
 UPDATE wf_tasks SET status=CASE upper(status) WHEN 'FAILED' THEN 'DEAD_LETTER' ELSE upper(status) END;
 ALTER TABLE wf_tasks ADD CONSTRAINT wf_tasks_status_check CHECK(status IN
  ('QUEUED','RUNNING','AWAITING_APPROVAL','COMPLETED','RETRY_SCHEDULED','DEAD_LETTER','CANCELLED'));
-DO $
+DO $block$
 BEGIN
  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='wf_tasks_attempt_bounds') THEN
   ALTER TABLE wf_tasks ADD CONSTRAINT wf_tasks_attempt_bounds CHECK(attempt_count >= 0 AND max_attempts > 0) NOT VALID;
  END IF;
-END $;
+END $block$;
 ALTER TABLE wf_tasks VALIDATE CONSTRAINT wf_tasks_attempt_bounds;
 CREATE INDEX IF NOT EXISTS wf_tasks_claim_idx ON wf_tasks(status,next_retry_at,lease_expires_at,created_at);
 
@@ -34,16 +34,16 @@ ALTER TABLE wf_approvals DROP CONSTRAINT IF EXISTS wf_approvals_check1;
 UPDATE wf_approvals SET status=upper(status);
 ALTER TABLE wf_approvals ALTER COLUMN status SET DEFAULT 'PENDING';
 ALTER TABLE wf_approvals ADD CONSTRAINT wf_approvals_status_check CHECK(status IN ('PENDING','APPROVED','REJECTED'));
-DO $
+DO $block$
 BEGIN
  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='wf_approval_consumption_binding') THEN
   ALTER TABLE wf_approvals ADD CONSTRAINT wf_approval_consumption_binding CHECK
    ((consumed_at IS NULL AND execution_run_id IS NULL) OR (consumed_at IS NOT NULL AND execution_run_id IS NOT NULL)) NOT VALID;
  END IF;
-END $;
+END $block$;
 ALTER TABLE wf_approvals VALIDATE CONSTRAINT wf_approval_consumption_binding;
 
-DO $
+DO $block$
 BEGIN
  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='wf_approvals_decision_actor_check') THEN
   ALTER TABLE wf_approvals ADD CONSTRAINT wf_approvals_decision_actor_check CHECK(
@@ -51,7 +51,7 @@ BEGIN
    (status IN ('APPROVED','REJECTED') AND approver_id IS NOT NULL AND decided_at IS NOT NULL)
   ) NOT VALID;
  END IF;
-END $;
+END $block$;
 ALTER TABLE wf_approvals VALIDATE CONSTRAINT wf_approvals_decision_actor_check;
 
 
