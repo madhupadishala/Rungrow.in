@@ -17,6 +17,10 @@ Product repositories remain independently owned and deployable unless a delibera
 | `madhupadishala/conversion-agent-platform` | TypeScript conversion domain state machine, provider ports, lead qualification, slot holds, payment, reminders, audit and governed voice-agent flow; current runtime store is in-memory and bootstrap config is single-test-tenant oriented | Shared conversion orchestration patterns for inbound sales across product verticals | Reuse the domain workflow and provider-port patterns selectively. Replace in-memory persistence, generalise tenant/product config and add RunGrow approval/consent/RBAC contracts before production use. |
 | `madhupadishala/creativ-i-studios` | Next.js 15, Tailwind 4, Prisma 6 and synthetic Studio X preview; README explicitly says the preview contains no real lead storage, database, admin or live integrations and is not the full agency source ZIP | Visual/design reference and potential Tailwind 4 component patterns only | Not a production backend or authoritative source for Studio Growth OS. Reuse visual components only after inspecting the exact files and confirming ownership. |
 
+## Tailwind implementation note
+
+The existing repositories already contain different Tailwind generations: `studio-growth-os` declares Tailwind 3.4, while `creativ-i-studios` declares Tailwind 4.1 and `@tailwindcss/postcss`. The current Workforce UI is standalone HTML/CSS/JavaScript and does not need an unused Tailwind dependency. A repo-local coding skill at `.agents/skills/tailwind-ui-engineering/SKILL.md` instructs coding agents to detect and preserve each repository's installed major version.
+
 ## Product mapping
 
 ### Photo Studio Growth OS / Growth Pro
