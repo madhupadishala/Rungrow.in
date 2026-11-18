@@ -23,6 +23,8 @@ PRODUCT_ROLE_IDS={
     "growtoys":"pgm-growtoys",
 }
 def enforce_product_scope(employee,product_id:str|None):
+    if product_id is not None and product_id not in PRODUCT_ROLE_IDS:
+        raise HTTPException(404,"Unknown product scope")
     if employee.product_id and product_id != employee.product_id:
         raise HTTPException(403,"Product-scoped employee requires its exact assigned product_id")
 def audit(p:Principal,action:str,kind:str,rid:str,outcome:str):
