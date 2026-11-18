@@ -334,6 +334,7 @@ async def resume_orchestrator_task(task_id: str, approval_id: str,
         resumed=await repo.resume_task(task_id,approval_id)
         return {"task_id":task_id,"status":resumed["status"],"execution":"not_started"}
     except HTTPException: raise
+    except KeyError as exc: raise HTTPException(404,str(exc)) from exc
     except Exception as exc: translate_repo_error(exc)
 
 
