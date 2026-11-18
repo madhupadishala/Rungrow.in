@@ -56,6 +56,7 @@ class ExecutionBoundaryGuard:
         if tool.requires_human_approval:
             if not approval_id:
                 await self.repository.pause_run_for_approval(run["id"],tool.action_type,payload)
+                await self.repository.commit_boundary()
                 raise ApprovalBoundaryError("Run paused: human approval required",409)
             try:
                 consumed=await self.repository.consume_approval(approval_id,product_id=run.get("product_id"),
