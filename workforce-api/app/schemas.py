@@ -19,6 +19,7 @@ class TaskCreate(StrictRequest):
     assignee_role_id: str = Field(min_length=2, max_length=100)
     product_id: str | None = Field(default=None, min_length=2, max_length=100)
     priority: Literal["low", "normal", "high", "urgent"] = "normal"
+    is_sandbox: bool = False
 
 
 class ApprovalDecision(StrictRequest):
@@ -47,3 +48,15 @@ class AgentRunRequest(StrictRequest):
     product_id: str | None = Field(default=None, min_length=2, max_length=100)
     task: str = Field(min_length=3, max_length=5000)
     source_refs: list[str] = Field(default_factory=list, max_length=30)
+    is_sandbox: bool = False
+
+
+class OrchestratorDispatchRequest(StrictRequest):
+    product_id: str | None = None
+    worker_id: str | None = Field(default=None, min_length=2, max_length=120)
+
+class ToolExecutionRequest(StrictRequest):
+    run_id: str
+    tool_name: str
+    payload: dict = Field(default_factory=dict)
+    approval_id: str | None = None
