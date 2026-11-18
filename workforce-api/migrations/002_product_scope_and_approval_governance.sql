@@ -2,6 +2,7 @@
 -- The application must set app.tenant_id, app.product_ids (comma-separated trusted IDs), and app.is_company_admin transaction-locally
 -- from the verified Principal. Never populate these settings from request data.
 
+ALTER TABLE workforce_employees ADD COLUMN IF NOT EXISTS product_id text;
 ALTER TABLE workforce_tasks ADD COLUMN IF NOT EXISTS product_id text;
 ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS product_id text;
 ALTER TABLE workforce_memory ADD COLUMN IF NOT EXISTS product_id text;
@@ -38,6 +39,8 @@ ALTER TABLE approvals
     OR (status IN ('approved', 'rejected') AND approver_id IS NOT NULL)
   ) NOT VALID;
 
+CREATE INDEX IF NOT EXISTS employees_tenant_product_role
+  ON workforce_employees(tenant_id, product_id, role_id);
 CREATE INDEX IF NOT EXISTS tasks_tenant_product_status
   ON workforce_tasks(tenant_id, product_id, status);
 CREATE INDEX IF NOT EXISTS runs_tenant_product_status
@@ -59,7 +62,7 @@ DECLARE
   table_name text;
 BEGIN
   FOREACH table_name IN ARRAY ARRAY[
-    'workforce_tasks', 'agent_runs', 'workforce_memory',
+    'workforce_employees', 'workforce_tasks', 'agent_runs', 'workforce_memory',
     'approvals', 'audit_events', 'outbox_events'
   ] LOOP
     EXECUTE format('DROP POLICY IF EXISTS product_scope_guard ON %I', table_name);
