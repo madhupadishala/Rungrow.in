@@ -17,8 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from .config import settings
 from .policy import Principal
 
-engine = create_async_engine(settings.database_url, pool_pre_ping=True, pool_size=5, max_overflow=10)
-SessionFactory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+def session_factory():
+    if not settings.database_url:
+        raise RuntimeError("DATABASE_URL is required for Workforce API runtime")
+    url = settings.database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    engine = create_async_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=10)
+    return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
 class TenantRepository:
@@ -212,6 +216,7 @@ class TenantRepository:
 
 
 async def repository_for(principal: Principal):
+    SessionFactory = session_factory()
     async with SessionFactory() as session:
         async with TenantRepository(session, principal) as repository:
             yield repository
