@@ -98,6 +98,9 @@ async def test_fastapi_records_survive_new_app_instance():
     from app.policy import Principal
     from app.repositories import PostgresWorkforceRepository, session_factory
     from app.security import current_principal
+    from app.config import settings
+    settings.database_url=URL
+    session_factory.cache_clear()
 
     principal=Principal("durability-user","durability-tenant","founder",frozenset({"*"}),
                         product_ids=frozenset({"photo-studio-growth-os"}))
@@ -108,12 +111,13 @@ async def test_fastapi_records_survive_new_app_instance():
         async with factory() as session:
             async with PostgresWorkforceRepository(session,p) as repo:
                 yield repo
-    workforce_app.dependency_overrides[current_principal]=principal_override
-    workforce_app.dependency_overrides[get_workforce_repo]=repository_override
+    for instance in (first,second):
+        instance.dependency_overrides[current_principal]=principal_override
+        instance.dependency_overrides[get_workforce_repo]=repository_override
     first=FastAPI()
-    first.mount("/",workforce_app)
+    first.include_router(workforce_app.router)
     second=FastAPI()
-    second.mount("/",workforce_app)
+    second.include_router(workforce_app.router)
     try:
         async with AsyncClient(transport=ASGITransport(app=first),base_url="http://first") as client1:
             task=await client1.post("/v1/workforce/tasks",headers={"Idempotency-Key":"durability-task-1"},
@@ -132,7 +136,9 @@ async def test_fastapi_records_survive_new_app_instance():
             approvals=(await client2.get("/v1/workforce/approvals")).json()
             assert any(x["id"]==approval.json()["approval_id"] for x in approvals)
     finally:
-        workforce_app.dependency_overrides.clear()
+        first.dependency_overrides.clear()
+        second.dependency_overrides.clear()
+        session_factory.cache_clear()
 
 @pytest.mark.asyncio
 async def test_task_lease_recovery_and_dead_letter_state_machine():
@@ -208,9 +214,11 @@ async def test_approval_single_use_and_payload_immutability_are_database_enforce
                 CAST(:payload AS jsonb),:digest,'requester','PENDING',now()+interval '5 minutes',now()) RETURNING id
             """),{"payload":payload,"digest":digest})).scalar_one()
             with pytest.raises(Exception):
-                await conn.execute(text("UPDATE wf_approvals SET status='APPROVED',approver_id=requester_id,decided_at=now() WHERE id=:id"),{"id":str(approval)})
+                async with conn.begin_nested():
+                    await conn.execute(text("UPDATE wf_approvals SET status='APPROVED',approver_id=requester_id,decided_at=now() WHERE id=:id"),{"id":str(approval)})
             with pytest.raises(Exception):
-                await conn.execute(text("UPDATE wf_approvals SET payload=CAST('{\\"message\\":\\"tampered\\"}' AS jsonb) WHERE id=:id"),{"id":str(approval)})
+                async with conn.begin_nested():
+                    await conn.execute(text("UPDATE wf_approvals SET payload=CAST('{\\"message\\":\\"tampered\\"}' AS jsonb) WHERE id=:id"),{"id":str(approval)})
             expired=(await conn.execute(text("""
               INSERT INTO wf_approvals(id,tenant_id,product_id,employee_id,action_type,payload,payload_hash,
                 requester_id,approver_id,status,expires_at,decided_at,created_at)
