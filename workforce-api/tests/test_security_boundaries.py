@@ -39,14 +39,14 @@ async def test_tenant_a_cannot_read_tenant_b_tasks_memory_runs_or_approvals():
 
 
 @pytest.mark.asyncio
-async def test_client_cannot_choose_tenant_when_creating_task():
+async def test_client_cannot_supply_tenant_id_when_creating_task():
     async with await client_for(principal()) as client:
         response = await client.post("/v1/workforce/tasks", json={
             "title":"Tenant-scoped task", "assignee_role_id":"market-intel",
             "tenant_id":"tenant-b", "product_id":"photo-studio-growth-os"
         })
-    assert response.status_code == 200
-    assert response.json()["tenant_id"] == "tenant-a"
+    assert response.status_code == 422
+    assert STATE["tasks"] == []
 
 
 @pytest.mark.asyncio
@@ -172,7 +172,7 @@ async def test_product_scoped_principal_cannot_list_other_products_without_filte
     assert {row["id"] for row in response.json()} == {"billing-task", "shared-task"}
 
 @pytest.mark.asyncio
-async def test_tenant_spoofing_cannot_write_memory_or_agent_run_into_another_tenant():
+async def test_client_cannot_supply_tenant_id_for_memory_or_agent_runs():
     async with await client_for(principal("tenant-a-user", "tenant-a")) as client:
         memory_response = await client.post("/v1/workforce/memory", json={
             "role_id":"market-intel", "content":"Tenant A note", "source_ref":"fixture",
@@ -182,11 +182,11 @@ async def test_tenant_spoofing_cannot_write_memory_or_agent_run_into_another_ten
             "role_id":"outbound-sdr", "task":"Send this campaign to approved contacts",
             "tenant_id":"tenant-b"
         })
-    assert memory_response.status_code == 200
-    assert run_response.status_code == 200
-    assert STATE["memory"][-1]["tenant_id"] == "tenant-a"
-    assert STATE["runs"][-1]["tenant_id"] == "tenant-a"
-    assert STATE["approvals"][-1]["tenant_id"] == "tenant-a"
+    assert memory_response.status_code == 422
+    assert run_response.status_code == 422
+    assert STATE["memory"] == []
+    assert STATE["runs"] == []
+    assert STATE["approvals"] == []
 
 
 @pytest.mark.asyncio
