@@ -204,3 +204,22 @@ async def test_expired_approval_is_rejected_at_execution_boundary():
             json={"product_id":"photo-studio-growth-os", "employee_id":"pgm-photo-studio-growth-os",
                   "action_type":"campaign.activate", "payload":{"campaign_id":"campaign-1"}})
     assert execution.status_code == 409
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("employee_id,action_type", [
+    ("pgm-photo-studio-billing", "campaign.activate"),
+    ("pgm-photo-studio-growth-os", "payment.initiate"),
+])
+async def test_approval_execution_rejects_employee_or_action_binding_mismatch(employee_id, action_type):
+    requester = principal("requester")
+    approval = create_approval(requester, product_id="photo-studio-growth-os",
+        employee_id="pgm-photo-studio-growth-os", action_type="campaign.activate",
+        payload={"campaign_id":"campaign-1"})
+    async with await client_for(principal("independent-approver")) as client:
+        decision = await client.post(f"/v1/workforce/approvals/{approval['id']}/decision",
+            json={"decision":"approved", "reason":"Reviewed", "product_id":"photo-studio-growth-os"})
+        assert decision.status_code == 200
+        execution = await client.post(f"/v1/workforce/approvals/{approval['id']}/validate-execution",
+            json={"product_id":"photo-studio-growth-os", "employee_id":employee_id,
+                  "action_type":action_type, "payload":{"campaign_id":"campaign-1"}})
+    assert execution.status_code == 403
