@@ -108,7 +108,7 @@ async def command(body: CommandRequest, p: Principal = Depends(current_principal
     command_id=str(uuid4())
     if permission not in p.permissions and "*" not in p.permissions:
         return {"status":"denied","message":"Workspace role is not authorised.","command_id":command_id}
-    if re.search(r"\\b(send|launch|activate|charge|refund|delete|export|deploy|sign|purchase|discount|change price)\\b",body.command,re.I):
+    if re.search(r"\b(send|launch|activate|charge|refund|delete|export|deploy|sign|purchase|discount|change price)\b",body.command,re.I):
         try:
             approval=await repo.create_approval(product_id=body.product_id,employee_id=role.id,
                 action_type="command.execution",payload={"command":body.command,"role_id":role_id},
