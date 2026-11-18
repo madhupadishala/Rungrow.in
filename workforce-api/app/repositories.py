@@ -578,6 +578,7 @@ class InMemoryWorkforceRepository:
     async def resume_task(self, task_id, approval_id):
         task=next((x for x in self.tasks if x["id"]==task_id and x["tenant_id"]==self.principal.tenant_id),None)
         approval=next((x for x in self.approvals if x["id"]==approval_id and x["tenant_id"]==self.principal.tenant_id),None)
+        if task: self._scope(task.get("product_id"))
         if not task or task.get("status")!="AWAITING_APPROVAL" or not approval or approval["status"]!="APPROVED" or approval["expires_at"]<=datetime.now(timezone.utc) or approval["product_id"]!=task.get("product_id") or approval["employee_id"]!=task["assignee_role_id"] or approval.get("consumed_at"):
             raise PermissionError("Task cannot resume without matching live approval")
         task.update(status="QUEUED",next_retry_at=datetime.now(timezone.utc))
@@ -690,6 +691,7 @@ class InMemoryWorkforceRepository:
     async def resume_agent_run(self, run_id, approval_id):
         run=await self.get_agent_run(run_id)
         approval=next((x for x in self.approvals if x["id"]==approval_id and x["tenant_id"]==self.principal.tenant_id),None)
+        if run: self._scope(run.get("product_id"))
         if not run or run.get("execution_state")!="AWAITING_APPROVAL" or not approval or approval["status"]!="APPROVED" or approval["expires_at"]<=datetime.now(timezone.utc) or approval["product_id"]!=run.get("product_id") or approval["employee_id"]!=run["employee_id"] or approval.get("consumed_at"):
             raise PermissionError("Run cannot resume without matching live approval")
         run.update(status="planned",execution_state="QUEUED")
