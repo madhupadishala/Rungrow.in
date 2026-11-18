@@ -302,7 +302,7 @@ async def orchestrator_dispatch(body: OrchestratorDispatchRequest,
     orchestrator=DurableTaskOrchestrator(repo,worker_id)
     task=None
     try:
-        task=await orchestrator.claim()
+        task=await orchestrator.claim(body.product_id)
         if not task: return {"status":"idle"}
         if body.product_id and task.get("product_id")!=body.product_id:
             await repo.fail_task(str(task["id"]),worker_id,"Product scope mismatch",0,task.get("max_attempts",5))
