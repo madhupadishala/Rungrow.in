@@ -255,23 +255,20 @@ class _WorkItemPlan(BaseModel):
 
 
 def get_model_gateway(repo):
-    provider_name=os.getenv("WORKFORCE_MODEL_PROVIDER","mock").lower()
-    model=os.getenv("WORKFORCE_PRIMARY_MODEL","fixture-model")
-    if provider_name=="anthropic":
-        primary=AnthropicProvider()
-    elif provider_name in {"openai","openai-compatible","local"}:
-        primary=OpenAICompatibleProvider()
-        provider_name="openai"
-    else:
-        primary=MockModelProvider([{"summary":"Deterministic offline task plan","steps":["Review task context","Prepare recommendation"],"requires_approval":False,"action_type":None,"action_payload":{}}])
-        provider_name="mock"
-    providers={provider_name:primary}
+    configured=os.getenv("WORKFORCE_MODEL_PROVIDER")
+    provider_name=(configured or ("mock" if settings.app_env=="test" else "openai-compatible")).lower()
+    model=os.getenv("WORKFORCE_PRIMARY_MODEL","gpt-4o-mini")
+    def build(name):
+        if name=="anthropic": return AnthropicProvider()
+        if name in {"openai","openai-compatible","local"}: return OpenAICompatibleProvider()
+        if name=="mock":
+            return MockModelProvider([{"summary":"Deterministic offline task plan","steps":["Review task context","Prepare recommendation"],"requires_approval":False,"action_type":None,"action_payload":{}}])
+        raise RuntimeError("Unsupported WORKFORCE_MODEL_PROVIDER: "+name)
+    providers={provider_name:build(provider_name)}
     fallback=os.getenv("WORKFORCE_FALLBACK_PROVIDER")
-    if fallback=="mock":
-        providers["mock"]=MockModelProvider([{"summary":"Fallback task plan","steps":["Fallback planning"],"requires_approval":False,"action_type":None,"action_payload":{}}])
+    if fallback: providers[fallback]=build(fallback)
     return ModelGateway(providers,primary_provider=provider_name,primary_model=model,
         fallback_provider=fallback,fallback_model=os.getenv("WORKFORCE_FALLBACK_MODEL"),repository=repo)
-
 
 def get_tool_registry():
     return getattr(app.state,"tool_registry",ToolRegistry())
