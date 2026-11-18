@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: rungrow_workforce_test
+      POSTGRES_USER: rungrow_migrator
+      POSTGRES_PASSWORD: rungrow_migrator_local_only
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rungrow_migrator -d rungrow_workforce_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - rungrow-workforce-test-data:/var/lib/postgresql/data
+volumes:
+  rungrow-workforce-test-data:
