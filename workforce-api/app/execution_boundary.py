@@ -49,7 +49,7 @@ class ExecutionBoundaryGuard:
             raise ApprovalBoundaryError("Employee identity mismatch",403)
         if run.get("tenant_id") != principal.tenant_id:
             raise ApprovalBoundaryError("Tenant boundary mismatch",403)
-        if run.get("is_sandbox") and not tool.allowed_in_sandbox:
+        if run.get("is_sandbox") and (not tool.allowed_in_sandbox or tool.action_type in SENSITIVE):
             await self.repository.append_audit("sandbox.violation","tool",tool_name,run.get("product_id"),{"run_id":run.get("id")})
             await self.repository.commit_boundary()
             raise SandboxViolation("Tool is prohibited in sandbox mode")
