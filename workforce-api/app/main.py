@@ -325,6 +325,20 @@ async def orchestrator_dispatch(body: OrchestratorDispatchRequest,
         translate_repo_error(exc)
 
 
+@app.post("/v1/workforce/orchestrator/tasks/{task_id}/resume")
+async def resume_orchestrator_task(task_id: str, approval_id: str,
+    p: Principal=Depends(require_permission("work.assign")),
+    repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    try:
+        task=next((x for x in await repo.list_tasks() if str(x["id"])==task_id),None)
+        if not task: raise HTTPException(404,"Task not found")
+        authorize_product_access(p,task.get("product_id"))
+        resumed=await repo.resume_task(task_id,approval_id)
+        return {"task_id":task_id,"status":resumed["status"],"execution":"not_started"}
+    except HTTPException: raise
+    except Exception as exc: translate_repo_error(exc)
+
+
 @app.post("/v1/workforce/orchestrator/runs/{run_id}/resume")
 async def resume_orchestrator_run(run_id: str, approval_id: str,
     p: Principal=Depends(require_permission("agent.run")),
