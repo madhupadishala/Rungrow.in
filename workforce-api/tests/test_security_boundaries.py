@@ -41,7 +41,8 @@ async def test_self_approval_rejected(install_test_repository,client):
 @pytest.mark.asyncio
 async def test_expired_approval_rejected(install_test_repository,client):
     repo=install_test_repository
-    item=await repo.create_approval(product_id=None,employee_id="market-intel",action_type="campaign.activate",payload={"id":"1"},expires_at=datetime.now(timezone.utc)-timedelta(seconds=1))
+    item=await repo.create_approval(product_id=None,employee_id="market-intel",action_type="campaign.activate",payload={"id":"1"},expires_at=datetime.now(timezone.utc)+timedelta(minutes=5))
+    item["expires_at"]=datetime.now(timezone.utc)-timedelta(seconds=1)
     other=Principal("approver","tenant-test","founder",frozenset({"*"}))
     async def override(p=__import__("fastapi").Depends(__import__("app.security",fromlist=["current_principal"]).current_principal)):
         return InMemoryWorkforceRepository(other,set(__import__("app.main",fromlist=["PRODUCTS"]).PRODUCTS))
