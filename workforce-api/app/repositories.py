@@ -239,6 +239,96 @@ class PostgresWorkforceRepository:
                "actor": self.principal.user_id, "action": action, "type": resource_type,
                "resource": resource_id, "details": json.dumps(details)})
 
+    async def record_model_usage(self, **usage):
+        await self.session.execute(text("""
+          INSERT INTO wf_model_usage(id,tenant_id,product_id,employee_id,run_id,provider,model,
+            prompt_tokens,completion_tokens,estimated_cost_inr,latency_ms,created_at)
+          VALUES(:id,:tenant,:product,:employee,:run,:provider,:model,:prompt,:completion,:cost,:latency,now())
+        """),{"id":str(uuid4()),"tenant":self.principal.tenant_id,"product":usage["product_id"],
+          "employee":usage["employee_id"],"run":usage["run_id"],"provider":usage["provider"],
+          "model":usage["model"],"prompt":usage["prompt_tokens"],"completion":usage["completion_tokens"],
+          "cost":usage["estimated_cost_inr"],"latency":usage["latency_ms"]})
+
+    async def claim_task(self, worker_id: str, lease_seconds: int):
+        return await self._one("""
+          WITH candidate AS (
+            SELECT id FROM wf_tasks
+            WHERE ((status IN ('QUEUED','RETRY_SCHEDULED') AND next_retry_at <= now())
+              OR (status='RUNNING' AND lease_expires_at <= now()))
+              AND tenant_id=:tenant
+              AND (product_id IS NULL OR product_id=ANY(string_to_array(:products,',')) OR :admin='true')
+            ORDER BY next_retry_at,created_at
+            FOR UPDATE SKIP LOCKED LIMIT 1
+          )
+          UPDATE wf_tasks t SET
+            status=CASE WHEN t.attempt_count >= t.max_attempts THEN 'DEAD_LETTER' ELSE 'RUNNING' END,
+            locked_by=CASE WHEN t.attempt_count >= t.max_attempts THEN NULL ELSE :worker END,
+            lease_expires_at=CASE WHEN t.attempt_count >= t.max_attempts THEN NULL ELSE now()+make_interval(secs=>:lease) END,
+            attempt_count=CASE WHEN t.attempt_count >= t.max_attempts THEN t.attempt_count ELSE t.attempt_count+1 END,
+            updated_at=now()
+          FROM candidate c WHERE t.id=c.id AND t.tenant_id=:tenant
+          RETURNING t.*
+        """,{"tenant":self.principal.tenant_id,"products":",".join(self.principal.product_ids),
+             "admin":"true" if "*" in self.principal.permissions else "false",
+             "worker":worker_id,"lease":lease_seconds})
+
+    async def finish_task(self, task_id: str, worker_id: str, result: Any):
+        item=await self._one("""
+          UPDATE wf_tasks SET status='COMPLETED',result=CAST(:result AS jsonb),
+            locked_by=NULL,lease_expires_at=NULL,updated_at=now()
+          WHERE id=:id AND tenant_id=:tenant AND status='RUNNING' AND locked_by=:worker
+            AND lease_expires_at > now() RETURNING *
+        """,{"id":task_id,"tenant":self.principal.tenant_id,"worker":worker_id,"result":json.dumps(result)})
+        if not item: raise PermissionError("Task lease lost or task is no longer owned")
+        await self.append_audit("task.completed","task",task_id,item["product_id"],{"worker_id":worker_id})
+        return item
+
+    async def fail_task(self, task_id: str, worker_id: str, error: str, retry_delay: int, max_attempts: int):
+        item=await self._one("""
+          UPDATE wf_tasks SET
+            status=CASE WHEN attempt_count >= LEAST(max_attempts,:max_attempts) THEN 'DEAD_LETTER' ELSE 'RETRY_SCHEDULED' END,
+            next_retry_at=now()+make_interval(secs=>:delay),last_error=:error,
+            locked_by=NULL,lease_expires_at=NULL,updated_at=now()
+          WHERE id=:id AND tenant_id=:tenant AND status='RUNNING' AND locked_by=:worker
+          RETURNING *
+        """,{"id":task_id,"tenant":self.principal.tenant_id,"worker":worker_id,"error":error,
+             "delay":retry_delay,"max_attempts":max_attempts})
+        if not item: raise PermissionError("Task lease lost")
+        await self.append_audit("task."+item["status"].lower(),"task",task_id,item["product_id"],{"error":error})
+        return item
+
+    async def enqueue_task(self, *, product_id, department, assignee_role_id, title, description="",
+                           priority="normal", is_sandbox=False, max_attempts=5, idempotency_key=None):
+        self._product(product_id)
+        return await self.create_task(product_id=product_id,department=department,assignee_role_id=assignee_role_id,
+            title=title,description=description,priority=priority,idempotency_key=idempotency_key or str(uuid4()),
+            is_sandbox=is_sandbox,max_attempts=max_attempts)
+
+    async def pause_run_for_approval(self, run_id: str, action_type: str, payload: dict):
+        run=await self._one("UPDATE wf_agent_runs SET status='awaiting_approval',execution_state='AWAITING_APPROVAL',updated_at=now() WHERE id=:id AND tenant_id=:tenant RETURNING *",
+            {"id":run_id,"tenant":self.principal.tenant_id})
+        if not run: raise LookupError("Agent run not found")
+        return await self.create_approval(product_id=run["product_id"],employee_id=run["employee_id"],
+            action_type=action_type,payload=payload,expires_at=datetime.now(timezone.utc)+__import__("datetime").timedelta(minutes=15))
+
+    async def consume_approval(self, approval_id: str, *, product_id, employee_id, action_type, payload, run_id):
+        digest=hashlib.sha256(json.dumps({"tenant_id":self.principal.tenant_id,"product_id":product_id,
+          "employee_id":employee_id,"action_type":action_type,"payload":payload},
+          sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
+        item=await self._one("""
+          UPDATE wf_approvals SET consumed_at=now(),execution_run_id=:run
+          WHERE id=:id AND tenant_id=:tenant AND product_id IS NOT DISTINCT FROM :product
+            AND employee_id=:employee AND action_type=:action AND status='approved'
+            AND approver_id IS NOT NULL AND approver_id<>requester_id
+            AND expires_at>now() AND consumed_at IS NULL AND payload_hash=:hash
+          RETURNING *
+        """,{"id":approval_id,"tenant":self.principal.tenant_id,"product":product_id,
+          "employee":employee_id,"action":action_type,"run":run_id,"hash":digest})
+        if not item: raise PermissionError("Approval missing, invalid, expired, tampered or already consumed")
+        await self.append_audit("approval.consumed","approval",approval_id,product_id,{"run_id":run_id})
+        return item
+
+
 
 async def repository_for(principal: Principal):
     SessionFactory = session_factory()
@@ -261,15 +351,88 @@ class WorkforceRepositoryProtocol(Protocol):
     async def list_approvals(self, product_id=None): ...
     async def decide_approval(self, approval_id, decision, reason, product_id=None): ...
     async def validate_approval(self, approval_id, **kwargs): ...
+    async def record_model_usage(self, **usage):
+        self._scope(usage.get("product_id"))
+        self.model_usage.append({"id":str(uuid4()),"tenant_id":self.principal.tenant_id,**usage})
+        self._audit("model.usage","model_usage",usage["run_id"],usage.get("product_id"),usage)
+
+    async def enqueue_task(self, *, product_id, department, assignee_role_id, title, description="", priority="normal", is_sandbox=False, max_attempts=5, idempotency_key=None):
+        item=await self.create_task(product_id=product_id,department=department,assignee_role_id=assignee_role_id,
+            title=title,description=description,priority=priority,idempotency_key=idempotency_key or str(uuid4()),
+            is_sandbox=is_sandbox,max_attempts=max_attempts)
+        item.setdefault("attempt_count",0); item.setdefault("max_attempts",max_attempts)
+        item.setdefault("next_retry_at",datetime.now(timezone.utc)); item.setdefault("locked_by",None)
+        item.setdefault("lease_expires_at",None); item.setdefault("result",None)
+        return item
+
+    async def claim_task(self, worker_id, lease_seconds):
+        now=datetime.now(timezone.utc)
+        eligible=[]
+        for task in self.tasks:
+            if task["tenant_id"]!=self.principal.tenant_id: continue
+            self._scope(task.get("product_id"))
+            status=task.get("status","QUEUED").upper()
+            retry=task.get("next_retry_at",now)
+            if isinstance(retry,str): retry=datetime.fromisoformat(retry)
+            lease=task.get("lease_expires_at")
+            if isinstance(lease,str): lease=datetime.fromisoformat(lease)
+            if status in {"QUEUED","RETRY_SCHEDULED"} and retry<=now or status=="RUNNING" and lease and lease<=now:
+                eligible.append(task)
+        if not eligible: return None
+        task=sorted(eligible,key=lambda x:x.get("created_at",""))[0]
+        if task.get("attempt_count",0)>=task.get("max_attempts",5):
+            task.update(status="DEAD_LETTER",locked_by=None,lease_expires_at=None)
+            self._audit("task.dead_letter","task",task["id"],task.get("product_id"))
+            return None
+        task.update(status="RUNNING",locked_by=worker_id,attempt_count=task.get("attempt_count",0)+1,
+            lease_expires_at=now+__import__("datetime").timedelta(seconds=lease_seconds))
+        return task
+
+    async def finish_task(self, task_id, worker_id, result):
+        task=next((x for x in self.tasks if x["id"]==task_id and x["tenant_id"]==self.principal.tenant_id),None)
+        if not task or task.get("status")!="RUNNING" or task.get("locked_by")!=worker_id or task["lease_expires_at"]<=datetime.now(timezone.utc):
+            raise PermissionError("Task lease lost")
+        task.update(status="COMPLETED",result=result,locked_by=None,lease_expires_at=None)
+        self._audit("task.completed","task",task_id,task.get("product_id")); return task
+
+    async def fail_task(self, task_id, worker_id, error, retry_delay, max_attempts):
+        task=next((x for x in self.tasks if x["id"]==task_id and x["tenant_id"]==self.principal.tenant_id),None)
+        if not task or task.get("locked_by")!=worker_id: raise PermissionError("Task lease lost")
+        task.update(status="DEAD_LETTER" if task["attempt_count"]>=min(task["max_attempts"],max_attempts) else "RETRY_SCHEDULED",
+            last_error=error,locked_by=None,lease_expires_at=None,
+            next_retry_at=datetime.now(timezone.utc)+__import__("datetime").timedelta(seconds=retry_delay))
+        self._audit("task."+task["status"].lower(),"task",task_id,task.get("product_id")); return task
+
+    async def pause_run_for_approval(self, run_id, action_type, payload):
+        run=next((x for x in self.runs if x["id"]==run_id and x["tenant_id"]==self.principal.tenant_id),None)
+        if not run: raise LookupError("Agent run not found")
+        run["status"]="awaiting_approval"
+        return await self.create_approval(product_id=run.get("product_id"),employee_id=run["employee_id"],
+            action_type=action_type,payload=payload,expires_at=datetime.now(timezone.utc)+__import__("datetime").timedelta(minutes=15))
+
+    async def consume_approval(self, approval_id, *, product_id, employee_id, action_type, payload, run_id):
+        item=await self.validate_approval(approval_id,product_id=product_id,employee_id=employee_id,action_type=action_type,payload=payload)
+        if item.get("consumed_at") is not None: raise PermissionError("Approval already consumed")
+        item["consumed_at"]=datetime.now(timezone.utc); item["execution_run_id"]=run_id
+        self._audit("approval.consumed","approval",approval_id,product_id,{"run_id":run_id})
+        return item
+
     async def append_audit(self, action, resource_type, resource_id, product_id, details): ...
     async def list_audit(self, product_id=None): ...
+    async def record_model_usage(self, **usage): ...
+    async def claim_task(self, worker_id, lease_seconds): ...
+    async def finish_task(self, task_id, worker_id, result): ...
+    async def fail_task(self, task_id, worker_id, error, retry_delay, max_attempts): ...
+    async def enqueue_task(self, **kwargs): ...
+    async def pause_run_for_approval(self, run_id, action_type, payload): ...
+    async def consume_approval(self, approval_id, **kwargs): ...
 
 
 class InMemoryWorkforceRepository:
     """Explicitly injected, per-app test adapter. Never selected by production."""
     def __init__(self, principal: Principal, products: set[str]):
         self.principal, self.products = principal, products
-        self.tasks, self.runs, self.memory, self.approvals, self.audit = [], [], [], [], []
+        self.tasks, self.runs, self.memory, self.approvals, self.audit, self.model_usage = [], [], [], [], []
 
     def _scope(self, product_id):
         if product_id is not None and product_id not in self.products:
@@ -337,7 +500,7 @@ class InMemoryWorkforceRepository:
           (x.get("product_id")==product_id if product_id else
            x.get("product_id") is None or "*" in self.principal.permissions or x.get("product_id") in self.principal.product_ids)]
 
-    async def decide_approval(self, approval_id, decision, reason):
+    async def decide_approval(self, approval_id, decision, reason, product_id=None):
         item=next((x for x in self.approvals if x["id"]==approval_id and x["tenant_id"]==self.principal.tenant_id),None)
         if not item: raise LookupError("Approval not found")
         if item["product_id"] != product_id: raise PermissionError("Approval product scope mismatch")
