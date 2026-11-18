@@ -157,3 +157,16 @@ async def test_signed_product_scope_claim_is_required_for_product_operations():
         })
     assert denied.status_code == 403
     assert allowed.status_code == 200
+
+@pytest.mark.asyncio
+async def test_product_scoped_principal_cannot_list_other_products_without_filter():
+    scoped = Principal("billing-user", "tenant-a", "sales", frozenset({"work.read"}), product_ids=frozenset({"photo-studio-billing"}))
+    STATE["tasks"].extend([
+        {"id":"billing-task","tenant_id":"tenant-a","product_id":"photo-studio-billing"},
+        {"id":"growth-task","tenant_id":"tenant-a","product_id":"photo-studio-growth-os"},
+        {"id":"shared-task","tenant_id":"tenant-a","product_id":None},
+    ])
+    async with await client_for(scoped) as client:
+        response = await client.get("/v1/workforce/tasks")
+    assert response.status_code == 200
+    assert {row["id"] for row in response.json()} == {"billing-task", "shared-task"}
