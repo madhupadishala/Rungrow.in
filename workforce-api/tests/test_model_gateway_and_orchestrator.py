@@ -142,3 +142,9 @@ async def test_sandbox_cannot_call_production_tool_and_records_violation():
         await ExecutionBoundaryGuard(repo,registry).execute(tool_name="customer.outreach",principal=repo.principal,
             employee=employee,run=run,payload={"text":"never send"})
     assert calls==[] and any(x["action"]=="sandbox.violation" for x in repo.audit)
+
+def test_outbound_prompt_always_contains_explicit_ai_identity_disclosure():
+    messages=ModelGateway.with_ai_identity([{"role":"user","content":"Draft a customer reply"}],outbound=True)
+    assert messages[0]["role"]=="system"
+    assert "AI assistant" in messages[0]["content"]
+    assert "Never claim or imply that you are human" in messages[0]["content"]
