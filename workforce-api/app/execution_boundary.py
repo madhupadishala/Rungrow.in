@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 from datetime import datetime, timezone
+from .policy import SENSITIVE
 import hashlib,json
 
 class ApprovalBoundaryError(PermissionError):
@@ -53,7 +54,8 @@ class ExecutionBoundaryGuard:
             await self.repository.commit_boundary()
             raise SandboxViolation("Tool is prohibited in sandbox mode")
         consumed=None
-        if tool.requires_human_approval:
+        approval_required=tool.requires_human_approval or tool.action_type in SENSITIVE
+        if approval_required:
             if not approval_id:
                 await self.repository.pause_run_for_approval(run["id"],tool.action_type,payload)
                 await self.repository.commit_boundary()
