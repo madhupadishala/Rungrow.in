@@ -147,3 +147,23 @@ BEGIN
  END IF;
 END $$;
 ALTER TABLE wf_approvals VALIDATE CONSTRAINT wf_approvals_expiry_after_creation;
+
+CREATE OR REPLACE FUNCTION wf_guard_approval_state_transition() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+ IF OLD.status <> 'PENDING' AND NEW.status <> OLD.status THEN
+   RAISE EXCEPTION 'approval decision is immutable once recorded';
+ END IF;
+ IF OLD.consumed_at IS NOT NULL AND
+    (NEW.consumed_at IS DISTINCT FROM OLD.consumed_at OR NEW.execution_run_id IS DISTINCT FROM OLD.execution_run_id) THEN
+   RAISE EXCEPTION 'approval execution token is single-use and immutable';
+ END IF;
+ IF NEW.consumed_at IS NOT NULL AND NEW.status <> 'APPROVED' THEN
+   RAISE EXCEPTION 'only an approved request can be consumed';
+ END IF;
+ RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS wf_approval_state_transition ON wf_approvals;
+CREATE TRIGGER wf_approval_state_transition BEFORE UPDATE ON wf_approvals
+FOR EACH ROW EXECUTE FUNCTION wf_guard_approval_state_transition();
