@@ -8,6 +8,7 @@ ALTER TABLE wf_tasks ADD COLUMN IF NOT EXISTS is_sandbox boolean NOT NULL DEFAUL
 ALTER TABLE wf_tasks ADD COLUMN IF NOT EXISTS result jsonb;
 ALTER TABLE wf_tasks ADD COLUMN IF NOT EXISTS last_error text;
 ALTER TABLE wf_tasks DROP CONSTRAINT IF EXISTS wf_tasks_status_check;
+ALTER TABLE wf_tasks ALTER COLUMN status SET DEFAULT 'QUEUED';
 UPDATE wf_tasks SET status=upper(status);
 ALTER TABLE wf_tasks ADD CONSTRAINT wf_tasks_status_check CHECK(status IN
  ('QUEUED','RUNNING','AWAITING_APPROVAL','COMPLETED','RETRY_SCHEDULED','DEAD_LETTER','CANCELLED'));
