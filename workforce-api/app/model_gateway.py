@@ -96,15 +96,17 @@ class ModelGateway:
             if exc.response.status_code not in self.transient_statuses or not self.fallback_provider: raise
             provider,model=self.fallback_provider,self.fallback_model or self.primary_model
             response=await self._call(provider,model,messages)
+        prompt=response.prompt_tokens; completion=response.completion_tokens
         try:
             parsed=output_model.model_validate_json(response.content) if hasattr(output_model,"model_validate_json") else output_model.parse_raw(response.content)
         except (ValidationError,ValueError,json.JSONDecodeError):
             repair=[*messages,{"role":"assistant","content":response.content},
-                    {"role":"user","content":"Repair the previous response. Return ONLY valid JSON matching this schema: "+json.dumps(output_model.schema())}]
-            response=await self._call(provider,model,repair)
+                    {"role":"user","content":"Repair the previous response. Return ONLY valid JSON matching this schema: "+json.dumps(output_model.model_json_schema() if hasattr(output_model,"model_json_schema") else output_model.schema())}]
+            repaired=await self._call(provider,model,repair)
+            prompt += repaired.prompt_tokens; completion += repaired.completion_tokens
+            response=repaired
             parsed=output_model.model_validate_json(response.content) if hasattr(output_model,"model_validate_json") else output_model.parse_raw(response.content)
         latency=int((time.perf_counter()-started)*1000)
-        prompt=response.prompt_tokens; completion=response.completion_tokens
         cost=(prompt*estimated_input_cost_inr_per_1k+completion*estimated_output_cost_inr_per_1k)/1000
         telemetry={"prompt_tokens":prompt,"completion_tokens":completion,"estimated_cost_inr":cost,
             "latency_ms":latency,"provider":response.provider,"model":response.model,
