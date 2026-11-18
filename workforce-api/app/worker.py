@@ -34,9 +34,9 @@ async def run_worker():
                     try:
                         gateway=get_model_gateway(repo)
                         plan,telemetry=await gateway.generate_structured(
-                            messages=[{"role":"user","content":"Create an execution plan only; do not perform side effects. Task: "+task["title"]+" "+task.get("description","")}],
+                            messages=[{"role":"user","content":("SANDBOX MODE: simulate only. " if task.get("is_sandbox") else "")+"Create an execution plan only; do not perform side effects. Task: "+task["title"]+" "+task.get("description","")}],
                             output_model=_WorkItemPlan,tenant_id=tenant,product_id=task.get("product_id"),
-                            employee_id=task["assignee_role_id"],run_id=str(task["id"]))
+                            employee_id=task["assignee_role_id"],run_id=str(task["id"]),is_sandbox=bool(task.get("is_sandbox",False)))
                         if plan.requires_approval:
                             await repo.pause_task_for_approval(str(task["id"]),plan.action_type or "task.sensitive_action",
                                 plan.action_payload or {"task_id":str(task["id"]),"summary":plan.summary})
