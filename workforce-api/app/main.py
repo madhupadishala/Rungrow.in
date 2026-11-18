@@ -168,6 +168,8 @@ async def validate_execution(approval_id: str,body: ApprovalExecutionValidation,
     try:
         item=await repo.validate_approval(approval_id,product_id=body.product_id,
             employee_id=body.employee_id,action_type=body.action_type,payload=body.payload)
+        await repo.append_audit("approval.execution_validated","approval",approval_id,
+                                body.product_id,{"payload_hash":item["payload_hash"]})
         return {"approval_id":item["id"],"authorised":True,"execution":"not_started"}
     except Exception as exc: translate_repo_error(exc)
 
