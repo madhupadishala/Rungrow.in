@@ -96,7 +96,7 @@ async def test_fastapi_records_survive_new_app_instance():
     from httpx import ASGITransport, AsyncClient
     from app.main import app as workforce_app, get_workforce_repo
     from app.policy import Principal
-    from app.repositories import TenantRepository, session_factory
+    from app.repositories import PostgresWorkforceRepository, session_factory
     from app.security import current_principal
 
     principal=Principal("durability-user","durability-tenant","founder",frozenset({"*"}),
@@ -106,7 +106,7 @@ async def test_fastapi_records_survive_new_app_instance():
     async def repository_override(p=Depends(current_principal)):
         factory=session_factory()
         async with factory() as session:
-            async with TenantRepository(session,p) as repo:
+            async with PostgresWorkforceRepository(session,p) as repo:
                 yield repo
     workforce_app.dependency_overrides[current_principal]=principal_override
     workforce_app.dependency_overrides[get_workforce_repo]=repository_override
