@@ -45,6 +45,12 @@ def validate_product_id(product_id: str | None) -> None:
         raise HTTPException(status_code=404, detail="Unknown product scope")
 
 
+def authorize_product_access(principal: Principal, product_id: str | None) -> None:
+    validate_product_id(product_id)
+    if product_id is not None and "*" not in principal.permissions and product_id not in principal.product_ids:
+        raise HTTPException(status_code=403, detail="Principal is not authorised for this product")
+
+
 def enforce_product_scope(employee, product_id: str | None) -> None:
     validate_product_id(product_id)
     if employee.product_id and product_id != employee.product_id:
@@ -64,7 +70,7 @@ def create_approval(
     principal: Principal, *, product_id: str | None, employee_id: str,
     action_type: str, payload: dict, ttl: timedelta = timedelta(minutes=15),
 ) -> dict:
-    validate_product_id(product_id)
+    authorize_product_access(principal, product_id)
     now = datetime.now(timezone.utc)
     item = {
         "id": str(uuid4()), "tenant_id": principal.tenant_id, "product_id": product_id,
@@ -87,6 +93,7 @@ def validate_approval_for_execution(
                  if row["id"] == approval_id and row["tenant_id"] == principal.tenant_id), None)
     if item is None:
         raise HTTPException(status_code=404, detail="Approval not found")
+    authorize_product_access(principal, product_id)
     if item["product_id"] != product_id:
         raise HTTPException(status_code=403, detail="Approval product scope mismatch")
     if item["employee_id"] != employee_id or item["action_type"] != action_type:
@@ -148,7 +155,7 @@ async def registry(p: Principal = Depends(require_permission("workforce.read")))
 
 @app.post("/v1/workforce/commands")
 async def command(body: CommandRequest, p: Principal = Depends(current_principal)):
-    validate_product_id(body.product_id)
+    authorize_product_access(p, body.product_id)
     department, role_id, permission = route(body.command)
     if body.product_id:
         role_id = PRODUCT_ROLE_IDS[body.product_id]
@@ -188,14 +195,14 @@ async def create_task(body: TaskCreate, p: Principal = Depends(require_permissio
 
 @app.get("/v1/workforce/tasks")
 async def tasks(product_id: str | None = None, p: Principal = Depends(require_permission("work.read"))):
-    validate_product_id(product_id)
+    authorize_product_access(p, product_id)
     rows = [row for row in STATE["tasks"] if row["tenant_id"] == p.tenant_id]
     return [row for row in rows if row.get("product_id") == product_id] if product_id else rows
 
 
 @app.get("/v1/workforce/approvals")
 async def approvals(product_id: str | None = None, p: Principal = Depends(require_permission("approval.read"))):
-    validate_product_id(product_id)
+    authorize_product_access(p, product_id)
     rows = [row for row in STATE["approvals"] if row["tenant_id"] == p.tenant_id]
     return [row for row in rows if row.get("product_id") == product_id] if product_id else rows
 
@@ -206,6 +213,7 @@ async def decide(approval_id: str, body: ApprovalDecision, p: Principal = Depend
                  if row["id"] == approval_id and row["tenant_id"] == p.tenant_id), None)
     if item is None:
         raise HTTPException(status_code=404, detail="Approval not found")
+    authorize_product_access(p, item["product_id"])
     if body.product_id != item["product_id"]:
         raise HTTPException(status_code=403, detail="Approval product scope mismatch")
     if item["status"] != "pending":
@@ -251,7 +259,7 @@ async def memory(body: MemoryWrite, p: Principal = Depends(require_permission("m
 
 @app.get("/v1/workforce/memory")
 async def read_memory(product_id: str | None = None, p: Principal = Depends(require_permission("memory.read"))):
-    validate_product_id(product_id)
+    authorize_product_access(p, product_id)
     rows = [row for row in STATE["memory"] if row["tenant_id"] == p.tenant_id]
     return [row for row in rows if row.get("product_id") == product_id] if product_id else rows
 
@@ -263,7 +271,7 @@ async def audit_events(p: Principal = Depends(require_permission("audit.read")))
 
 @app.get("/v1/workforce/agent-runs")
 async def agent_runs(product_id: str | None = None, p: Principal = Depends(require_permission("work.read"))):
-    validate_product_id(product_id)
+    authorize_product_access(p, product_id)
     rows = [row for row in STATE["runs"] if row["tenant_id"] == p.tenant_id]
     return [row for row in rows if row.get("product_id") == product_id] if product_id else rows
 
