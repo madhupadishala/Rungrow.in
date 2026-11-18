@@ -15,7 +15,14 @@
       "readiness_assertion": "founder_stated_built",
       "commercial_validation": "pending",
       "pricing_validation": "pending",
-      "owner_role_id": "pgm-photo-studio-growth-os"
+      "owner_role_id": "pgm-photo-studio-growth-os",
+      "source_repositories": [
+        "madhupadishala/studio-growth-os",
+        "madhupadishala/studio-x-photography"
+      ],
+      "design_reference_repositories": [
+        "madhupadishala/creativ-i-studios"
+      ]
     },
     {
       "product_id": "photo-studio-billing",
@@ -25,7 +32,10 @@
       "readiness_assertion": "founder_stated_built",
       "commercial_validation": "pending",
       "pricing_validation": "pending",
-      "owner_role_id": "pgm-photo-studio-billing"
+      "owner_role_id": "pgm-photo-studio-billing",
+      "source_repositories": [
+        "madhupadishala/studio-growth-os"
+      ]
     },
     {
       "product_id": "clinics-counter",
@@ -35,7 +45,9 @@
       "readiness_assertion": "founder_stated_built",
       "commercial_validation": "pending",
       "pricing_validation": "pending",
-      "owner_role_id": "pgm-clinics-counter"
+      "owner_role_id": "pgm-clinics-counter",
+      "source_repositories": [],
+      "repository_discovery_status": "no RunGrow source repository verified yet"
     },
     {
       "product_id": "entrepreneur-instagram-tools",
@@ -45,7 +57,9 @@
       "readiness_assertion": "founder_stated_built",
       "commercial_validation": "pending",
       "pricing_validation": "pending",
-      "owner_role_id": "pgm-entrepreneur-tools"
+      "owner_role_id": "pgm-entrepreneur-tools",
+      "source_repositories": [],
+      "repository_discovery_status": "no RunGrow source repository verified yet"
     },
     {
       "product_id": "pharma-software-utilities",
@@ -55,7 +69,9 @@
       "readiness_assertion": "founder_stated_built",
       "commercial_validation": "pending",
       "pricing_validation": "pending",
-      "owner_role_id": "pgm-pharma"
+      "owner_role_id": "pgm-pharma",
+      "source_repositories": [],
+      "repository_discovery_status": "no RunGrow source repository verified yet"
     },
     {
       "product_id": "artists-business-tools",
@@ -65,7 +81,9 @@
       "readiness_assertion": "founder_stated_built",
       "commercial_validation": "pending",
       "pricing_validation": "pending",
-      "owner_role_id": "pgm-artists-tools"
+      "owner_role_id": "pgm-artists-tools",
+      "source_repositories": [],
+      "repository_discovery_status": "no RunGrow source repository verified yet"
     },
     {
       "product_id": "growtoys",
@@ -75,7 +93,9 @@
       "readiness_assertion": "founder_stated_built",
       "commercial_validation": "pending",
       "pricing_validation": "pending",
-      "owner_role_id": "pgm-growtoys"
+      "owner_role_id": "pgm-growtoys",
+      "source_repositories": [],
+      "repository_discovery_status": "no RunGrow source repository verified yet"
     }
   ],
   "controls": {
