@@ -32,3 +32,7 @@ The UI, role catalogue, API contract, local command router, JWT validation, poli
 - workforce-api/app/: config, auth, policy, registry, API and schemas
 - workforce-api/migrations/: PostgreSQL tenant schema and RLS
 - workforce-api/tests/: policy and registry contract tests
+
+
+## Voice and research adapters
+The operator interface supports browser speech recognition (en-IN) and speech synthesis for spoken responses, using the same command endpoint as text. The API host and token supplier are injected at runtime through RUN_GROW_WORKFORCE_API and RUN_GROW_WORKFORCE_GET_TOKEN; tokens are never persisted in local storage. LiveKit Agents (Apache-2.0) is the selected production realtime voice/telephony runtime. The Crawlee (Apache-2.0) adapter accepts tenant-approved host allowlists, respects robots.txt, limits concurrency and marks all discovered contact details as not-consented.
