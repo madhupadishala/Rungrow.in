@@ -9,11 +9,11 @@ class DurableTaskOrchestrator:
         self.repository=repository; self.worker_id=worker_id
         self.lease_seconds=lease_seconds; self.max_attempts=max_attempts
 
-    async def claim(self):
-        return await self.repository.claim_task(self.worker_id,self.lease_seconds)
+    async def claim(self, product_id=None):
+        return await self.repository.claim_task(self.worker_id,self.lease_seconds,product_id)
 
-    async def dispatch_once(self, handler: Callable[[dict],Awaitable[Any]]):
-        task=await self.claim()
+    async def dispatch_once(self, handler: Callable[[dict],Awaitable[Any]], product_id=None):
+        task=await self.claim(product_id)
         if not task: return None
         try:
             result=await handler(task)
@@ -26,6 +26,9 @@ class DurableTaskOrchestrator:
 
     async def run(self, handler, *, poll_seconds: float=1, stop: asyncio.Event | None=None):
         while stop is None or not stop.is_set():
-            result=await self.dispatch_once(handler)
+            try:
+                result=await self.dispatch_once(handler)
+            except Exception:
+                result=None
             if result is None: await asyncio.sleep(poll_seconds)
 
