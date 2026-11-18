@@ -5,7 +5,7 @@ from typing import Any, Awaitable, Callable
 import asyncio, random
 
 class DurableTaskOrchestrator:
-    def __init__(self, repository, worker_id: str, lease_seconds: int=60, max_attempts: int=5):
+    def __init__(self, repository, worker_id: str, lease_seconds: int=180, max_attempts: int=5):
         self.repository=repository; self.worker_id=worker_id
         self.lease_seconds=lease_seconds; self.max_attempts=max_attempts
 
