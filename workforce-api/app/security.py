@@ -17,7 +17,11 @@ def issue_access_token(user_id:str,tenant_id:str,role:str,permissions:list[str])
 async def current_principal(credentials:HTTPAuthorizationCredentials|None=Depends(bearer))->Principal:
     if credentials is None: raise HTTPException(401,"Bearer token required",headers={"WWW-Authenticate":"Bearer"})
     try:
-        data=jwt.decode(credentials.credentials,settings.jwt_secret,algorithms=["HS256"],issuer=settings.jwt_issuer,options={"require":["sub","tid","role","exp","iss"]})
+        if settings.app_env == "production":
+            if not settings.jwt_public_key: raise HTTPException(503,"OIDC verification key is not configured")
+            data=jwt.decode(credentials.credentials,settings.jwt_public_key,algorithms=["RS256"],issuer=settings.jwt_issuer,audience=settings.jwt_audience,options={"require":["sub","tid","role","exp","iss","aud"]})
+        else:
+            data=jwt.decode(credentials.credentials,settings.jwt_secret,algorithms=["HS256"],issuer=settings.jwt_issuer,options={"require":["sub","tid","role","exp","iss"]})
         return Principal(data["sub"],data["tid"],data["role"],frozenset(data.get("perms",[])))
     except jwt.PyJWTError as exc: raise HTTPException(401,"Invalid or expired access token") from exc
 def require_permission(permission:str):
