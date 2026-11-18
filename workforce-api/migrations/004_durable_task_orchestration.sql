@@ -27,6 +27,10 @@ ALTER TABLE wf_agent_runs ADD COLUMN IF NOT EXISTS execution_state text NOT NULL
 ALTER TABLE wf_agent_runs ADD COLUMN IF NOT EXISTS locked_by text;
 ALTER TABLE wf_agent_runs ADD COLUMN IF NOT EXISTS lease_expires_at timestamptz;
 ALTER TABLE wf_agent_runs ADD COLUMN IF NOT EXISTS attempt_count integer NOT NULL DEFAULT 0;
+UPDATE wf_agent_runs SET execution_state=CASE upper(status)
+ WHEN 'COMPLETED' THEN 'COMPLETED' WHEN 'FAILED' THEN 'DEAD_LETTER'
+ WHEN 'APPROVAL_REQUIRED' THEN 'AWAITING_APPROVAL' WHEN 'AWAITING_APPROVAL' THEN 'AWAITING_APPROVAL'
+ ELSE 'QUEUED' END;
 
 ALTER TABLE wf_approvals ADD COLUMN IF NOT EXISTS consumed_at timestamptz;
 ALTER TABLE wf_approvals ADD COLUMN IF NOT EXISTS execution_run_id uuid;
