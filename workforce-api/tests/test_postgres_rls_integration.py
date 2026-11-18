@@ -232,7 +232,7 @@ async def test_approval_single_use_and_payload_immutability_are_database_enforce
               INSERT INTO wf_approvals(id,tenant_id,product_id,employee_id,action_type,payload,payload_hash,
                 requester_id,approver_id,status,expires_at,decided_at,created_at)
               VALUES(gen_random_uuid(),'approval-tenant','photo-studio-growth-os','employee-1','message.send',
-                CAST(:payload AS jsonb),:digest,'requester','approver','APPROVED',now()-interval '1 second',now()-interval '10 minutes',now()) RETURNING id
+                CAST(:payload AS jsonb),:digest,'requester','approver','APPROVED',now()-interval '1 second',now()-interval '10 minutes',now()-interval '20 minutes') RETURNING id
             """),{"payload":payload,"digest":digest})).scalar_one()
             rejected=await conn.execute(text("""
               UPDATE wf_approvals SET consumed_at=now(),execution_run_id=gen_random_uuid()
