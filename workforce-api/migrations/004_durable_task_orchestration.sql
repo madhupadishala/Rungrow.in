@@ -85,3 +85,41 @@ BEGIN
  END IF;
 END $$;
 ALTER TABLE wf_agent_runs VALIDATE CONSTRAINT wf_agent_runs_execution_state_check;
+
+CREATE OR REPLACE FUNCTION wf_enforce_task_state_transition() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+ IF NEW.status=OLD.status THEN RETURN NEW; END IF;
+ IF NOT (
+   (OLD.status='QUEUED' AND NEW.status IN ('RUNNING','AWAITING_APPROVAL','CANCELLED')) OR
+   (OLD.status='RUNNING' AND NEW.status IN ('RUNNING','AWAITING_APPROVAL','COMPLETED','RETRY_SCHEDULED','DEAD_LETTER','CANCELLED')) OR
+   (OLD.status='RETRY_SCHEDULED' AND NEW.status IN ('RUNNING','DEAD_LETTER','CANCELLED')) OR
+   (OLD.status='AWAITING_APPROVAL' AND NEW.status IN ('QUEUED','CANCELLED'))
+ ) THEN
+   RAISE EXCEPTION 'invalid workforce task state transition: % -> %',OLD.status,NEW.status;
+ END IF;
+ RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS wf_task_state_transition ON wf_tasks;
+CREATE TRIGGER wf_task_state_transition BEFORE UPDATE OF status ON wf_tasks
+FOR EACH ROW EXECUTE FUNCTION wf_enforce_task_state_transition();
+
+CREATE OR REPLACE FUNCTION wf_enforce_agent_run_state_transition() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+ IF NEW.execution_state=OLD.execution_state THEN RETURN NEW; END IF;
+ IF NOT (
+   (OLD.execution_state='QUEUED' AND NEW.execution_state IN ('RUNNING','AWAITING_APPROVAL','CANCELLED')) OR
+   (OLD.execution_state='RUNNING' AND NEW.execution_state IN ('RUNNING','AWAITING_APPROVAL','COMPLETED','RETRY_SCHEDULED','DEAD_LETTER','CANCELLED')) OR
+   (OLD.execution_state='RETRY_SCHEDULED' AND NEW.execution_state IN ('QUEUED','RUNNING','DEAD_LETTER','CANCELLED')) OR
+   (OLD.execution_state='AWAITING_APPROVAL' AND NEW.execution_state IN ('QUEUED','CANCELLED'))
+ ) THEN
+   RAISE EXCEPTION 'invalid workforce agent-run state transition: % -> %',OLD.execution_state,NEW.execution_state;
+ END IF;
+ RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS wf_agent_run_state_transition ON wf_agent_runs;
+CREATE TRIGGER wf_agent_run_state_transition BEFORE UPDATE OF execution_state ON wf_agent_runs
+FOR EACH ROW EXECUTE FUNCTION wf_enforce_agent_run_state_transition();
