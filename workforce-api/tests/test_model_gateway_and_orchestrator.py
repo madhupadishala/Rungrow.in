@@ -40,7 +40,7 @@ async def test_transient_primary_failure_routes_to_fallback_and_records_cost():
         product_id="photo-studio-growth-os",employee_id="market-intel",run_id="r2",
         estimated_input_cost_inr_per_1k=1,estimated_output_cost_inr_per_1k=2)
     assert result.summary=="ok" and usage["model"]=="f1"
-    assert repo.model_usage[0]["estimated_cost_inr"]>=0
+    assert repo.model_usage[0]["estimated_cost_inr"]>0
 
 @pytest.mark.asyncio
 async def test_lease_recovery_reclaims_expired_task_and_idempotent_handler_completes_once():
