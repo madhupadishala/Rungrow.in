@@ -13,7 +13,7 @@ from .agent_runtime import AgentInput, AgentOrchestrator
 from .config import settings
 from .policy import Principal
 from .registry import BY_ID, DEPARTMENTS, EMPLOYEES, public_registry
-from .repositories import WorkforceRepositoryProtocol, TenantRepository, session_factory
+from .repositories import WorkforceRepositoryProtocol, PostgresWorkforceRepository, session_factory
 from .schemas import ApprovalDecision, ApprovalExecutionValidation, AgentRunRequest, CommandRequest, MemoryWrite, TaskCreate
 from .security import current_principal, require_permission
 
@@ -42,7 +42,7 @@ async def get_workforce_repo(p: Principal = Depends(current_principal)):
         raise HTTPException(503, "DATABASE_URL is not configured")
     factory = session_factory()
     async with factory() as session:
-        async with TenantRepository(session, p) as repository:
+        async with PostgresWorkforceRepository(session, p) as repository:
             yield repository
 
 
