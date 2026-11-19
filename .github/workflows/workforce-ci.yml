@@ -85,6 +85,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify preserved static marketing entrypoint
         run: test -s index.html
+      - name: Validate Workforce browser scripts
+        run: |
+          node --check workforce/scripts/workforce.js
+          node --check workforce/scripts/ceo.js
       - name: Build Next.js application when one exists
         if: hashFiles('package.json') != ''
         run: |
