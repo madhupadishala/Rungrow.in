@@ -40,6 +40,8 @@ def read_context():
 
 @pytest.mark.asyncio
 async def test_signed_read_contract_for_leads_quotes_bookings_and_conversation(adapter, read_context):
+    summary = await adapter.get_tenant_summary("studio-hyd-001", context=AdapterContext(
+        "studio-hyd-001", scopes=frozenset({READ}), correlation_id="corr-summary"))
     leads = await adapter.list_leads("studio-hyd-001", limit=10, context=AdapterContext(
         "studio-hyd-001", scopes=frozenset({READ}), correlation_id="corr-leads"))
     quotes = await adapter.list_quotes("studio-hyd-001", context=AdapterContext(
@@ -48,6 +50,8 @@ async def test_signed_read_contract_for_leads_quotes_bookings_and_conversation(a
         "studio-hyd-001", scopes=frozenset({READ}), correlation_id="corr-bookings"))
     conversation = await adapter.get_conversation_context("studio-hyd-001", "lead-hyd-001",
         context=AdapterContext("studio-hyd-001", scopes=frozenset({READ}), correlation_id="corr-conv"))
+    assert summary["tenant_id"] == "studio-hyd-001"
+    assert summary["is_synthetic"] is True
     assert leads["leads"][0]["stage"] == "qualified"
     assert quotes[0]["status"] == "approved"
     assert bookings[0]["state"] == "confirmed"
