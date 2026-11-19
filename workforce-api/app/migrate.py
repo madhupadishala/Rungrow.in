@@ -101,9 +101,11 @@ async def run(database_url: str | None = None) -> list[str]:
         print("Migration chain verified; newly applied: " + (", ".join(applied) if applied else "none"))
         return applied
     finally:
-        if locked:
-            await connection.execute("SELECT pg_advisory_unlock($1)", MIGRATION_LOCK_KEY)
-        await connection.close()
+        try:
+            if locked:
+                await connection.execute("SELECT pg_advisory_unlock($1)", MIGRATION_LOCK_KEY)
+        finally:
+            await connection.close()
 
 
 def main() -> None:
