@@ -49,16 +49,17 @@ class GenericProductAdapter:
     def __init__(self, product_id: str, *, service_secret: str, commercial_stage: str = "COMMERCIAL"):
         if product_id not in GENERIC_PRODUCT_IDS:
             raise ValueError("Generic adapter is only for the six standardised product verticals")
-        if not service_secret:
-            raise ValueError("A product-specific webhook secret is required")
+        
         if commercial_stage not in {"COMMERCIAL", "DISCOVERY_ONLY"}:
             raise ValueError("Unsupported commercial stage")
         self.product_id = product_id
-        self.service_secret = service_secret.encode("utf-8")
+        self.service_secret = service_secret.encode("utf-8") if service_secret else None
         self.commercial_stage = commercial_stage
 
     def sign(self, body: bytes, timestamp: int | str, *, external_tenant_id: str,
              workforce_tenant_id: str) -> str:
+        if not self.service_secret:
+            raise AdapterGovernanceError("Product webhook secret is not configured", 503)
         binding = ".".join((str(timestamp), external_tenant_id, workforce_tenant_id, self.product_id)).encode()
         return "sha256=" + hmac.new(self.service_secret, binding + b"." + body, hashlib.sha256).hexdigest()
 
@@ -112,7 +113,7 @@ class GenericProductAdapter:
                       repository, handoff_handler=None) -> dict[str, Any]:
         if context.product_id != self.product_id or run.get("product_id") != self.product_id:
             raise AdapterGovernanceError("Adapter handoff product binding mismatch")
-        if context.tenant_id != principal.tenant_id or context.workforce_tenant_id != principal.tenant_id:
+        if context.workforce_tenant_id != principal.tenant_id or run.get("tenant_id") != principal.tenant_id:
             raise AdapterGovernanceError("Adapter handoff tenant binding mismatch")
         if self.product_id == "growtoys" and self.commercial_stage == "DISCOVERY_ONLY" and not context.is_sandbox:
             raise AdapterGovernanceError("Growtoys is DISCOVERY_ONLY; live sales handoff is disabled", 403)
