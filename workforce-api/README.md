@@ -72,3 +72,19 @@ python -m app.worker
 ``
 
 The worker only creates plans. External communication, financial, investor, access-control, export and deployment actions must be registered as tools and pass `ExecutionBoundaryGuard`. Sensitive action types always require human approval even if a tool is incorrectly registered with `requires_human_approval=False`. Approval consumption and the pre-execution audit commit before the handler is invoked. A consumed approval cannot be replayed. Sandbox runs cannot invoke tools with `allowed_in_sandbox=False`.
+
+
+## Priority 4: Photo Studio Growth OS adapter v1
+
+The adapter treats `studio-growth-os` as the authoritative source for its tenant, lead, quote, booking and conversation records. Workforce stores only adapter idempotency evidence and lifecycle/revenue telemetry; it does not create a parallel CRM, quote or booking database.
+
+Configure:
+- `STUDIO_GROWTH_OS_API_URL`: standalone Studio Growth OS API base URL.
+- `STUDIO_GROWTH_OS_SERVICE_SECRET`: shared HMAC-SHA256 secret; never expose it to browser clients.
+- `DATABASE_URL`: required for durable adapter idempotency and telemetry.
+
+Outbound requests sign the exact request body using `X-RunGrow-Timestamp` and `X-RunGrow-Signature`, and propagate `X-RunGrow-Tenant-ID`, `X-RunGrow-Product-ID`, `X-Correlation-ID`, and `Idempotency-Key`. The verifier rejects timestamps outside a 300-second replay window. Product read and write scopes are distinct. All write tools are registered with `ExecutionBoundaryGuard`; outreach/handoff actions require a matching, unexpired, third-party-approved, single-use approval and are prohibited in sandbox runs.
+
+Apply migration 005 after migrations 001–004. It creates the append-only `product_telemetry_events` ledger and `adapter_idempotency_keys`, both forced through tenant+product RLS. Only `invoice_recognised` may carry non-zero `recognised_revenue_inr`; onboarding, trial, conversion, booking and churn-risk events remain non-revenue pipeline telemetry.
+
+The local ASGI ingress under `app/adapters/mocks/` and fixtures under `tests/fixtures/photo_studio_growth_os/` are synthetic-only. They are not production customer, booking or revenue evidence.
