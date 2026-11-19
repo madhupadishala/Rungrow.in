@@ -17,10 +17,10 @@ async def test_postgres_role_is_restricted_and_rls_is_forced():
               SELECT c.relname,c.relforcerowsecurity
               FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
               WHERE n.nspname='public' AND c.relname IN
-                ('wf_tasks','wf_agent_runs','wf_memory','wf_approvals','wf_audit_events','wf_model_usage','adapter_idempotency_keys','product_telemetry_events','investment_capital_events','ceo_briefings')
+                ('wf_tasks','wf_agent_runs','wf_memory','wf_approvals','wf_audit_events','wf_model_usage','adapter_idempotency_keys','product_telemetry_events','investment_capital_events','ceo_briefings','worker_heartbeats','release_gate_signoffs')
             """))
             rows=list(forced)
-            assert len(rows)==10
+            assert len(rows)==12
             assert all(row.relforcerowsecurity for row in rows)
             owners=await conn.execute(text("""
               SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -459,5 +459,32 @@ async def test_commercial_intelligence_tables_enforce_tenant_product_rls_and_cam
                 {"id":prospect_id})).scalar_one()==0
             assert (await conn.execute(text("SELECT count(*) FROM campaign_plans WHERE id=:id"),
                 {"id":campaign_id})).scalar_one()==0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_release_signoffs_are_tenant_scoped_and_append_only():
+    engine=create_async_engine(URL)
+    signoff_id=str(__import__("uuid").uuid4())
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','release-tenant-a',true)"))
+            await conn.execute(text("""
+              INSERT INTO release_gate_signoffs
+                (id,tenant_id,release_layer,gate_name,status,evidence,verifier_type,verifier_id,
+                 candidate_sha,environment,occurred_at)
+              VALUES (:id,'release-tenant-a','RELEASE_1_WORKFORCE','ENGINEERING','PASS',
+                '{"ci":"https://github.com/example/run/1"}'::jsonb,'HUMAN','founder','abc123','staging',now())
+            """),{"id":signoff_id})
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','release-tenant-b',true)"))
+            hidden=await conn.execute(text("SELECT count(*) FROM release_gate_signoffs WHERE id=:id"),{"id":signoff_id})
+            assert hidden.scalar_one()==0
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','release-tenant-a',true)"))
+            with pytest.raises(Exception):
+                async with conn.begin_nested():
+                    await conn.execute(text("UPDATE release_gate_signoffs SET status='BLOCKED' WHERE id=:id"),{"id":signoff_id})
     finally:
         await engine.dispose()
