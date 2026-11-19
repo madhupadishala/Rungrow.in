@@ -134,11 +134,15 @@ class PhotoStudioGrowthOSAdapter:
 
     async def _handoff_prospect(self, tenant_id, workforce_tenant_id, prospect_payload,
                                 idempotency_key, correlation_id, repository):
-        if not prospect_payload.get("contact_id"):
+        if not isinstance(prospect_payload, dict) or not prospect_payload.get("contact_id"):
             raise ValueError("prospect_payload.contact_id is required by Studio Growth OS LeadCreate")
+        if prospect_payload.get("tenant_id") not in (None, tenant_id):
+            raise PermissionError("Prospect payload external tenant mismatch")
+        product_payload = {k:v for k,v in prospect_payload.items()
+                           if k not in {"tenant_id","workforce_tenant_id"}}
         ctx = AdapterContext(tenant_id, scopes=frozenset({self.WRITE_SCOPE}),
             correlation_id=correlation_id, workforce_tenant_id=workforce_tenant_id)
-        return await self._governed_write("/api/v1/leads", prospect_payload, ctx, idempotency_key, repository)
+        return await self._governed_write("/api/v1/leads", product_payload, ctx, idempotency_key, repository)
 
     async def dispatch_governed_lead_followup(self, tenant_id, lead_id, message_payload,
             approval_id, idempotency_key, *, repository, principal, employee, run, correlation_id=None):
