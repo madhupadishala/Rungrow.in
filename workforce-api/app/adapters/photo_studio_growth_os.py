@@ -43,7 +43,7 @@ class PhotoStudioGrowthOSAdapter:
             scopes=context.scopes)
         canonical_scopes = ",".join(sorted(context.scopes))
         headers = {"X-RunGrow-Signature":signature, "X-RunGrow-Timestamp":timestamp,
-                   "X-Correlation-ID":context.correlation_id, "X-RunGrow-Tenant-ID":context.tenant_id, "X-RunGrow-External-Tenant-Id":context.tenant_id,
+                   "X-Correlation-ID":context.correlation_id, "X-RunGrow-Tenant-ID":context.workforce_tenant_id, "X-RunGrow-External-Tenant-Id":context.tenant_id,
                    "X-RunGrow-Org-ID":context.workforce_tenant_id,
                    "X-RunGrow-Product-ID":self.product_id, "X-RunGrow-Scopes":canonical_scopes,
                    "Content-Type":"application/json"}
