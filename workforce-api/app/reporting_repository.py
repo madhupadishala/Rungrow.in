@@ -52,8 +52,13 @@ class ReportingRepositoryMixin:
             approval=next((a for a in self.approvals if a["id"]==approval_id
                 and a["tenant_id"]==self.principal.tenant_id and a.get("status")=="APPROVED"
                 and a.get("approver_id") and a.get("approver_id")!=a.get("requester_id")
-                and a.get("expires_at")>datetime.now(timezone.utc)),None)
-            if not approval: raise PermissionError("Investment event requires a verified, live approval")
+                and a.get("action_type") in {"investment.commit","investor.commit","securities.commit"}
+                and a.get("expires_at")>datetime.now(timezone.utc) and a.get("consumed_at") is None
+                and (a.get("payload") or {}).get("event_type")==event_type
+                and (a.get("payload") or {}).get("investor_ref")==investor_ref
+                and float((a.get("payload") or {}).get("amount_inr",-1))==amount),None)
+            if not approval: raise PermissionError("Investment event requires a matching, verified, unused approval")
+            approval["consumed_at"]=when
         item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,"event_type":event_type,
           "investor_ref":investor_ref,"amount_inr":amount,"is_received":is_received,
           "approval_id":approval_id,"source_ref":source_ref,"metadata":metadata or {},
