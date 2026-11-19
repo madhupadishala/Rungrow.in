@@ -65,10 +65,14 @@ class DigitalCEOService:
               "active":sum(str(t.get("status","")).upper() in {"QUEUED","RUNNING","RETRY_SCHEDULED","AWAITING_APPROVAL"} for t in scoped),
               "dead_lettered":sum(str(t.get("status","")).upper() in {"DEAD_LETTER","FAILED"} for t in scoped)})
         corp=[t for t in tasks if not t.get("product_id")]
-        task_rows.append({"product_id":None,"product":"Shared corporate departments",
-          "completed":sum(str(t.get("status","")).upper() in {"COMPLETED","DONE"} for t in corp),
-          "active":sum(str(t.get("status","")).upper() in {"QUEUED","RUNNING","RETRY_SCHEDULED","AWAITING_APPROVAL"} for t in corp),
-          "dead_lettered":sum(str(t.get("status","")).upper() in {"DEAD_LETTER","FAILED"} for t in corp)})
+        corporate_departments=sorted({getattr(e,"department",None) for e in self.registry.values()
+                                      if getattr(e,"product_id",None) is None} - {None})
+        for department in corporate_departments:
+            scoped=[t for t in corp if t.get("department")==department]
+            task_rows.append({"product_id":None,"department":department,"product":department,
+              "completed":sum(str(t.get("status","")).upper() in {"COMPLETED","DONE"} for t in scoped),
+              "active":sum(str(t.get("status","")).upper() in {"QUEUED","RUNNING","RETRY_SCHEDULED","AWAITING_APPROVAL"} for t in scoped),
+              "dead_lettered":sum(str(t.get("status","")).upper() in {"DEAD_LETTER","FAILED"} for t in scoped)})
         by_product={p:Decimal("0") for p in PRODUCT_ALLOCATIONS}
         for event in telemetry:
             if event.get("event_type")=="invoice_recognised":
@@ -83,7 +87,7 @@ class DigitalCEOService:
         received=sum((Decimal(str(e.get("amount_inr") or 0)) for e in capital
           if e.get("event_type")=="capital_received" and e.get("is_received") is True),Decimal("0"))
         committed=sum((Decimal(str(e.get("amount_inr") or 0)) for e in capital
-          if e.get("event_type") in {"term_sheet_signed","commitment_approved"}),Decimal("0"))
+          if e.get("event_type")=="commitment_approved"),Decimal("0"))
         pending=[]
         for a in approvals:
             if str(a.get("status","")).upper()!="PENDING": continue
@@ -107,11 +111,14 @@ class DigitalCEOService:
           "query_completed_at":completed_at.isoformat(),"tasks":task_rows,
           "operating_revenue":{"actual_inr":float(revenue),"target_inr":REVENUE_TARGET_INR,
             "remaining_inr":max(0,REVENUE_TARGET_INR-float(revenue)),"data_source":"product_telemetry_events",
-            "event_filter":"invoice_recognised","is_synthetic":False,"as_of":completed_at.isoformat(),
+            "event_filter":"invoice_recognised","is_synthetic":False,"is_provisional":False,
+            "source_event_count":sum(1 for e in telemetry if e.get("event_type")=="invoice_recognised"),
+            "as_of":completed_at.isoformat(),
             "by_product":revenue_rows},
           "investment_capital":{"received_inr":float(received),"committed_pipeline_inr":float(committed),
             "target_inr":CAPITAL_TARGET_INR,"remaining_received_inr":max(0,CAPITAL_TARGET_INR-float(received)),
-            "data_source":"investment_capital_events","is_synthetic":False,"as_of":completed_at.isoformat()},
+            "data_source":"investment_capital_events","is_synthetic":False,"is_provisional":False,
+            "source_event_count":len(capital),"as_of":completed_at.isoformat()},
           "pending_approvals":pending,"risks":risks,"recommended_actions":actions,
           "source_provenance":["wf_tasks","wf_approvals","product_telemetry_events","investment_capital_events"]}
         await self.repo.save_ceo_briefing(snapshot=snapshot,query_started_at=started,
