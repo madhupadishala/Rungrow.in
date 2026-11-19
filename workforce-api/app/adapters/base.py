@@ -46,18 +46,24 @@ class SignedWebhookVerifier:
         if tolerance_seconds < 1 or tolerance_seconds > 300:
             raise ValueError("Replay window must be between 1 and 300 seconds")
         self.secret, self.tolerance_seconds = secret.encode(), tolerance_seconds
-    def sign(self, body: bytes, timestamp: int | str) -> str:
-        message = str(timestamp).encode("ascii") + b"." + body
+    def sign(self, body: bytes, timestamp: int | str, *, tenant_id: str = "",
+             product_id: str = PRODUCT_ID, workforce_tenant_id: str = "") -> str:
+        binding = ".".join((str(timestamp), tenant_id, workforce_tenant_id, product_id)).encode("utf-8")
+        message = binding + b"." + body
         return "sha256=" + hmac.new(self.secret, message, hashlib.sha256).hexdigest()
     def verify(self, body: bytes, signature: str | None, timestamp: str | None, *,
-               tenant_id: str, product_id: str, now: float | None = None):
+               tenant_id: str, product_id: str, workforce_tenant_id: str = "",
+               now: float | None = None):
         if product_id != PRODUCT_ID or not tenant_id: raise PermissionError("Invalid product or tenant binding")
+        if workforce_tenant_id and workforce_tenant_id == tenant_id:
+            raise PermissionError("External and internal tenant bindings must be distinct")
         if not signature or not timestamp: raise PermissionError("Missing service signature or timestamp")
         try: issued = int(timestamp)
         except (TypeError, ValueError) as exc: raise PermissionError("Invalid signature timestamp") from exc
         if abs((time.time() if now is None else now) - issued) > self.tolerance_seconds:
             raise PermissionError("Service signature timestamp outside replay window")
-        expected = self.sign(body, issued)
+        expected = self.sign(body, issued, tenant_id=tenant_id, product_id=product_id,
+                             workforce_tenant_id=workforce_tenant_id)
         supplied = signature if signature.startswith("sha256=") else "sha256=" + signature
         if not hmac.compare_digest(expected, supplied): raise PermissionError("Invalid service signature")
 
