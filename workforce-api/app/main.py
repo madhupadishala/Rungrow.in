@@ -469,7 +469,7 @@ def _ceo_service(repo):
     return DigitalCEOService(repo, BY_ID, PRODUCTS)
 
 @app.get("/v1/ceo/briefing")
-async def ceo_briefing(p: Principal=Depends(require_permission("reports.read")),
+async def ceo_briefing(p: Principal=Depends(require_permission("executive.read")),
                        repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
     try: return await _ceo_service(repo).briefing(generated_by=p.user_id)
     except Exception as exc: translate_repo_error(exc)
