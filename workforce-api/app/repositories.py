@@ -291,6 +291,8 @@ class PostgresWorkforceRepository(ReportingRepositoryMixin):
             source_url=EXCLUDED.source_url,
             evidence_snippet=CASE WHEN length(EXCLUDED.evidence_snippet)>length(prospect_records.evidence_snippet)
               THEN EXCLUDED.evidence_snippet ELSE prospect_records.evidence_snippet END,
+            decision_maker_name=COALESCE(EXCLUDED.decision_maker_name,prospect_records.decision_maker_name),
+            public_contact_channel=COALESCE(EXCLUDED.public_contact_channel,prospect_records.public_contact_channel),
             confidence_score=GREATEST(prospect_records.confidence_score,EXCLUDED.confidence_score),
             icp_fit_tier=CASE
               WHEN EXCLUDED.icp_fit_tier='HIGH' OR prospect_records.icp_fit_tier='HIGH' THEN 'HIGH'
