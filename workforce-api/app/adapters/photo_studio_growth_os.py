@@ -206,7 +206,7 @@ class PhotoStudioGrowthOSAdapter:
         return response
 
 def register_photo_studio_growth_os_tools(registry, adapter, repository_factory):
-    """Register product-scoped read tools for Workforce employee roles."""
+    """Register product-scoped read and governed write tools for Workforce roles."""
     def assert_tenant(tenant_id):
         if tenant_id == repository_factory.principal.tenant_id or adapter.tenant_map.get(tenant_id) != repository_factory.principal.tenant_id:
             raise PermissionError("External tenant is not mapped to authenticated Workforce organization")
