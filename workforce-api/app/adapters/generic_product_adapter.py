@@ -152,7 +152,7 @@ class GenericProductAdapter:
             raise ValueError("Webhook event_id and event_type are required")
         store = IdempotencyStore(repository)
         claim = await store.begin(tenant_id=workforce_tenant_id, external_tenant_id=external_tenant_id,
-            product_id=self.product_id, direction="INBOUND", key=idempotency_key,
+            product_id=self.product_id, direction="inbound", key=idempotency_key,
             payload=payload, correlation_id=correlation_id)
         if not claim.get("created"):
             if claim.get("response") is not None:
@@ -167,5 +167,5 @@ class GenericProductAdapter:
         response = {"status": "ACCEPTED", "product_id": self.product_id,
                     "event_id": str(event["event_id"]), "api_version": self.api_version}
         await store.complete(tenant_id=workforce_tenant_id, external_tenant_id=external_tenant_id,
-            product_id=self.product_id, direction="INBOUND", key=idempotency_key, response=response)
+            product_id=self.product_id, direction="inbound", key=idempotency_key, response=response)
         return response
