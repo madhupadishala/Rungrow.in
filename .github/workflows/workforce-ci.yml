@@ -1,0 +1,95 @@
+name: Workforce CI
+on:
+  push:
+    branches: [main, feat/month-1-day-1-operating-foundation]
+  pull_request:
+    branches: [main, feat/month-1-day-1-operating-foundation]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workforce-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workforce-api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: rungrow_workforce_test
+          POSTGRES_USER: rungrow_migrator
+          POSTGRES_PASSWORD: rungrow_migrator_ci
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U rungrow_migrator -d rungrow_workforce_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: workforce-api
+    env:
+      PGHOST: localhost
+      PGPORT: 55432
+      PGDATABASE: rungrow_workforce_test
+      PGUSER: rungrow_migrator
+      PGPASSWORD: rungrow_migrator_ci
+      RUNGROW_APP_PASSWORD: rungrow_app_ci_only
+      RUNGROW_TEST_DATABASE_URL: postgresql+asyncpg://rungrow_app_user:rungrow_app_ci_only@localhost:55432/rungrow_workforce_test
+      APP_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: workforce-api/pyproject.toml
+      - name: Install API and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+      - name: Apply migrations 001–006 and provision restricted role
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          mkdir -p /tmp/ci-bin
+          cat > /tmp/ci-bin/docker <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [[ "${1:-}" == "compose" ]]; then shift; fi
+          if [[ "${1:-}" == "-f" ]]; then shift 2; fi
+          if [[ "${1:-}" == "exec" ]]; then
+            shift
+            [[ "${1:-}" == "-T" ]] && shift
+            [[ "${1:-}" == "postgres" ]] && shift
+            exec "$@"
+          fi
+          echo "Unsupported docker shim invocation: $*" >&2
+          exit 2
+          SH
+          chmod +x /tmp/ci-bin/docker
+          echo "/tmp/ci-bin" >> "$GITHUB_PATH"
+          export PATH="/tmp/ci-bin:$PATH"
+          bash ./scripts/init_test_db.sh
+      - name: Run workforce API tests
+        run: pytest -v tests
+
+  marketing-site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify preserved static marketing entrypoint
+        run: test -s index.html
+      - name: Build Next.js application when one exists
+        if: hashFiles('package.json') != ''
+        run: |
+          npm ci
+          npm run build
+      - name: Typecheck Next.js application when a TypeScript config exists
+        if: hashFiles('package.json', 'tsconfig.json') != ''
+        run: npx tsc --noEmit
