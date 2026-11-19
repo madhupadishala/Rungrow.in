@@ -31,7 +31,7 @@ CREATE POLICY investment_capital_tenant_scope ON investment_capital_events
  WITH CHECK (tenant_id=current_setting('app.current_tenant_id',true));
 
 CREATE OR REPLACE FUNCTION wf_validate_investment_approval() RETURNS trigger
-LANGUAGE plpgsql AS $
+LANGUAGE plpgsql AS $$
 DECLARE a wf_approvals%ROWTYPE;
 BEGIN
  IF NEW.event_type <> 'investor_lead' THEN
@@ -54,7 +54,7 @@ BEGIN
  END IF;
  RETURN NEW;
 END;
-$;
+$$;
 DROP TRIGGER IF EXISTS investment_capital_approval_guard ON investment_capital_events;
 CREATE TRIGGER investment_capital_approval_guard
  BEFORE INSERT ON investment_capital_events
