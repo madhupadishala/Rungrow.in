@@ -465,6 +465,11 @@ class InvestmentCapitalEventRequest(BaseModel):
     metadata: dict = Field(default_factory=dict)
     occurred_at: datetime | None = None
 
+class InvestmentApprovalRequest(BaseModel):
+    event_type: str
+    investor_ref: str = Field(min_length=1, max_length=240)
+    amount_inr: float = Field(gt=0)
+
 def _ceo_service(repo):
     return DigitalCEOService(repo, BY_ID, PRODUCTS)
 
@@ -549,5 +554,21 @@ async def record_investment_event(body: InvestmentCapitalEventRequest,
             investor_ref=body.investor_ref,amount_inr=body.amount_inr,
             is_received=body.is_received,approval_id=body.approval_id,
             source_ref=body.source_ref,metadata=body.metadata,occurred_at=body.occurred_at)
+    except Exception as exc:
+        translate_repo_error(exc)
+
+@app.post("/v1/finance/investment-approvals")
+async def request_investment_approval(body: InvestmentApprovalRequest,
+    p: Principal=Depends(require_permission("investment.record")),
+    repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    if body.event_type not in {"term_sheet_signed","commitment_approved","capital_received"}:
+        raise HTTPException(422,"Investment approval is only required for signed, committed or received capital events")
+    try:
+        approval=await repo.create_approval(product_id=None,employee_id="finance",
+            action_type="investment.commit",
+            payload={"event_type":body.event_type,"investor_ref":body.investor_ref,"amount_inr":body.amount_inr},
+            expires_at=datetime.now(timezone.utc)+timedelta(hours=24))
+        return {"approval_id":str(approval["id"]),"status":approval["status"],
+                "event_type":body.event_type,"execution":"not_started"}
     except Exception as exc:
         translate_repo_error(exc)
