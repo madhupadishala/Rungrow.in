@@ -92,10 +92,25 @@ class DigitalCEOService:
           "allocation_label":"PROVISIONAL ALLOCATION","is_provisional":True,
           "data_source":"product_telemetry_events:event_type=invoice_recognised",
           "is_synthetic":False} for pid in PRODUCT_ALLOCATIONS]
-        received=sum((Decimal(str(e.get("amount_inr") or 0)) for e in capital
-          if e.get("event_type")=="capital_received" and e.get("is_received") is True),Decimal("0"))
-        committed=sum((Decimal(str(e.get("amount_inr") or 0)) for e in capital
-          if e.get("event_type")=="commitment_approved"),Decimal("0"))
+        approved_by_investor={}
+        signed_by_investor={}
+        received_by_investor={}
+        received=Decimal("0")
+        for event in capital:
+            investor=str(event.get("investor_ref") or "")
+            amount=Decimal(str(event.get("amount_inr") or 0))
+            if event.get("event_type")=="commitment_approved":
+                approved_by_investor[investor]=approved_by_investor.get(investor,Decimal("0"))+amount
+            elif event.get("event_type")=="term_sheet_signed":
+                signed_by_investor[investor]=signed_by_investor.get(investor,Decimal("0"))+amount
+            elif event.get("event_type")=="capital_received" and event.get("is_received") is True:
+                received+=amount
+                received_by_investor[investor]=received_by_investor.get(investor,Decimal("0"))+amount
+        committed=sum((max(Decimal("0"),amount-received_by_investor.get(investor,Decimal("0")))
+                       for investor,amount in approved_by_investor.items()),Decimal("0"))
+        term_sheet_pipeline=sum((max(Decimal("0"),amount-approved_by_investor.get(investor,Decimal("0"))
+                       -received_by_investor.get(investor,Decimal("0")))
+                       for investor,amount in signed_by_investor.items()),Decimal("0"))
         pending=[]
         for a in approvals:
             if str(a.get("status","")).upper()!="PENDING": continue
@@ -133,6 +148,7 @@ class DigitalCEOService:
             "as_of":completed_at.isoformat(),
             "by_product":revenue_rows},
           "investment_capital":{"received_inr":float(received),"committed_pipeline_inr":float(committed),
+            "term_sheet_pipeline_inr":float(term_sheet_pipeline),
             "target_inr":CAPITAL_TARGET_INR,"remaining_received_inr":max(0,CAPITAL_TARGET_INR-float(received)),
             "data_source":"investment_capital_events","is_synthetic":False,"is_provisional":False,
             "source_event_count":len(capital),"as_of":completed_at.isoformat()},
