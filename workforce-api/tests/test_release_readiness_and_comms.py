@@ -159,3 +159,17 @@ async def test_health_ready_returns_503_when_database_is_missing(client,monkeypa
     response=await client.get("/health/ready")
     assert response.status_code==503
     assert "postgresql" in response.json()["failed_checks"]
+
+
+@pytest.mark.asyncio
+async def test_in_memory_worker_heartbeat_counts_and_freshness(install_test_repository):
+    repo=install_test_repository
+    await repo.heartbeat("worker-test","STARTING")
+    await repo.heartbeat("worker-test","BUSY")
+    await repo.heartbeat("worker-test","IDLE",processed_increment=2,dead_letter_increment=1)
+    rows=await repo.list_worker_heartbeats()
+    assert len(rows)==1
+    assert rows[0]["status"]=="IDLE"
+    assert rows[0]["processed_count"]==2
+    assert rows[0]["dead_letter_count"]==1
+    assert rows[0]["is_fresh"] is True
