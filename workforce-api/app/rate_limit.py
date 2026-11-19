@@ -60,8 +60,9 @@ async def _allow_local(scope_keys: list[str], limit: int, window: int):
     return True,0
 
 class RateLimitMiddleware:
-    def __init__(self, app):
+    def __init__(self, app, use_local=False):
         self.app=app
+        self.use_local=use_local
     async def __call__(self, scope, receive, send):
         if scope["type"]!="http":
             await self.app(scope,receive,send); return
