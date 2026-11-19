@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS release_gate_signoffs (
   evidence jsonb NOT NULL CHECK (jsonb_typeof(evidence)='object' AND evidence <> '{}'::jsonb),
   verifier_type text NOT NULL CHECK (verifier_type IN ('HUMAN','AUTOMATED')),
   verifier_id text NOT NULL CHECK (length(trim(verifier_id)) > 0),
-  candidate_sha text NOT NULL CHECK (candidate_sha ~ '^[0-9a-fA-F]{40,64}
+  candidate_sha text NOT NULL CHECK (length(candidate_sha) BETWEEN 40 AND 64),
+  environment text NOT NULL CHECK (length(trim(environment)) > 0),
 );
 CREATE INDEX IF NOT EXISTS release_gate_signoffs_lookup_idx
   ON release_gate_signoffs(tenant_id,release_layer,gate_name,occurred_at DESC);
