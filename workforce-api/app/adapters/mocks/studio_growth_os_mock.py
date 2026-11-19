@@ -31,23 +31,23 @@ async def _tenant(request,tenant_id):
 
 @app.get("/api/v1/leads")
 async def leads(request:Request,page:int=1,page_size:int=50,stage:str|None=None):
- tenant=request.headers.get("X-RunGrow-Tenant-ID",""); await _tenant(request,tenant)
+ tenant=request.headers.get("X-RunGrow-Tenant-ID",""); await await _tenant(request,tenant)
  rows=[x for x in LEADS if x["tenant_id"]==tenant and (not stage or x["stage"]==stage)]
  return {"leads":rows[:page_size],"total":len(rows),"page":page,"page_size":page_size,"is_synthetic":True}
 
 @app.get("/api/v1/quotes")
 async def quotes(request:Request,status:str|None=None,page:int=1,page_size:int=50):
- tenant=request.headers.get("X-RunGrow-Tenant-ID",""); _tenant(request,tenant)
+ tenant=request.headers.get("X-RunGrow-Tenant-ID",""); await _tenant(request,tenant)
  return [x for x in QUOTES if x["tenant_id"]==tenant and (not status or x["status"]==status)][:page_size]
 
 @app.get("/api/v1/bookings")
 async def bookings(request:Request,state:str|None=None,page:int=1,page_size:int=50):
- tenant=request.headers.get("X-RunGrow-Tenant-ID",""); _tenant(request,tenant)
+ tenant=request.headers.get("X-RunGrow-Tenant-ID",""); await _tenant(request,tenant)
  return [x for x in BOOKINGS if x["tenant_id"]==tenant and (not state or x["state"]==state)][:page_size]
 
 @app.get("/api/v1/conversations")
 async def conversations(request:Request,lead_id:str=Query(...),include_messages:bool=True):
- tenant=request.headers.get("X-RunGrow-Tenant-ID",""); _tenant(request,tenant)
+ tenant=request.headers.get("X-RunGrow-Tenant-ID",""); await _tenant(request,tenant)
  if not any(x["id"]==lead_id and x["tenant_id"]==tenant for x in LEADS): raise HTTPException(404,"Lead not found")
  return {"lead_id":lead_id,"tenant_id":tenant,"channel":"whatsapp","status":"open",
   "messages":[{"direction":"inbound","content":"Please share wedding package details","is_synthetic":True}],
@@ -55,20 +55,20 @@ async def conversations(request:Request,lead_id:str=Query(...),include_messages:
 
 @app.get("/api/v1/analytics/summary")
 async def summary(request:Request):
- tenant=request.headers.get("X-RunGrow-Tenant-ID",""); _tenant(request,tenant)
+ tenant=request.headers.get("X-RunGrow-Tenant-ID",""); await _tenant(request,tenant)
  return {"tenant_id":tenant,"lead_count":len(LEADS),"quote_count":len(QUOTES),
   "booking_count":len(BOOKINGS),"recognised_revenue_inr":0,"is_synthetic":True}
 
 @app.post("/api/v1/leads")
 async def prospect_handoff(request:Request):
- tenant=request.headers.get("X-RunGrow-Tenant-ID",""); _tenant(request,tenant)
+ tenant=request.headers.get("X-RunGrow-Tenant-ID",""); await _tenant(request,tenant)
  payload=await request.json()
  return {"status":"accepted","tenant_id":tenant,"external_reference":"synthetic-handoff-001",
   "received_fields":sorted(payload),"is_synthetic":True}
 
 @app.post("/api/v1/agent/execute-tool")
 async def execute_tool(request:Request):
- tenant=request.headers.get("X-RunGrow-Tenant-ID",""); _tenant(request,tenant)
+ tenant=request.headers.get("X-RunGrow-Tenant-ID",""); await _tenant(request,tenant)
  key=request.headers.get("Idempotency-Key")
  if not key: raise HTTPException(400,"Idempotency-Key required")
  payload=await request.json()
