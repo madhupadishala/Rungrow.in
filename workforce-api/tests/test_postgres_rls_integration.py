@@ -475,8 +475,8 @@ async def test_release_signoffs_are_tenant_scoped_and_append_only():
                 (id,tenant_id,release_layer,gate_name,status,evidence,verifier_type,verifier_id,
                  candidate_sha,environment,occurred_at)
               VALUES (:id,'release-tenant-a','RELEASE_1_WORKFORCE','ENGINEERING','PASS',
-                '{"ci":"https://github.com/example/run/1"}'::jsonb,'HUMAN','founder','abc123','staging',now())
-            """),{"id":signoff_id})
+                '{"ci":"https://github.com/example/run/1"}'::jsonb,'HUMAN','founder',:sha,'staging',now())
+            """),{"id":signoff_id,"sha":"a"*40})
         async with engine.begin() as conn:
             await conn.execute(text("SELECT set_config('app.current_tenant_id','release-tenant-b',true)"))
             hidden=await conn.execute(text("SELECT count(*) FROM release_gate_signoffs WHERE id=:id"),{"id":signoff_id})
