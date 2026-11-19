@@ -25,6 +25,12 @@ class PhotoStudioGrowthOSAdapter:
             raise ValueError("STUDIO_GROWTH_OS_TENANT_SERVICE_TOKENS must be a JSON object") from exc
         if not isinstance(self.tenant_service_tokens, dict):
             raise ValueError("STUDIO_GROWTH_OS_TENANT_SERVICE_TOKENS must be a JSON object")
+        try:
+            self.tenant_map = json.loads(os.getenv("STUDIO_GROWTH_OS_TENANT_MAP", "{}"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("STUDIO_GROWTH_OS_TENANT_MAP must be a JSON object") from exc
+        if not isinstance(self.tenant_map, dict):
+            raise ValueError("STUDIO_GROWTH_OS_TENANT_MAP must be a JSON object")
         self.transport, self.timeout = transport, timeout
 
     def _headers(self, context: AdapterContext, body=b""):
@@ -56,6 +62,8 @@ class PhotoStudioGrowthOSAdapter:
         if context.product_id != PRODUCT_ID: raise PermissionError("Product scope mismatch")
         if not context.workforce_tenant_id or context.workforce_tenant_id == context.tenant_id:
             raise PermissionError("External and internal tenant scopes must remain distinct")
+        if self.tenant_map.get(tenant_id) != context.workforce_tenant_id:
+            raise PermissionError("External tenant is not mapped to this Workforce organization")
         context.require(scope)
 
     async def get_tenant_summary(self, tenant_id, *, context):
@@ -116,7 +124,8 @@ class PhotoStudioGrowthOSAdapter:
 
     async def dispatch_governed_lead_followup(self, tenant_id, lead_id, message_payload,
             approval_id, idempotency_key, *, repository, principal, employee, run, correlation_id=None):
-        if tenant_id != principal.tenant_id: raise PermissionError("Outbound tenant does not match authenticated principal")
+        if self.tenant_map.get(tenant_id) != principal.tenant_id:
+            raise PermissionError("External tenant is not mapped to authenticated Workforce organization")
         ctx = AdapterContext(tenant_id, scopes=frozenset({self.WRITE_SCOPE}),
             correlation_id=correlation_id or str(uuid4()), is_sandbox=bool(run.get("is_sandbox")),
             workforce_tenant_id=principal.tenant_id)
@@ -157,6 +166,8 @@ class PhotoStudioGrowthOSAdapter:
         workforce_tenant_id = payload.get("workforce_tenant_id")
         if workforce_tenant_id != repository.principal.tenant_id or workforce_tenant_id == tenant_id:
             raise PermissionError("Webhook internal Workforce tenant binding mismatch")
+        if self.tenant_map.get(tenant_id) != workforce_tenant_id:
+            raise PermissionError("Webhook external tenant is not mapped to Workforce organization")
         event_id = str(payload.get("event_id") or idempotency_key)
         event_type = payload.get("event_type")
         allowed = {"studio_tenant_onboarded","trial_started","lead_converted","booking_confirmed",
@@ -195,8 +206,8 @@ class PhotoStudioGrowthOSAdapter:
 def register_photo_studio_growth_os_tools(registry, adapter, repository_factory):
     """Register product-scoped read tools for Workforce employee roles."""
     def assert_tenant(tenant_id):
-        if tenant_id != repository_factory.principal.tenant_id:
-            raise PermissionError("Adapter request tenant does not match authenticated repository principal")
+        if tenant_id == repository_factory.principal.tenant_id or adapter.tenant_map.get(tenant_id) != repository_factory.principal.tenant_id:
+            raise PermissionError("External tenant is not mapped to authenticated Workforce organization")
     async def read_leads(tenant_id, status=None, limit=50, correlation_id=None):
         assert_tenant(tenant_id)
         ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),
