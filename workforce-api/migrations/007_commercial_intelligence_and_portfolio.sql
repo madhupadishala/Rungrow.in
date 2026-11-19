@@ -78,6 +78,11 @@ DECLARE
   approval_row wf_approvals%ROWTYPE;
 BEGIN
   NEW.updated_at := now();
+  IF OLD.status IN ('APPROVED','ACTIVE') AND
+     (NEW.approval_id IS DISTINCT FROM OLD.approval_id OR
+      NEW.execution_run_id IS DISTINCT FROM OLD.execution_run_id) THEN
+    RAISE EXCEPTION 'campaign approval binding is immutable after approval';
+  END IF;
   IF NEW.status NOT IN ('APPROVED','ACTIVE') THEN
     IF NEW.status='AWAITING_APPROVAL' AND OLD.status NOT IN ('DRAFT','PAUSED') THEN
       RAISE EXCEPTION 'campaign cannot request approval from current state %',OLD.status;
