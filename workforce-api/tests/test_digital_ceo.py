@@ -44,12 +44,19 @@ async def test_capital_received_requires_separate_live_approval(principal, insta
     now=datetime.now(timezone.utc)
     repo.approvals.append({"id":"approval-verified","tenant_id":principal.tenant_id,
       "status":"APPROVED","approver_id":"founder-2","requester_id":"agent-1",
-      "expires_at":now+timedelta(hours=1)})
+      "action_type":"investment.commit",
+      "payload":{"event_type":"capital_received","investor_ref":"INV-1","amount_inr":100000},
+      "consumed_at":None,"expires_at":now+timedelta(hours=1)})
     event=await repo.record_investment_capital_event(event_type="capital_received",
       investor_ref="INV-1",amount_inr=100000,is_received=True,
       approval_id="approval-verified",occurred_at=now)
     assert event["amount_inr"] == 100000
     assert event["is_received"] is True
+    assert repo.approvals[-1]["consumed_at"] is not None
+    with pytest.raises(PermissionError):
+        await repo.record_investment_capital_event(event_type="capital_received",
+          investor_ref="INV-1",amount_inr=100000,is_received=True,
+          approval_id="approval-verified",occurred_at=now)
 
 \n@pytest.mark.asyncio
 async def test_synthetic_invoice_telemetry_is_excluded_from_recognised_revenue(principal, install_test_repository):
