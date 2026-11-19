@@ -19,6 +19,12 @@ class PhotoStudioGrowthOSAdapter:
         self.base_url = (base_url or os.getenv("STUDIO_GROWTH_OS_API_URL", "http://studio-growth-os")).rstrip("/")
         self.secret = service_secret or os.getenv("STUDIO_GROWTH_OS_SERVICE_SECRET", "")
         self.verifier = SignedWebhookVerifier(self.secret) if self.secret else None
+        try:
+            self.tenant_service_tokens = json.loads(os.getenv("STUDIO_GROWTH_OS_TENANT_SERVICE_TOKENS", "{}"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("STUDIO_GROWTH_OS_TENANT_SERVICE_TOKENS must be a JSON object") from exc
+        if not isinstance(self.tenant_service_tokens, dict):
+            raise ValueError("STUDIO_GROWTH_OS_TENANT_SERVICE_TOKENS must be a JSON object")
         self.transport, self.timeout = transport, timeout
 
     def _headers(self, context: AdapterContext, body=b""):
@@ -26,9 +32,13 @@ class PhotoStudioGrowthOSAdapter:
         if not self.secret: raise RuntimeError("STUDIO_GROWTH_OS_SERVICE_SECRET is required")
         timestamp = str(int(time.time()))
         signature = hmac.new(self.secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
-        return {"X-RunGrow-Signature":"sha256="+signature, "X-RunGrow-Timestamp":timestamp,
-                "X-Correlation-ID":context.correlation_id, "X-RunGrow-Tenant-ID":context.tenant_id,
-                "X-RunGrow-Product-ID":self.product_id, "Content-Type":"application/json"}
+        headers = {"X-RunGrow-Signature":"sha256="+signature, "X-RunGrow-Timestamp":timestamp,
+                   "X-Correlation-ID":context.correlation_id, "X-RunGrow-Tenant-ID":context.tenant_id,
+                   "X-RunGrow-Product-ID":self.product_id, "Content-Type":"application/json"}
+        tenant_token = self.tenant_service_tokens.get(context.tenant_id)
+        if tenant_token:
+            headers["Authorization"] = "Bearer " + tenant_token
+        return headers
 
     async def _request(self, method, path, context, *, params=None, payload=None, idempotency_key=None):
         body = json.dumps(payload or {}, separators=(",",":"), ensure_ascii=False).encode()
