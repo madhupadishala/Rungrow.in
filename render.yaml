@@ -4,7 +4,7 @@ services:
     runtime: docker
     dockerfilePath: ./workforce-api/Dockerfile
     dockerContext: .
-    healthCheckPath: /health
+    healthCheckPath: /health/ready
     preDeployCommand: python -m app.migrate
     envVars:
       - key: APP_ENV
@@ -32,6 +32,16 @@ services:
       - key: STUDIO_GROWTH_OS_TENANT_MAP
         sync: false
       - key: STUDIO_GROWTH_OS_TENANT_SERVICE_TOKENS
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_GRAPH_API_VERSION
+        value: v21.0
+      - key: EMAIL_API_KEY
+        sync: false
+      - key: EMAIL_FROM_ADDRESS
         sync: false
   - type: worker
     name: rungrow-workforce-worker
