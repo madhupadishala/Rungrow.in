@@ -2,6 +2,7 @@
 CREATE TABLE IF NOT EXISTS adapter_idempotency_keys (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id text NOT NULL,
+  external_tenant_id text NOT NULL,
   product_id text NOT NULL REFERENCES wf_product_registry(product_id),
   direction text NOT NULL CHECK (direction IN ('inbound','outbound')),
   idempotency_key text NOT NULL CHECK (length(idempotency_key) BETWEEN 1 AND 200),
@@ -11,7 +12,7 @@ CREATE TABLE IF NOT EXISTS adapter_idempotency_keys (
   correlation_id text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   completed_at timestamptz,
-  CONSTRAINT adapter_idempotency_unique UNIQUE (tenant_id,product_id,direction,idempotency_key),
+  CONSTRAINT adapter_idempotency_unique UNIQUE (tenant_id,external_tenant_id,product_id,direction,idempotency_key),
   CONSTRAINT adapter_idempotency_completion CHECK (
     (status='PROCESSING' AND completed_at IS NULL) OR
     (status='COMPLETED' AND completed_at IS NOT NULL AND response_json IS NOT NULL)
@@ -34,6 +35,7 @@ CREATE POLICY adapter_idempotency_tenant_product_scope ON adapter_idempotency_ke
 CREATE TABLE IF NOT EXISTS product_telemetry_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id text NOT NULL,
+  external_tenant_id text NOT NULL,
   product_id text NOT NULL REFERENCES wf_product_registry(product_id),
   event_id text NOT NULL,
   event_type text NOT NULL CHECK (event_type IN (
@@ -46,7 +48,7 @@ CREATE TABLE IF NOT EXISTS product_telemetry_events (
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
   correlation_id text NOT NULL,
   received_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT product_telemetry_event_unique UNIQUE (tenant_id,product_id,event_id),
+  CONSTRAINT product_telemetry_event_unique UNIQUE (tenant_id,external_tenant_id,product_id,event_id),
   CONSTRAINT product_telemetry_revenue_event_check CHECK (
     (event_type='invoice_recognised') OR recognised_revenue_inr=0
   )
