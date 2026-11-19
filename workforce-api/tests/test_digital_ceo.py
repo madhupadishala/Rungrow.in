@@ -58,7 +58,9 @@ async def test_capital_received_requires_separate_live_approval(principal, insta
           investor_ref="INV-1",amount_inr=100000,is_received=True,
           approval_id="approval-verified",occurred_at=now)
 
-\n@pytest.mark.asyncio
+
+
+@pytest.mark.asyncio
 async def test_synthetic_invoice_telemetry_is_excluded_from_recognised_revenue(principal, install_test_repository):
     repo=install_test_repository
     await repo.record_product_telemetry(tenant_id=principal.tenant_id,
@@ -70,7 +72,9 @@ async def test_synthetic_invoice_telemetry_is_excluded_from_recognised_revenue(p
     assert snapshot["operating_revenue"]["actual_inr"] == 0
     assert snapshot["operating_revenue"]["source_event_count"] == 0
 
-\n@pytest.mark.asyncio
+
+
+@pytest.mark.asyncio
 async def test_capital_pipeline_nets_received_tranches_without_double_counting(principal, install_test_repository):
     repo=install_test_repository
     repo.investment_capital_events.extend([
