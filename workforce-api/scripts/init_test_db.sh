@@ -23,28 +23,14 @@ if [[ "$ready" != "true" ]]; then
   exit 1
 fi
 PSQL=("${COMPOSE[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "$OWNER" -d "$DB")
-# Apply the canonical ordered migration chain only. 001_workforce.sql is a
-# legacy bootstrap from the pre-tenant schema and intentionally is not part
-# of this chain; applying it after 001_initial_workforce_schema.sql recreates
-# shared identity tables and fails with "relation users already exists".
-MIGRATIONS=(
-  001_initial_workforce_schema.sql
-  002_product_scope_and_approval_governance.sql
-  003_durable_workforce_repositories.sql
-  004_durable_task_orchestration.sql
-  005_product_adapters_and_telemetry.sql
-  006_capital_and_ceo_reporting.sql
-  007_commercial_intelligence_and_portfolio.sql
+# Use the same checksum-verified transactional runner used by production.
+# The legacy 001_workforce.sql is intentionally excluded from the canonical chain.
+export DATABASE_URL="postgresql://${OWNER}:${PGPASSWORD:-${POSTGRES_PASSWORD:-rungrow_migrator_local_only}}@${PGHOST:-localhost}:${PGPORT:-55432}/${DB}"
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+(
+  cd "$ROOT"
+  python -m app.migrate
 )
-for name in "${MIGRATIONS[@]}"; do
-  migration="$ROOT/migrations/$name"
-  if [[ ! -f "$migration" ]]; then
-    echo "Required migration $name is missing" >&2
-    exit 1
-  fi
-  echo "Applying $name"
-  "${PSQL[@]}" -f - < "$migration"
-done
 "${PSQL[@]}" <<SQL
 DO \$do\$
 BEGIN
@@ -66,5 +52,5 @@ ALTER DEFAULT PRIVILEGES FOR ROLE $OWNER IN SCHEMA public
 ALTER DEFAULT PRIVILEGES FOR ROLE $OWNER IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO $APP_USER;
 SQL
-echo "Canonical migrations 001_initial_workforce_schema and 002..007 applied. App role: $APP_USER (NOSUPERUSER NOCREATEDB NOCREATEROLE)."
+echo "Checksum-verified migrations 001_initial_workforce_schema and 002..007 applied. App role: $APP_USER (NOSUPERUSER NOCREATEDB NOCREATEROLE)."
 echo "RUNGROW_TEST_DATABASE_URL=postgresql+asyncpg://$APP_USER:$APP_PASSWORD@localhost:55432/$DB"
