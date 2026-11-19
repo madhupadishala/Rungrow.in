@@ -200,7 +200,7 @@ async def test_governed_followup_consumes_third_party_approval_once(adapter):
     payload = {"tenant_id":TENANT,"workforce_tenant_id":WORKFORCE_TENANT,"lead_id":"lead-hyd-001","message_payload":{"quote_id":"quote-hyd-001","channel":"whatsapp","template_vars":{"lead_id":"lead-hyd-001"}},
                "idempotency_key":"approved-write-001","correlation_id":"corr-approved"}
     approval = await repository.create_approval(product_id=PRODUCT,employee_id=employee.id,
-        action_type="whatsapp.send",payload=payload,expires_at=datetime.now(timezone.utc)+timedelta(minutes=5))
+        action_type="outreach.send",payload=payload,expires_at=datetime.now(timezone.utc)+timedelta(minutes=5))
     approval.update(status="APPROVED",approver_id="independent-approver",
                     decided_at=datetime.now(timezone.utc))
     sent=[]
