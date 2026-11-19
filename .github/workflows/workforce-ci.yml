@@ -99,6 +99,12 @@ jobs:
         run: |
           node --check workforce/scripts/workforce.js
           node --check workforce/scripts/ceo.js
+      - name: Validate production deployment manifests
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('vercel.json', 'utf8'))"
+          python -m pip install pyyaml
+          python -c "import yaml; yaml.safe_load(open('render.yaml', encoding='utf-8'))"
+          docker build --pull -f workforce-api/Dockerfile -t rungrow-workforce-api:ci .
       - name: Build Next.js application when one exists
         if: hashFiles('package.json') != ''
         run: |
