@@ -307,14 +307,16 @@ async def photo_studio_growth_os_webhook(
         payload = json.loads(raw)
     except (ValueError, TypeError) as exc:
         raise HTTPException(422, "Invalid webhook JSON") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(422, "Webhook payload must be a JSON object")
     tenant_id = payload.get("tenant_id")
     product_id = payload.get("product_id")
     if product_id != "photo-studio-growth-os" or product_header != product_id:
         raise HTTPException(403, "Webhook product binding mismatch")
     if not tenant_id or tenant_header != tenant_id:
         raise HTTPException(403, "Webhook tenant binding mismatch")
-    if not correlation_id:
-        raise HTTPException(400, "X-Correlation-ID is required")
+    if not correlation_id or len(correlation_id) > 128:
+        raise HTTPException(400, "A valid X-Correlation-ID is required")
     if not idempotency_key:
         raise HTTPException(400, "Idempotency-Key is required")
     secret = os.getenv("STUDIO_GROWTH_OS_SERVICE_SECRET", "")
