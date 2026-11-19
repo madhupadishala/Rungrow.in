@@ -502,12 +502,12 @@ async def ceo_directive(body: CEODirectiveRequest,
             "is_sandbox":body.is_sandbox,"execution":"queued_not_executed"}
 
 @app.get("/v1/dashboards/founder")
-async def founder_dashboard(p: Principal=Depends(require_permission("reports.read")),
+async def founder_dashboard(p: Principal=Depends(require_permission("executive.read")),
                             repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
     return await _ceo_service(repo).briefing(generated_by=p.user_id)
 
 @app.get("/v1/dashboards/ceo")
-async def executive_dashboard(p: Principal=Depends(require_permission("reports.read")),
+async def executive_dashboard(p: Principal=Depends(require_permission("executive.read")),
                               repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
     tasks=await repo.list_tasks()
     runs=await repo.list_agent_runs()
