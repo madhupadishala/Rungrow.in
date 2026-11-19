@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib, hmac, json, os, time
 from uuid import uuid4
 from decimal import Decimal, InvalidOperation
+from datetime import datetime
 from typing import Any
 import httpx
 from .base import AdapterContext, IdempotencyStore, PRODUCT_ID, SignedWebhookVerifier
@@ -141,8 +142,14 @@ class PhotoStudioGrowthOSAdapter:
             raise ValueError("Recognised revenue must be a valid INR amount") from exc
         if not revenue.is_finite() or revenue < 0 or (event_type != "invoice_recognised" and revenue != 0):
             raise ValueError("Recognised revenue is allowed only on invoice_recognised events")
+        occurred_at = payload.get("occurred_at")
+        if isinstance(occurred_at, str):
+            try:
+                occurred_at = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError("occurred_at must be an ISO-8601 timestamp") from exc
         event = {"event_id":event_id,"event_type":event_type,"recognised_revenue_inr":revenue,
-                 "occurred_at":payload.get("occurred_at"),"source_ref":payload.get("source_ref"),
+                 "occurred_at":occurred_at,"source_ref":payload.get("source_ref"),
                  "metadata":payload.get("metadata") or {}}
         store = IdempotencyStore(repository)
         claim = await store.begin(tenant_id=tenant_id,product_id=self.product_id,direction="inbound",
