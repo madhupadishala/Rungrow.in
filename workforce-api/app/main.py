@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from .agent_runtime import AgentInput, AgentOrchestrator
-from .config import settings
+from .config import settings, validate_production_environment
 from .policy import Principal
 from .registry import BY_ID, DEPARTMENTS, EMPLOYEES, public_registry
 from .repositories import WorkforceRepositoryProtocol, PostgresWorkforceRepository, session_factory
@@ -47,6 +47,8 @@ if set(PRODUCT_ROLE_IDS) != set(PRODUCTS):
 
 @app.on_event("startup")
 async def require_database_configuration():
+    if settings.app_env == "production":
+        validate_production_environment()
     if not settings.database_url and settings.app_env != "test":
         raise RuntimeError("DATABASE_URL is required; Workforce API refuses volatile in-memory production storage")
 
