@@ -28,8 +28,9 @@ def session_factory():
 
 
 from .reporting_repository import ReportingRepositoryMixin
+from .release_repository import ReleaseRepositoryMixin
 
-class PostgresWorkforceRepository(ReportingRepositoryMixin):
+class PostgresWorkforceRepository(ReleaseRepositoryMixin, ReportingRepositoryMixin):
     def __init__(self, session: AsyncSession, principal: Principal):
         self.session = session
         self.principal = principal
@@ -657,7 +658,7 @@ class WorkforceRepositoryProtocol(Protocol):
     async def consume_approval(self, approval_id, **kwargs): ...
 
 
-class InMemoryWorkforceRepository(ReportingRepositoryMixin):
+class InMemoryWorkforceRepository(ReleaseRepositoryMixin, ReportingRepositoryMixin):
     """Explicitly injected, per-app test adapter. Never selected by production."""
     def __init__(self, principal: Principal, products: set[str]):
         self.principal, self.products = principal, products
