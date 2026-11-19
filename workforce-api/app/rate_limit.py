@@ -25,32 +25,39 @@ def _policy(path: str):
         if path.startswith(prefix): return policy
     return None
 
-def _client_ip(request: Request) -> str:
-    # Never trust arbitrary X-Forwarded-For unless a trusted proxy has normalized it.
-    return request.client.host if request.client else "unknown"
-
-async def _allow_postgres(scope_key: str, limit: int, window: int):
+async def _allow_postgres(scope_keys: list[str], limit: int, window: int):
     factory=session_factory()
     async with factory() as session:
         async with session.begin():
-            await session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:scope))"),{"scope":scope_key})
-            await session.execute(text("DELETE FROM rate_limit_events WHERE scope_key=:scope AND occurred_at < now() - make_interval(secs => :window)"),
-                                  {"scope":scope_key,"window":window})
-            count=(await session.execute(text("SELECT count(*) FROM rate_limit_events WHERE scope_key=:scope AND occurred_at >= now() - make_interval(secs => :window)"),
-                                         {"scope":scope_key,"window":window})).scalar_one()
-            if count>=limit:
-                oldest=(await session.execute(text("SELECT min(occurred_at) FROM rate_limit_events WHERE scope_key=:scope"),
-                                              {"scope":scope_key})).scalar_one()
-                remaining=max(1,window-int((time.time()-oldest.timestamp())))
-                return False,remaining
-            await session.execute(text("INSERT INTO rate_limit_events(scope_key) VALUES (:scope)"),{"scope":scope_key})
+            for key in sorted(scope_keys):
+                await session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:scope))"),{"scope":key})
+            retry=0
+            for key in scope_keys:
+                await session.execute(text("DELETE FROM rate_limit_events WHERE scope_key=:scope AND occurred_at < now() - make_interval(secs => :window)"),
+                                      {"scope":key,"window":window})
+                count=(await session.execute(text("SELECT count(*) FROM rate_limit_events WHERE scope_key=:scope AND occurred_at >= now() - make_interval(secs => :window)"),
+                                             {"scope":key,"window":window})).scalar_one()
+                if count>=limit:
+                    oldest=(await session.execute(text("SELECT min(occurred_at) FROM rate_limit_events WHERE scope_key=:scope"),
+                                                  {"scope":key})).scalar_one()
+                    retry=max(retry,max(1,window-int((time.time()-oldest.timestamp()))))
+            if retry:
+                return False,retry
+            for key in scope_keys:
+                await session.execute(text("INSERT INTO rate_limit_events(scope_key) VALUES (:scope)"),{"scope":key})
             return True,0
 
-async def _allow_local(scope_key: str, limit: int, window: int):
-    now=time.monotonic(); q=_events[scope_key]
-    while q and q[0] <= now-window: q.popleft()
-    if len(q)>=limit: return False,max(1,int(window-(now-q[0])))
-    q.append(now); return True,0
+async def _allow_local(scope_keys: list[str], limit: int, window: int):
+    now=time.monotonic()
+    retry=0
+    for key in scope_keys:
+        q=_events[key]
+        while q and q[0] <= now-window: q.popleft()
+        if len(q)>=limit:
+            retry=max(retry,max(1,int(window-(now-q[0]))))
+    if retry: return False,retry
+    for key in scope_keys: _events[key].append(now)
+    return True,0
 
 class RateLimitMiddleware:
     def __init__(self, app):
@@ -67,17 +74,18 @@ class RateLimitMiddleware:
         tenant=headers.get("x-rungrow-tenant-id") or headers.get("x-rungrow-external-tenant-id") or "anonymous"
         client=scope.get("client")
         ip=client[0] if client else "unknown"
-        # Tenant+IP key cannot be bypassed by rotating bearer tokens.
-        scope_key=hashlib.sha256(f"{path.split('?')[0]}|{tenant}|{ip}".encode()).hexdigest()
+        normalized_path=path.split("?")[0]
+        ip_key=hashlib.sha256(f"{normalized_path}|ip|{ip}".encode()).hexdigest()
+        tenant_key=hashlib.sha256(f"{normalized_path}|tenant|{tenant}|{ip}".encode()).hexdigest()
+        scope_keys=[ip_key,tenant_key]
         try:
-            allowed,retry=await _allow_postgres(scope_key,limit,window) if settings.database_url else await _allow_local(scope_key,limit,window)
+            allowed,retry=await _allow_postgres(scope_keys,limit,window) if settings.database_url else await _allow_local(scope_keys,limit,window)
         except Exception:
             if settings.app_env=="production":
-                # Abuse protection is a security dependency: fail closed if the shared limiter is unavailable.
                 response=b'{"detail":"Rate limiting dependency unavailable"}'
                 await send({"type":"http.response.start","status":503,"headers":[(b"content-type",b"application/json")]})
                 await send({"type":"http.response.body","body":response}); return
-            allowed,retry=await _allow_local(scope_key,limit,window)
+            allowed,retry=await _allow_local(scope_keys,limit,window)
         if not allowed:
             response=b'{"detail":"Rate limit exceeded"}'
             await send({"type":"http.response.start","status":429,"headers":[(b"content-type",b"application/json"),(b"retry-after",str(retry).encode())]})
