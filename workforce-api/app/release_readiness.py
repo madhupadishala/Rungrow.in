@@ -34,7 +34,9 @@ class ReleaseReadinessService:
                 latest=matching[0] if matching else None
                 if layer=="RELEASE_1_WORKFORCE":
                     if gate_name=="ARCHITECTURE_RELEASE_INTEGRITY" and not migration_ok:
-                        evidence.append("DATABASE_URL and checksum-verified migration chain 001–008")
+                        evidence.append("Live PostgreSQL connection and checksum-verified migrations 001–008")
+                        if migration_state.get("missing"): evidence.append("Missing migration versions: "+", ".join(migration_state["missing"]))
+                        if migration_state.get("drift"): evidence.append("Migration checksum/name drift: "+", ".join(migration_state["drift"]))
                     if gate_name=="SECURITY_TENANT_ISOLATION" and not (
                         os.getenv("JWT_JWKS_URL") or settings.jwt_jwks_url or os.getenv("JWT_PUBLIC_KEY") or settings.jwt_public_key):
                         evidence.append("Production OIDC JWKS URL or asymmetric JWT public key")
