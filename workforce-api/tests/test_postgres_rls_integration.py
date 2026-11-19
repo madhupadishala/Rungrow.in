@@ -373,3 +373,36 @@ async def test_capital_and_ceo_ledgers_are_tenant_scoped_and_append_only():
             assert (await conn.execute(text("SELECT count(*) FROM ceo_briefings"))).scalar_one()==0
     finally:
         await engine.dispose()
+
+\n@pytest.mark.asyncio
+async def test_capital_event_requires_matching_approval_and_consumes_it_once():
+    import json
+    engine=create_async_engine(URL)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','tenant-capital-test',true)"))
+            payload={"event_type":"capital_received","investor_ref":"INV-TEST-01","amount_inr":250000}
+            approval_id=(await conn.execute(text("""
+              INSERT INTO wf_approvals
+                (id,tenant_id,product_id,employee_id,action_type,payload,payload_hash,
+                 requester_id,approver_id,status,expires_at,decided_at,created_at)
+              VALUES (gen_random_uuid(),'tenant-capital-test',NULL,'finance','investment.commit',
+                CAST(:payload AS jsonb),:hash,'finance-user','founder-user','approved',
+                now()+interval '1 hour',now(),now()) RETURNING id
+            """),{"payload":json.dumps(payload),"hash":"0"*64})).scalar_one()
+            await conn.execute(text("""
+              INSERT INTO investment_capital_events
+                (tenant_id,event_type,investor_ref,amount_inr,is_received,approval_id,occurred_at,created_by)
+              VALUES ('tenant-capital-test','capital_received','INV-TEST-01',250000,true,:approval,now(),'finance-user')
+            """),{"approval":approval_id})
+            consumed=(await conn.execute(text("SELECT consumed_at FROM wf_approvals WHERE id=:id"),{"id":approval_id})).scalar_one()
+            assert consumed is not None
+            with pytest.raises(Exception):
+                async with conn.begin_nested():
+                    await conn.execute(text("""
+                      INSERT INTO investment_capital_events
+                        (tenant_id,event_type,investor_ref,amount_inr,is_received,approval_id,occurred_at,created_by)
+                      VALUES ('tenant-capital-test','capital_received','INV-TEST-01',250000,true,:approval,now(),'finance-user')
+                    """),{"approval":approval_id})
+    finally:
+        await engine.dispose()
