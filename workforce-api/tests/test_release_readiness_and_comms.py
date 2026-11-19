@@ -1,0 +1,117 @@
+import pytest
+from types import SimpleNamespace
+from app.communications import (
+    IntegrationNotConfiguredError, TransactionalEmailGateway, WhatsAppCloudGateway,
+)
+from app.release_readiness import ReleaseReadinessService
+
+class GatewayRepo:
+    def __init__(self):
+        self.audit=[]
+        self.failed=[]
+        self.completed=[]
+    async def append_audit(self,*args): self.audit.append(args)
+    async def commit_boundary(self): return None
+    async def consume_approval(self,*args,**kwargs): return {"id":"approval-once"}
+    async def start_agent_run(self,run_id): return None
+    async def fail_agent_run(self,run_id,error): self.failed.append((run_id,error))
+    async def complete_agent_run(self,run_id,result): self.completed.append((run_id,result))
+
+class FakeResponse:
+    def raise_for_status(self): return None
+    def json(self): return {"messages":[{"id":"provider-message-1"}]}
+
+class FakeHttp:
+    def __init__(self): self.calls=[]
+    async def post(self,url,headers,json,timeout):
+        self.calls.append({"url":url,"headers":headers,"json":json,"timeout":timeout})
+        return FakeResponse()
+
+@pytest.fixture
+def execution_context():
+    principal=SimpleNamespace(user_id="founder",tenant_id="tenant-a",
+        permissions=frozenset({"communication.send"}),product_ids=frozenset({"photo-studio-growth-os"}))
+    employee=SimpleNamespace(id="sales-ops",permissions=frozenset({"communication.send"}),
+        department="Sales & Revenue",product_id="photo-studio-growth-os")
+    run={"id":"run-1","tenant_id":"tenant-a","employee_id":"sales-ops",
+         "product_id":"photo-studio-growth-os","is_sandbox":False}
+    return principal,employee,run
+
+@pytest.mark.asyncio
+async def test_whatsapp_live_mode_fails_closed_without_credentials(monkeypatch,execution_context):
+    monkeypatch.delenv("WHATSAPP_ACCESS_TOKEN",raising=False)
+    monkeypatch.delenv("WHATSAPP_PHONE_NUMBER_ID",raising=False)
+    repo=GatewayRepo()
+    principal,employee,run=execution_context
+    gateway=WhatsAppCloudGateway(repo)
+    with pytest.raises(IntegrationNotConfiguredError):
+        await gateway.send(principal=principal,employee=employee,run=run,
+            payload={"to":"919999999999","message":"Appointment details"},approval_id="approved-once")
+    assert repo.failed and any(event[0]=="tool.execution.failed" for event in repo.audit)
+
+@pytest.mark.asyncio
+async def test_email_live_mode_fails_closed_without_credentials(monkeypatch,execution_context):
+    monkeypatch.delenv("EMAIL_API_KEY",raising=False)
+    monkeypatch.delenv("EMAIL_FROM_ADDRESS",raising=False)
+    repo=GatewayRepo()
+    principal,employee,run=execution_context
+    with pytest.raises(IntegrationNotConfiguredError):
+        await TransactionalEmailGateway(repo).send(principal=principal,employee=employee,run=run,
+            payload={"to":"customer@example.com","subject":"Booking","message":"Your booking is confirmed"},
+            approval_id="approved-once")
+    assert repo.failed
+
+@pytest.mark.asyncio
+async def test_sandbox_communication_is_hard_blocked(execution_context):
+    repo=GatewayRepo()
+    principal,employee,run=execution_context
+    run["is_sandbox"]=True
+    with pytest.raises(PermissionError,match="sandbox"):
+        await WhatsAppCloudGateway(repo).send(principal=principal,employee=employee,run=run,
+            payload={"to":"919999999999","message":"Never send"},approval_id="unused")
+    assert not repo.completed
+    assert any(event[0]=="communication.sandbox_blocked" for event in repo.audit)
+
+@pytest.mark.asyncio
+async def test_whatsapp_gateway_adds_ai_disclosure_and_uses_meta_api(monkeypatch,execution_context):
+    monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN","test-token")
+    monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID","123456789")
+    http=FakeHttp()
+    repo=GatewayRepo()
+    principal,employee,run=execution_context
+    result=await WhatsAppCloudGateway(repo,http_client=http).send(
+        principal=principal,employee=employee,run=run,
+        payload={"to":"919999999999","message":"Your appointment is confirmed"},
+        approval_id="approved-once")
+    assert result["messages"][0]["id"]=="provider-message-1"
+    sent=http.calls[0]["json"]["text"]["body"]
+    assert "Your appointment is confirmed" in sent
+    from app.commercial_intelligence import AI_IDENTITY_DISCLOSURE
+    assert AI_IDENTITY_DISCLOSURE in sent
+    assert repo.completed
+
+@pytest.mark.asyncio
+async def test_release_readiness_never_infers_go_from_empty_evidence(install_test_repository):
+    result=await ReleaseReadinessService(install_test_repository).evaluate()
+    assert result["overall_decision"]=="NO_GO"
+    assert set(result["release_layers"])=={
+        "RELEASE_1_WORKFORCE","RELEASE_2_PRODUCTS","RELEASE_3_COMMERCIAL"}
+    assert all(g["status"]=="BLOCKED" for layer in result["release_layers"].values() for g in layer["gates"])
+
+@pytest.mark.asyncio
+async def test_readiness_api_exposes_all_three_layers(client):
+    response=await client.get("/v1/release/readiness")
+    assert response.status_code==200
+    payload=response.json()
+    assert payload["overall_decision"] in {"GO","NO_GO"}
+    assert len(payload["release_layers"])==3
+
+@pytest.mark.asyncio
+async def test_rate_limiter_returns_429_and_retry_after(client,monkeypatch):
+    from app import rate_limit
+    monkeypatch.setitem(rate_limit.POLICIES,"/v1/commercial/prospects/discover",(1,60))
+    first=await client.post("/v1/commercial/prospects/discover",json={})
+    second=await client.post("/v1/commercial/prospects/discover",json={})
+    assert first.status_code in {401,403,422}
+    assert second.status_code==429
+    assert int(second.headers["retry-after"])>=1
