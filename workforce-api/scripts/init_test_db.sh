@@ -57,5 +57,5 @@ ALTER DEFAULT PRIVILEGES FOR ROLE $OWNER IN SCHEMA public
 ALTER DEFAULT PRIVILEGES FOR ROLE $OWNER IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO $APP_USER;
 SQL
-echo "Checksum-verified migrations 001_initial_workforce_schema and 002..007 applied. App role: $APP_USER (NOSUPERUSER NOCREATEDB NOCREATEROLE)."
+echo "Checksum-verified migrations 001_initial_workforce_schema and 002..008 applied. App role: $APP_USER (NOSUPERUSER NOCREATEDB NOCREATEROLE)."
 echo "RUNGROW_TEST_DATABASE_URL=postgresql+asyncpg://$APP_USER:$APP_PASSWORD@localhost:55432/$DB"
