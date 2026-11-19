@@ -93,7 +93,12 @@ class RateLimitMiddleware:
         tenant_key=hashlib.sha256(f"{normalized_path}|tenant|{tenant}|{ip}".encode()).hexdigest()
         scope_keys=[ip_key,tenant_key]
         try:
-            allowed,retry=await _allow_postgres(scope_keys,limit,window) if settings.database_url and not self.use_local else await _allow_local(scope_keys,limit,window)
+            if self.use_local or (settings.app_env!="production" and not settings.database_url):
+                allowed,retry=await _allow_local(scope_keys,limit,window)
+            else:
+                if not settings.database_url:
+                    raise RuntimeError("DATABASE_URL is required for production shared rate limiting")
+                allowed,retry=await _allow_postgres(scope_keys,limit,window)
         except Exception:
             if settings.app_env=="production":
                 response=b'{"detail":"Rate limiting dependency unavailable"}'
