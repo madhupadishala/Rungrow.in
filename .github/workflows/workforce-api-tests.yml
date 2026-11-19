@@ -1,7 +1,7 @@
 name: Workforce API Tests
 on:
   pull_request:
-    branches: [main, feat/workforce-foundation]
+    branches: [main, feat/ai-workforce-platform]
   push:
     branches: [feat/month-1-day-1-operating-foundation]
   workflow_dispatch:
