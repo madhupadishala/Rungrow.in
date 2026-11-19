@@ -33,7 +33,7 @@ from .adapters.registry import build_product_adapter_registry
 app = FastAPI(title="RunGrow Workforce API", version="0.4.0")
 app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins,
     allow_credentials=True, allow_methods=["GET","POST"],
-    allow_headers=["Authorization","Content-Type","Idempotency-Key","X-RunGrow-Signature","X-RunGrow-Timestamp","X-RunGrow-Tenant-ID","X-RunGrow-External-Tenant-Id","X-RunGrow-Product-ID","X-RunGrow-Org-ID","X-Correlation-ID"])
+    allow_headers=["Authorization","Content-Type","Idempotency-Key","X-RunGrow-Signature","X-RunGrow-Timestamp","X-RunGrow-Tenant-ID","X-RunGrow-External-Tenant-Id","X-RunGrow-Product-ID","X-RunGrow-Org-ID","X-RunGrow-Scopes","X-Correlation-ID"])
 
 _PORTFOLIO_PATH = Path(__file__).resolve().parents[2] / "data" / "workforce" / "product-portfolio.json"
 with _PORTFOLIO_PATH.open("r", encoding="utf-8") as f:
@@ -306,9 +306,9 @@ def get_tool_registry(repo: WorkforceRepositoryProtocol = Depends(get_workforce_
     return register_photo_studio_growth_os_tools(registry, adapter, repo)
 
 async def get_adapter_repo(
-    tenant_id: str = Header(..., alias="X-RunGrow-Tenant-ID"),
+    tenant_id: str = Header(..., alias="X-RunGrow-External-Tenant-Id"),
     product_id: str = Header(..., alias="X-RunGrow-Product-ID"),
-    org_id: str = Header(..., alias="X-RunGrow-Org-ID"),
+    org_id: str = Header(..., alias="X-RunGrow-Tenant-ID"),
 ):
     if product_id != "photo-studio-growth-os":
         raise HTTPException(403, "Adapter product binding mismatch")
@@ -333,9 +333,9 @@ async def photo_studio_growth_os_webhook(
     repo: WorkforceRepositoryProtocol = Depends(get_adapter_repo),
     signature: str | None = Header(default=None, alias="X-RunGrow-Signature"),
     timestamp: str | None = Header(default=None, alias="X-RunGrow-Timestamp"),
-    tenant_header: str | None = Header(default=None, alias="X-RunGrow-Tenant-ID"),
+    tenant_header: str | None = Header(default=None, alias="X-RunGrow-External-Tenant-Id"),
     product_header: str | None = Header(default=None, alias="X-RunGrow-Product-ID"),
-    org_header: str | None = Header(default=None, alias="X-RunGrow-Org-ID"),
+    org_header: str | None = Header(default=None, alias="X-RunGrow-Tenant-ID"),
     correlation_id: str | None = Header(default=None, alias="X-Correlation-ID"),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
