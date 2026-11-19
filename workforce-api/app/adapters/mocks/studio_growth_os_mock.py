@@ -53,10 +53,10 @@ async def conversations(request:Request,lead_id:str=Query(...),include_messages:
   "messages":[{"direction":"inbound","content":"Please share wedding package details","is_synthetic":True}],
   "is_synthetic":True}
 
-@app.get("/api/v1/analytics/summary")
-async def summary(request:Request):
+@app.get("/api/v1/analytics/dashboard")
+async def summary(request:Request,range:str="30d"):
  tenant=request.headers.get("X-RunGrow-Tenant-ID",""); await _tenant(request,tenant)
- return {"tenant_id":tenant,"lead_count":len(LEADS),"quote_count":len(QUOTES),
+ return {"tenant_id":tenant,"range":range,"lead_count":len(LEADS),"quote_count":len(QUOTES),
   "booking_count":len(BOOKINGS),"recognised_revenue_inr":0,"is_synthetic":True}
 
 @app.post("/api/v1/leads")
