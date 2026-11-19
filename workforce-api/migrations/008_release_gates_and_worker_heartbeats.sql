@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS rate_limit_events (
 );
 CREATE INDEX IF NOT EXISTS rate_limit_events_scope_time_idx
   ON rate_limit_events(scope_key,occurred_at DESC);
+CREATE INDEX IF NOT EXISTS rate_limit_events_occurred_idx
+  ON rate_limit_events(occurred_at);
 
 DO $do$
 BEGIN
