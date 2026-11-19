@@ -181,3 +181,32 @@ async def test_campaign_brief_always_includes_ai_identity_disclosure():
         channel="RESEARCH_ONLY", employee_id="pgm-photo-studio-growth-os", is_sandbox=True)
     assert AI_IDENTITY_DISCLOSURE in brief.messaging_brief
     assert "AI" in brief.messaging_brief
+
+
+@pytest.mark.asyncio
+async def test_generic_v1_webhook_is_hmac_signed_and_idempotent():
+    p = Principal("service", "workforce-tenant", "service", frozenset({"*"}),
+                  actor_type="service", product_ids=frozenset({"clinics-counter"}))
+    repo = InMemoryWorkforceRepository(p, {"clinics-counter"})
+    adapter = GenericProductAdapter("clinics-counter", service_secret="webhook-secret")
+    payload = {
+        "tenant_id": "external-clinic-tenant",
+        "product_id": "clinics-counter",
+        "event": {"event_id": "invoice-1", "event_type": "invoice_recognised",
+                  "recognised_revenue_inr": 1250, "metadata": {"invoice_ref": "INV-1"}},
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    timestamp = str(int(time.time()))
+    signature = adapter.sign(raw, timestamp, external_tenant_id="external-clinic-tenant",
+                              workforce_tenant_id="workforce-tenant")
+    first = await adapter.handle_webhook(raw_body=raw, signature=signature, timestamp=timestamp,
+        external_tenant_id="external-clinic-tenant", workforce_tenant_id="workforce-tenant",
+        idempotency_key="webhook-once", correlation_id="corr-1", repository=repo)
+    replay = await adapter.handle_webhook(raw_body=raw, signature=signature, timestamp=timestamp,
+        external_tenant_id="external-clinic-tenant", workforce_tenant_id="workforce-tenant",
+        idempotency_key="webhook-once", correlation_id="corr-1", repository=repo)
+    events = await repo.list_product_telemetry()
+    assert first["status"] == "ACCEPTED"
+    assert replay["replayed"] is True
+    assert len(events) == 1
+    assert events[0]["recognised_revenue_inr"] == 1250
