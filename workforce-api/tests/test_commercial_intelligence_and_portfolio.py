@@ -210,3 +210,36 @@ async def test_generic_v1_webhook_is_hmac_signed_and_idempotent():
     assert replay["replayed"] is True
     assert len(events) == 1
     assert events[0]["recognised_revenue_inr"] == 1250
+
+
+@pytest.mark.asyncio
+async def test_campaign_activation_consumes_one_approval_through_execution_boundary():
+    p = principal()
+    repo = InMemoryWorkforceRepository(p, {"photo-studio-growth-os"})
+    employee = BY_ID["pgm-photo-studio-growth-os"]
+    campaign = await repo.create_campaign(product_id="photo-studio-growth-os",
+        name="Approved studio campaign", target_icp_segment="Wedding photography studios",
+        channel="RESEARCH_ONLY",
+        messaging_brief="Research-only brief with AI identity disclosure and no outbound send.",
+        ai_identity_disclosure=AI_IDENTITY_DISCLOSURE, is_sandbox=False,
+        created_by=p.user_id, metadata={})
+    approval = await repo.request_campaign_approval(campaign_id=campaign["id"],
+        product_id="photo-studio-growth-os", employee_id=employee.id,
+        messaging_brief=campaign["messaging_brief"])
+    approval.update(status="APPROVED", approver_id="independent-founder",
+                    decided_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc))
+    run = await repo.create_agent_run(product_id="photo-studio-growth-os",
+        employee_id=employee.id, task="Activate approved campaign", status="planned",
+        summary="", steps=[], correlation_id="campaign-activation-run", is_sandbox=False)
+    service = CommercialIntelligenceService(repo, MockDirectoryFetcher())
+    result = await service.activate_campaign(campaign_id=campaign["id"],
+        approval_id=approval["id"], principal=p, employee=employee, run=run)
+    assert result["status"] == "ACTIVE"
+    assert approval["consumed_at"] is not None
+    assert approval["execution_run_id"] == run["id"]
+    assert run["execution_state"] == "COMPLETED"
+    with pytest.raises(PermissionError):
+        await repo.consume_approval(approval["id"], product_id="photo-studio-growth-os",
+            employee_id=employee.id, action_type="campaign.activate",
+            payload={"campaign_id": campaign["id"], "messaging_brief": campaign["messaging_brief"]},
+            run_id=run["id"])
