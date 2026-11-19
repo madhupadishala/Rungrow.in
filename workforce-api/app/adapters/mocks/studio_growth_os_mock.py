@@ -17,7 +17,7 @@ BOOKINGS=[{"id":"booking-hyd-001","tenant_id":TENANT,"lead_id":"lead-hyd-001","s
  "event_date":"2026-12-12T00:00:00+05:30","is_synthetic":True}]
 
 async def _tenant(request,tenant_id):
- if request.headers.get("X-RunGrow-Tenant-ID")!=tenant_id: raise HTTPException(403,"external tenant binding mismatch")
+ if (request.headers.get("X-RunGrow-External-Tenant-Id") or request.headers.get("X-RunGrow-Tenant-ID"))!=tenant_id: raise HTTPException(403,"external tenant binding mismatch")
  org_id=request.headers.get("X-RunGrow-Org-ID") or request.headers.get("X-RunGrow-Tenant-ID","")
  if not org_id or org_id==tenant_id: raise HTTPException(403,"internal/external tenant separation required")
  if request.headers.get("X-RunGrow-Product-ID")!="photo-studio-growth-os": raise HTTPException(403,"product binding mismatch")
