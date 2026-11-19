@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS campaign_plans (
   ai_identity_disclosure text NOT NULL CHECK (length(trim(ai_identity_disclosure)) >= 20),
   status text NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','AWAITING_APPROVAL','APPROVED','ACTIVE','PAUSED')),
   approval_id uuid REFERENCES wf_approvals(id),
+  execution_run_id uuid REFERENCES wf_agent_runs(id),
   is_sandbox boolean NOT NULL DEFAULT true,
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(metadata)='object'),
   created_by text NOT NULL,
@@ -94,16 +95,16 @@ BEGIN
         AND product_id=NEW.product_id AND action_type='campaign.activate'
         AND status='APPROVED' AND approver_id IS NOT NULL
         AND approver_id<>requester_id AND expires_at>now()
-        AND consumed_at IS NULL
+        AND consumed_at IS NOT NULL
+        AND execution_run_id=NEW.execution_run_id
         AND payload->>'campaign_id'=NEW.id::text
       FOR UPDATE;
-    IF NOT FOUND THEN
-      RAISE EXCEPTION 'campaign requires a matching, approved, unexpired, unused approval';
-    END IF;
-    UPDATE wf_approvals SET consumed_at=now(),execution_run_id=NEW.id
-      WHERE id=NEW.approval_id AND consumed_at IS NULL;
-    IF NOT FOUND THEN
-      RAISE EXCEPTION 'campaign approval was already consumed';
+    IF NOT FOUND OR NEW.execution_run_id IS NULL OR NOT EXISTS (
+      SELECT 1 FROM wf_agent_runs r
+      WHERE r.id=NEW.execution_run_id AND r.tenant_id=NEW.tenant_id
+        AND r.product_id=NEW.product_id
+    ) THEN
+      RAISE EXCEPTION 'campaign requires a matching approval consumed by its authorised execution run';
     END IF;
     RETURN NEW;
   END IF;
@@ -117,7 +118,7 @@ BEGIN
       WHERE id=NEW.approval_id AND tenant_id=NEW.tenant_id
         AND product_id=NEW.product_id AND action_type='campaign.activate'
         AND status='APPROVED' AND consumed_at IS NOT NULL
-        AND execution_run_id=NEW.id
+        AND execution_run_id=NEW.execution_run_id
     ) THEN
       RAISE EXCEPTION 'campaign activation approval binding is invalid';
     END IF;
