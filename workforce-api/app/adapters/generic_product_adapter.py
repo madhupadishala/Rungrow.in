@@ -80,7 +80,9 @@ class GenericProductAdapter:
             raise AdapterGovernanceError("Invalid webhook signature", 401)
 
     async def read(self, *, external_tenant_id: str, context: GenericAdapterContext, repository) -> dict[str, Any]:
-        if context.product_id != self.product_id or context.tenant_id != external_tenant_id:
+        if (context.product_id != self.product_id or context.tenant_id != external_tenant_id
+                or context.workforce_tenant_id != repository.principal.tenant_id
+                or context.tenant_id == context.workforce_tenant_id):
             raise AdapterGovernanceError("Adapter tenant/product context mismatch")
         if "product.read" not in context.scopes and "*" not in context.scopes:
             raise AdapterGovernanceError("Missing product.read scope")
