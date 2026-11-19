@@ -17,7 +17,7 @@ def test_app(principal):
     repository=InMemoryWorkforceRepository(principal,set(PRODUCTS))
     instance=FastAPI()
     instance.include_router(route_source_app.router)
-    instance.add_middleware(RateLimitMiddleware)
+    instance.add_middleware(RateLimitMiddleware, use_local=True)
     async def override_principal():
         return principal
     async def override_repo(p=Depends(current_principal)):
