@@ -114,12 +114,25 @@ class PhotoStudioGrowthOSAdapter:
                                   idempotency_key, correlation_id, repository):
         ctx = AdapterContext(tenant_id, scopes=frozenset({self.WRITE_SCOPE}),
             correlation_id=correlation_id, workforce_tenant_id=workforce_tenant_id)
+        quote_id = message_payload.get("quote_id")
+        if not quote_id:
+            raise ValueError("message_payload.quote_id is required by the Studio Growth OS send_quote tool")
+        channel = message_payload.get("channel", "whatsapp")
+        if channel not in {"whatsapp","email","instagram_dm"}:
+            raise ValueError("Unsupported Studio Growth OS quote delivery channel")
+        quote = await self._request("GET", f"/api/v1/quotes/{quote_id}", ctx)
+        if quote.get("tenant_id") != tenant_id or quote.get("lead_id") != lead_id:
+            raise PermissionError("Quote does not belong to the supplied external tenant and lead")
+        tool_call = {"tool":"send_quote","arguments":{"quote_id":quote_id,"channel":channel,
+            "template_vars":message_payload.get("template_vars") or {}},
+            "idempotency_key":idempotency_key}
         return await self._governed_write("/api/v1/agent/execute-tool",
-            {"tool":"send_quote","arguments":{"lead_id":lead_id,**message_payload},
-             "idempotency_key":idempotency_key}, ctx, idempotency_key, repository)
+            tool_call, ctx, idempotency_key, repository)
 
     async def _handoff_prospect(self, tenant_id, workforce_tenant_id, prospect_payload,
                                 idempotency_key, correlation_id, repository):
+        if not prospect_payload.get("contact_id"):
+            raise ValueError("prospect_payload.contact_id is required by Studio Growth OS LeadCreate")
         ctx = AdapterContext(tenant_id, scopes=frozenset({self.WRITE_SCOPE}),
             correlation_id=correlation_id, workforce_tenant_id=workforce_tenant_id)
         return await self._governed_write("/api/v1/leads", prospect_payload, ctx, idempotency_key, repository)
