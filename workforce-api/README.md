@@ -91,3 +91,8 @@ Outbound requests sign the exact request body using `X-RunGrow-Timestamp` and `X
 Apply migration 005 after migrations 001–004. It creates the append-only `product_telemetry_events` ledger and `adapter_idempotency_keys`, both forced through tenant+product RLS. Only `invoice_recognised` may carry non-zero `recognised_revenue_inr`; onboarding, trial, conversion, booking and churn-risk events remain non-revenue pipeline telemetry.
 
 The local ASGI ingress under `app/adapters/mocks/` and fixtures under `tests/fixtures/photo_studio_growth_os/` are synthetic-only. They are not production customer, booking or revenue evidence.
+
+
+### Live source compatibility notes
+
+The inspected Studio Growth OS router imports `bookings` and `conversations`, and the Prisma schema contains both models, but the corresponding `apps/api/api/v1/endpoints/bookings.py` and `conversations.py` source files were not present at the inspected `main` ref. The adapter and ASGI mock expose the expected `GET /api/v1/bookings` and `GET /api/v1/conversations?lead_id=...` contracts; live reads for those resources require those product routes to be present. The live `agent.py` currently defines `send_quote` and its execute-tool route returns a mock result; governed lead follow-up therefore requires a valid tenant quote ID and uses that existing tool contract, but it does not claim that the product currently performs a real WhatsApp send.
