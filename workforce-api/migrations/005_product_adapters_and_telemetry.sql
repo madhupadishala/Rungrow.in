@@ -72,18 +72,18 @@ CREATE POLICY product_telemetry_tenant_product_scope ON product_telemetry_events
 
 -- Product telemetry is an append-only evidence ledger.
 CREATE OR REPLACE FUNCTION wf_reject_product_telemetry_mutation() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql AS $fn$
 BEGIN
   RAISE EXCEPTION 'product telemetry events are immutable';
 END;
-$$;
+$fn$;
 DROP TRIGGER IF EXISTS product_telemetry_append_only ON product_telemetry_events;
 CREATE TRIGGER product_telemetry_append_only
   BEFORE UPDATE OR DELETE ON product_telemetry_events
   FOR EACH ROW EXECUTE FUNCTION wf_reject_product_telemetry_mutation();
 
 CREATE OR REPLACE FUNCTION wf_guard_adapter_idempotency_identity() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql AS $fn$
 BEGIN
   IF NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
      OR NEW.external_tenant_id IS DISTINCT FROM OLD.external_tenant_id
@@ -96,14 +96,14 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$$;
+$fn$;
 DROP TRIGGER IF EXISTS adapter_idempotency_identity_immutable ON adapter_idempotency_keys;
 CREATE TRIGGER adapter_idempotency_identity_immutable
   BEFORE UPDATE ON adapter_idempotency_keys
   FOR EACH ROW EXECUTE FUNCTION wf_guard_adapter_idempotency_identity();
 
 CREATE OR REPLACE FUNCTION wf_guard_adapter_idempotency_transition() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql AS $fn$
 BEGIN
   IF OLD.status='COMPLETED' THEN
     RAISE EXCEPTION 'completed adapter idempotency records are immutable';
@@ -113,7 +113,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$$;
+$fn$;
 DROP TRIGGER IF EXISTS adapter_idempotency_completion_guard ON adapter_idempotency_keys;
 CREATE TRIGGER adapter_idempotency_completion_guard
   BEFORE UPDATE ON adapter_idempotency_keys
