@@ -6,6 +6,7 @@ from app.main import app as route_source_app, get_workforce_repo, get_adapter_re
 from app.policy import Principal
 from app.repositories import InMemoryWorkforceRepository
 from app.security import current_principal
+from app.rate_limit import RateLimitMiddleware, reset_rate_limits
 
 @pytest.fixture
 def principal():
