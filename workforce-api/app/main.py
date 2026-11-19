@@ -23,7 +23,7 @@ from .orchestrator import DurableTaskOrchestrator
 from .execution_boundary import ToolRegistry, ExecutionBoundaryGuard, ApprovalBoundaryError, SandboxViolation
 from .schemas import OrchestratorDispatchRequest, ToolExecutionRequest
 from .adapters.base import SignedWebhookVerifier
-from .adapters.photo_studio_growth_os import PhotoStudioGrowthOSAdapter, register_photo_studio_growth_os_tools
+from .adapters.photo_studio_growth_os import PhotoStudioGrowthOSAdapter, register_photo_studio_growth_os_tools\nfrom .digital_ceo import DigitalCEOService\nfrom .schemas import BaseModel as _SchemaBaseModel
 
 app = FastAPI(title="RunGrow Workforce API", version="0.4.0")
 app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins,
@@ -447,3 +447,67 @@ async def execute_registered_tool(body: ToolExecutionRequest,
     except HTTPException: raise
     except KeyError as exc: raise HTTPException(404,str(exc)) from exc
     except Exception as exc: translate_repo_error(exc)
+
+\nclass CEODirectiveRequest(_SchemaBaseModel):
+    directive: str = Field(min_length=8, max_length=5000)
+    product_ids: list[str] = Field(default_factory=list)
+    is_sandbox: bool = True
+
+def _ceo_service(repo):
+    return DigitalCEOService(repo, BY_ID, PRODUCTS)
+
+@app.get("/v1/ceo/briefing")
+async def ceo_briefing(p: Principal=Depends(require_permission("reports.read")),
+                       repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    try: return await _ceo_service(repo).briefing(generated_by=p.user_id)
+    except Exception as exc: translate_repo_error(exc)
+
+@app.post("/v1/ceo/directives")
+async def ceo_directive(body: CEODirectiveRequest,
+    p: Principal=Depends(require_permission("work.assign")),
+    repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    if not body.directive.strip(): raise HTTPException(422,"Directive cannot be empty")
+    products=body.product_ids or list(PRODUCTS)
+    if len(set(products))!=len(products): raise HTTPException(422,"Duplicate product scope")
+    for product_id in products:
+        authorize_product_access(p,product_id)
+    created=[]
+    for product_id in products:
+        role_id=PRODUCT_ROLE_IDS[product_id]
+        employee=BY_ID[role_id]
+        created.append(await repo.enqueue_task(product_id=product_id,department=employee.department,
+            assignee_role_id=role_id,title=f"Founder directive: {body.directive[:120]}",
+            description=body.directive,priority="HIGH",is_sandbox=body.is_sandbox,
+            idempotency_key=f"ceo-directive:{uuid4()}"))
+    return {"status":"queued","task_count":len(created),"tasks":created,
+            "is_sandbox":body.is_sandbox,"execution":"queued_not_executed"}
+
+@app.get("/v1/dashboards/founder")
+async def founder_dashboard(p: Principal=Depends(require_permission("reports.read")),
+                            repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    return await _ceo_service(repo).briefing(generated_by=p.user_id)
+
+@app.get("/v1/dashboards/ceo")
+async def executive_dashboard(p: Principal=Depends(require_permission("reports.read")),
+                              repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    tasks=await repo.list_tasks()
+    runs=await repo.list_agent_runs()
+    return {"tasks":tasks,"agent_runs":runs,
+      "sandbox_runs":sum(bool(x.get("is_sandbox")) for x in tasks+runs),
+      "production_runs":sum(not bool(x.get("is_sandbox")) for x in tasks+runs),
+      "escalations":[x for x in tasks if str(x.get("status","")).upper() in {"DEAD_LETTER","FAILED","AWAITING_APPROVAL"}]}
+
+@app.get("/v1/dashboards/pgm/{product_id}")
+async def pgm_dashboard(product_id: str,p: Principal=Depends(require_permission("reports.read")),
+                        repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    authorize_product_access(p,product_id)
+    tasks=await repo.list_tasks(product_id)
+    telemetry=await repo.list_product_telemetry()
+    approvals=await repo.list_approvals(product_id)
+    product_events=[e for e in telemetry if e.get("product_id")==product_id]
+    revenue=sum(float(e.get("recognised_revenue_inr") or 0) for e in product_events if e.get("event_type")=="invoice_recognised")
+    counts={kind:sum(e.get("event_type")==kind for e in product_events) for kind in
+      ("studio_tenant_onboarded","trial_started","lead_converted","booking_confirmed","churn_risk_flagged")}
+    return {"product_id":product_id,"funnel":counts,"recognised_revenue_inr":revenue,
+      "data_source":"product_telemetry_events","is_synthetic":False,"tasks":tasks,
+      "pending_approvals":[a for a in approvals if str(a.get("status","")).upper()=="PENDING"]}
