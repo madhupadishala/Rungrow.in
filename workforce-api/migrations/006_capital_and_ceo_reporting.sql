@@ -48,7 +48,7 @@ BEGIN
       OR COALESCE((a.payload->>'amount_inr')::numeric,-1) <> NEW.amount_inr THEN
      RAISE EXCEPTION 'investment approval does not match event type, investor and amount';
    END IF;
-   UPDATE wf_approvals SET consumed_at=NEW.recorded_at
+   UPDATE wf_approvals SET consumed_at=NEW.recorded_at, execution_run_id=NEW.id
     WHERE id=NEW.approval_id AND tenant_id=NEW.tenant_id AND consumed_at IS NULL;
    IF NOT FOUND THEN RAISE EXCEPTION 'investment approval has already been consumed'; END IF;
  END IF;
