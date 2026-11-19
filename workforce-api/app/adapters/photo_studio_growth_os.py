@@ -159,9 +159,11 @@ class PhotoStudioGrowthOSAdapter:
 
     async def register_qualified_prospect_handoff(self, tenant_id, prospect_payload, approval_id,
             idempotency_key, *, repository, principal, employee, run, correlation_id=None):
-        if tenant_id != principal.tenant_id: raise PermissionError("Outbound tenant does not match authenticated principal")
+        if self.tenant_map.get(tenant_id) != principal.tenant_id:
+            raise PermissionError("External tenant is not mapped to authenticated Workforce organization")
         ctx = AdapterContext(tenant_id, scopes=frozenset({self.WRITE_SCOPE}),
-            correlation_id=correlation_id or str(uuid4()), is_sandbox=bool(run.get("is_sandbox")))
+            correlation_id=correlation_id or str(uuid4()), is_sandbox=bool(run.get("is_sandbox")),
+            workforce_tenant_id=principal.tenant_id)
         payload = {"tenant_id":tenant_id,"workforce_tenant_id":principal.tenant_id,
                    "prospect_payload":prospect_payload,"idempotency_key":idempotency_key,
                    "correlation_id":ctx.correlation_id}
