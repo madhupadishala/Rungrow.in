@@ -128,14 +128,12 @@ class PhotoStudioGrowthOSAdapter:
         channel = message_payload.get("channel", "whatsapp")
         if channel not in {"whatsapp","email","instagram_dm"}:
             raise ValueError("Unsupported Studio Growth OS quote delivery channel")
-        quote = await self._request("GET", f"/api/v1/workforce/quotes/{quote_id}", ctx)
-        if quote.get("tenant_id") != tenant_id or quote.get("lead_id") != lead_id:
-            raise PermissionError("Quote does not belong to the supplied external tenant and lead")
-        tool_call = {"tool":"send_quote","arguments":{"quote_id":quote_id,"channel":channel,
-            "template_vars":{**(message_payload.get("template_vars") or {}),"ai_identity_disclosure":AI_IDENTITY_DISCLOSURE}},
-            "idempotency_key":idempotency_key}
+        followup = {"quote_id":quote_id,"channel":channel,
+            "template_vars":message_payload.get("template_vars") or {},
+            "ai_identity_disclosure":AI_IDENTITY_DISCLOSURE,
+            "correlation_id":correlation_id}
         return await self._governed_write(f"/api/v1/workforce/leads/{lead_id}/followup",
-            tool_call, ctx, idempotency_key, repository)
+            followup, ctx, idempotency_key, repository)
 
     async def _handoff_prospect(self, tenant_id, workforce_tenant_id, prospect_payload,
                                 idempotency_key, correlation_id, repository):
