@@ -81,6 +81,7 @@ The adapter treats `studio-growth-os` as the authoritative source for its tenant
 Configure:
 - `STUDIO_GROWTH_OS_API_URL`: standalone Studio Growth OS API base URL.
 - `STUDIO_GROWTH_OS_SERVICE_SECRET`: shared HMAC-SHA256 secret; never expose it to browser clients.
+- `STUDIO_GROWTH_OS_TENANT_SERVICE_TOKENS`: JSON object mapping each external Studio Growth OS tenant ID to its short-lived service JWT. Existing protected Studio Growth OS routes require tenant membership JWTs; the adapter sends the tenant-matched JWT in addition to its HMAC signature when configured.
 - `DATABASE_URL`: required for durable adapter idempotency and telemetry.
 
 Outbound requests sign the exact request body using `X-RunGrow-Timestamp` and `X-RunGrow-Signature`, and propagate `X-RunGrow-Tenant-ID`, `X-RunGrow-Product-ID`, `X-Correlation-ID`, and `Idempotency-Key`. The verifier rejects timestamps outside a 300-second replay window. Product read and write scopes are distinct. All write tools are registered with `ExecutionBoundaryGuard`; outreach/handoff actions require a matching, unexpired, third-party-approved, single-use approval and are prohibited in sandbox runs.
