@@ -157,25 +157,35 @@ class PhotoStudioGrowthOSAdapter:
 
 def register_photo_studio_growth_os_tools(registry, adapter, repository_factory):
     """Register product-scoped read tools for Workforce employee roles."""
+    def assert_tenant(tenant_id):
+        if tenant_id != repository_factory.principal.tenant_id:
+            raise PermissionError("Adapter request tenant does not match authenticated repository principal")
     async def read_leads(tenant_id, status=None, limit=50, correlation_id=None):
+        assert_tenant(tenant_id)
         ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),correlation_id=correlation_id or str(uuid4()))
         return await adapter.list_leads(tenant_id,status,limit,context=ctx)
     async def read_quotes(tenant_id,status=None,limit=50,correlation_id=None):
+        assert_tenant(tenant_id)
         ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),correlation_id=correlation_id or str(uuid4()))
         return await adapter.list_quotes(tenant_id,status,limit,context=ctx)
     async def read_bookings(tenant_id,status=None,limit=50,correlation_id=None):
+        assert_tenant(tenant_id)
         ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),correlation_id=correlation_id or str(uuid4()))
         return await adapter.list_bookings(tenant_id,status,limit,context=ctx)
     async def read_summary(tenant_id,correlation_id=None):
+        assert_tenant(tenant_id)
         ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),correlation_id=correlation_id or str(uuid4()))
         return await adapter.get_tenant_summary(tenant_id,context=ctx)
     async def read_conversation(tenant_id,lead_id,correlation_id=None):
+        assert_tenant(tenant_id)
         ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),correlation_id=correlation_id or str(uuid4()))
         return await adapter.get_conversation_context(tenant_id,lead_id,context=ctx)
     async def governed_followup(tenant_id, lead_id, message_payload, idempotency_key, correlation_id):
+        assert_tenant(tenant_id)
         return await adapter._send_lead_followup(tenant_id,lead_id,message_payload,idempotency_key,
             correlation_id,repository_factory)
     async def governed_handoff(tenant_id, prospect_payload, idempotency_key, correlation_id):
+        assert_tenant(tenant_id)
         return await adapter._handoff_prospect(tenant_id,prospect_payload,idempotency_key,
             correlation_id,repository_factory)
     for name,handler in (("studio_growth_os.summary.read",read_summary),
