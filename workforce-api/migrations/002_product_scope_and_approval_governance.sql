@@ -16,7 +16,7 @@ ALTER TABLE approvals
 ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS product_id text;
 ALTER TABLE outbox_events ADD COLUMN IF NOT EXISTS product_id text;
 
-DO $$
+DO $do$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'approvals_governance_binding_ck') THEN
     ALTER TABLE approvals ADD CONSTRAINT approvals_governance_binding_ck
@@ -40,7 +40,7 @@ BEGIN
       ) NOT VALID;
   END IF;
 END
-$$;
+$do$;
 
 CREATE INDEX IF NOT EXISTS employees_tenant_product_role
   ON workforce_employees(tenant_id, product_id, role_id);
@@ -57,7 +57,7 @@ CREATE INDEX IF NOT EXISTS audit_tenant_product_time
 CREATE INDEX IF NOT EXISTS outbox_tenant_product_status
   ON outbox_events(tenant_id, product_id, status, available_at);
 
-DO $$
+DO $do$
 DECLARE table_name text;
 BEGIN
   FOREACH table_name IN ARRAY ARRAY[
@@ -82,4 +82,4 @@ BEGIN
     );
   END LOOP;
 END
-$$;
+$do$;
