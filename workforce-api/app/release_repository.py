@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 from uuid import uuid4
+from datetime import datetime, timezone, timedelta
 from sqlalchemy import text
 
 class ReleaseRepositoryMixin:
@@ -9,6 +10,18 @@ class ReleaseRepositoryMixin:
                         dead_letter_increment: int = 0):
         if status not in {"STARTING","IDLE","BUSY","STOPPING","ERROR"}:
             raise ValueError("Invalid worker heartbeat status")
+        if not hasattr(self, "session"):
+            rows=getattr(self,"worker_heartbeats",None)
+            if rows is None: self.worker_heartbeats=[]; rows=self.worker_heartbeats
+            item=next((x for x in rows if x["worker_id"]==worker_id and x["tenant_id"]==self.principal.tenant_id),None)
+            now=datetime.now(timezone.utc).isoformat()
+            if item:
+                item.update(status=status,last_heartbeat_at=now,processed_count=item["processed_count"]+processed_increment,
+                    dead_letter_count=item["dead_letter_count"]+dead_letter_increment)
+            else:
+                rows.append({"worker_id":worker_id,"tenant_id":self.principal.tenant_id,"status":status,
+                    "last_heartbeat_at":now,"processed_count":processed_increment,"dead_letter_count":dead_letter_increment})
+            return
         await self.session.execute(text("""
           INSERT INTO worker_heartbeats(worker_id,tenant_id,status,last_heartbeat_at,processed_count,dead_letter_count)
           VALUES (:worker,:tenant,:status,now(),:processed,:dead)
@@ -22,11 +35,26 @@ class ReleaseRepositoryMixin:
         await self.session.flush()
 
     async def list_worker_heartbeats(self, stale_after_seconds: int = 90):
+        if not hasattr(self, "session"):
+            cutoff=datetime.now(timezone.utc)-timedelta(seconds=stale_after_seconds)
+            return [{**x,"is_fresh":datetime.fromisoformat(x["last_heartbeat_at"])>=cutoff}
+                for x in getattr(self,"worker_heartbeats",[]) if x["tenant_id"]==self.principal.tenant_id]
         return await self._rows("""
           SELECT worker_id,status,last_heartbeat_at,processed_count,dead_letter_count,
                  (last_heartbeat_at >= now() - make_interval(secs => :stale)) AS is_fresh
           FROM worker_heartbeats WHERE tenant_id=:tenant ORDER BY last_heartbeat_at DESC
         """, {"tenant":self.principal.tenant_id,"stale":stale_after_seconds})
+
+    async def verify_migration_chain(self):
+        if not hasattr(self, "session"):
+            return {"ok":False,"missing":["PostgreSQL migration evidence"],"drift":[]}
+        from .migrate import migration_files
+        expected={v:(p.name,c) for v,p,c in migration_files()}
+        rows=await self._rows("SELECT version,filename,checksum_sha256 FROM schema_migrations")
+        actual={str(x["version"]):(x["filename"],x["checksum_sha256"]) for x in rows}
+        missing=sorted(set(expected)-set(actual))
+        drift=sorted(v for v in set(expected)&set(actual) if expected[v]!=actual[v])
+        return {"ok":not missing and not drift and set(actual)==set(expected),"missing":missing,"drift":drift}
 
     async def record_release_gate_signoff(self, *, release_layer: str, gate_name: str,
             status: str, evidence: dict, verifier_type: str, verifier_id: str,
@@ -41,7 +69,15 @@ class ReleaseRepositoryMixin:
             raise ValueError("Verifier identity is required")
         if not isinstance(evidence,dict) or not evidence:
             raise ValueError("Evidence object is required")
-        item=await self._one("""
+        if not hasattr(self, "session"):
+            if not hasattr(self,"release_signoffs"): self.release_signoffs=[]
+            item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,"release_layer":release_layer,
+                "gate_name":gate_name,"status":status,"evidence":evidence,"verifier_type":verifier_type,
+                "verifier_id":verifier_id,"candidate_sha":candidate_sha,"environment":environment,
+                "occurred_at":datetime.now(timezone.utc).isoformat()}
+            self.release_signoffs.insert(0,item)
+            return item
+        return await self._one("""
           INSERT INTO release_gate_signoffs
             (id,tenant_id,release_layer,gate_name,status,evidence,verifier_type,verifier_id,
              candidate_sha,environment,occurred_at)
@@ -51,9 +87,10 @@ class ReleaseRepositoryMixin:
               "gate":gate_name,"status":status,"evidence":json.dumps(evidence),
               "type":verifier_type,"verifier":verifier_id,"sha":candidate_sha,
               "environment":environment})
-        return item
 
     async def list_release_gate_signoffs(self):
+        if not hasattr(self, "session"):
+            return [x for x in getattr(self,"release_signoffs",[]) if x["tenant_id"]==self.principal.tenant_id]
         return await self._rows("""
           SELECT id,release_layer,gate_name,status,evidence,verifier_type,verifier_id,
                  candidate_sha,environment,occurred_at
