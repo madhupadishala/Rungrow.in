@@ -28,6 +28,13 @@ READ = "photo-studio-growth-os:read"
 WRITE = "photo-studio-growth-os:write"
 
 
+@pytest.fixture(autouse=True)
+def tenant_mapping_env(monkeypatch):
+    monkeypatch.setenv("STUDIO_GROWTH_OS_TENANT_MAP", json.dumps({
+        TENANT:WORKFORCE_TENANT, STUDIO_TENANT:WORKFORCE_TENANT
+    }))
+
+
 @pytest.fixture
 def adapter(monkeypatch):
     monkeypatch.setenv("STUDIO_GROWTH_OS_SERVICE_SECRET", SECRET)
