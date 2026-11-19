@@ -106,7 +106,7 @@ class PostgresWorkforceRepository(ReportingRepositoryMixin):
         self._product(product_id)
         return await self._rows("""
           SELECT * FROM wf_tasks
-          WHERE tenant_id=:tenant AND (:product IS NULL OR product_id=:product)
+          WHERE tenant_id=:tenant AND (CAST(:product AS text) IS NULL OR product_id=:product)
           ORDER BY created_at DESC
         """, {"tenant": self.principal.tenant_id, "product": product_id})
 
