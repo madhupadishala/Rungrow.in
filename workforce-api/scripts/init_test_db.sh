@@ -30,6 +30,8 @@ export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 (
   cd "$ROOT"
   python -m app.migrate
+  # The second invocation must observe matching checksums and apply nothing.
+  python -m app.migrate
 )
 "${PSQL[@]}" <<SQL
 DO \$do\$
