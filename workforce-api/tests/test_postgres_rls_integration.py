@@ -227,7 +227,7 @@ async def test_approval_single_use_and_payload_immutability_are_database_enforce
                     await conn.execute(text("UPDATE wf_approvals SET status='APPROVED',approver_id=requester_id,decided_at=now() WHERE id=:id"),{"id":str(approval)})
             with pytest.raises(Exception):
                 async with conn.begin_nested():
-                    await conn.execute(text("UPDATE wf_approvals SET payload=CAST('{\\"message\\":\\"tampered\\"}' AS jsonb) WHERE id=:id"),{"id":str(approval)})
+                    await conn.execute(text("UPDATE wf_approvals SET payload=CAST('{\"message\":\"tampered\"}' AS jsonb) WHERE id=:id"),{"id":str(approval)})
             expired=(await conn.execute(text("""
               INSERT INTO wf_approvals(id,tenant_id,product_id,employee_id,action_type,payload,payload_hash,
                 requester_id,approver_id,status,expires_at,decided_at,created_at)
@@ -337,7 +337,9 @@ async def test_product_telemetry_and_adapter_idempotency_are_forced_and_tenant_p
     finally:
         await engine.dispose()
 
-\n@pytest.mark.asyncio
+
+
+@pytest.mark.asyncio
 async def test_capital_and_ceo_ledgers_are_tenant_scoped_and_append_only():
     engine=create_async_engine(URL)
     try:
@@ -374,7 +376,9 @@ async def test_capital_and_ceo_ledgers_are_tenant_scoped_and_append_only():
     finally:
         await engine.dispose()
 
-\n@pytest.mark.asyncio
+
+
+@pytest.mark.asyncio
 async def test_capital_event_requires_matching_approval_and_consumes_it_once():
     import json
     engine=create_async_engine(URL)
