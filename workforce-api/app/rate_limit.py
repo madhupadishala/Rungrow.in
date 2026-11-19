@@ -73,7 +73,16 @@ class RateLimitMiddleware:
             await self.app(scope,receive,send); return
         limit,window=policy
         headers={k.decode("latin1").lower():v.decode("latin1") for k,v in scope.get("headers",[])}
-        tenant=headers.get("x-rungrow-tenant-id") or headers.get("x-rungrow-external-tenant-id") or "anonymous"
+        tenant=headers.get("x-rungrow-tenant-id") or headers.get("x-rungrow-external-tenant-id")
+        if not tenant and headers.get("authorization","").lower().startswith("bearer "):
+            try:
+                import jwt
+                claims=jwt.decode(headers["authorization"].split(" ",1)[1],
+                    options={"verify_signature":False,"verify_exp":False,"verify_aud":False})
+                tenant=str(claims.get("tid") or "anonymous")
+            except Exception:
+                tenant="anonymous"
+        tenant=tenant or "anonymous"
         client=scope.get("client")
         ip=client[0] if client else "unknown"
         normalized_path=path.split("?")[0]
