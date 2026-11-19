@@ -43,6 +43,13 @@ async def quotes(request:Request,status:str|None=None,page:int=1,page_size:int=5
  tenant=request.headers.get("X-RunGrow-Tenant-ID",""); await _tenant(request,tenant)
  return [x for x in QUOTES if x["tenant_id"]==tenant and (not status or x["status"]==status)][:page_size]
 
+@app.get("/api/v1/quotes/{quote_id}")
+async def quote_detail(request:Request,quote_id:str):
+ tenant=request.headers.get("X-RunGrow-Tenant-ID",""); await _tenant(request,tenant)
+ row=next((x for x in QUOTES if x["id"]==quote_id and x["tenant_id"]==tenant),None)
+ if row is None: raise HTTPException(404,"Quote not found")
+ return row
+
 @app.get("/api/v1/bookings")
 async def bookings(request:Request,state:str|None=None,page:int=1,page_size:int=50):
  tenant=request.headers.get("X-RunGrow-Tenant-ID",""); await _tenant(request,tenant)
@@ -66,6 +73,7 @@ async def summary(request:Request,range:str="30d"):
 async def prospect_handoff(request:Request):
  tenant=request.headers.get("X-RunGrow-Tenant-ID",""); await _tenant(request,tenant)
  payload=await request.json()
+ if not payload.get("contact_id"): raise HTTPException(422,"contact_id required")
  return {"status":"accepted","tenant_id":tenant,"external_reference":"synthetic-handoff-001",
   "received_fields":sorted(payload),"is_synthetic":True}
 
@@ -75,4 +83,6 @@ async def execute_tool(request:Request):
  key=request.headers.get("Idempotency-Key")
  if not key: raise HTTPException(400,"Idempotency-Key required")
  payload=await request.json()
+ if payload.get("tool")=="send_quote" and not payload.get("arguments",{}).get("quote_id"):
+  raise HTTPException(422,"quote_id required for send_quote")
  return {"status":"accepted","tool":payload.get("tool"),"idempotency_key":key,"is_synthetic":True}
