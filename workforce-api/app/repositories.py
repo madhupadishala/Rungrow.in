@@ -323,12 +323,19 @@ class PostgresWorkforceRepository:
           ON CONFLICT(tenant_id,external_tenant_id,product_id,direction,idempotency_key) DO NOTHING RETURNING *""",
           {"id":str(uuid4()),"tenant":tenant_id,"external_tenant":external_tenant_id,"product":product_id,"direction":direction,
            "key":idempotency_key,"hash":payload_hash,"correlation":correlation_id})
-        if item: return {"created":True,"response":None}
+        if item:
+            await self.append_audit("adapter.idempotency.claimed","adapter_idempotency",idempotency_key,
+                product_id,{"direction":direction,"external_tenant_id":external_tenant_id,
+                "correlation_id":correlation_id})
+            return {"created":True,"response":None}
         item=await self._one("""SELECT * FROM adapter_idempotency_keys WHERE tenant_id=:tenant AND external_tenant_id=:external_tenant
           AND product_id=:product AND direction=:direction AND idempotency_key=:key""",
           {"tenant":tenant_id,"external_tenant":external_tenant_id,"product":product_id,"direction":direction,"key":idempotency_key})
         if not item: raise RuntimeError("Idempotency conflict row unavailable")
         if item["payload_hash"] != payload_hash: raise ValueError("Idempotency-Key reused with a different payload")
+        await self.append_audit("adapter.idempotency.replayed","adapter_idempotency",idempotency_key,
+            product_id,{"direction":direction,"external_tenant_id":external_tenant_id,
+            "correlation_id":correlation_id})
         return {"created":False,"response":item.get("response_json"),"status":item["status"]}
 
     async def complete_adapter_idempotency(self, *, tenant_id, external_tenant_id, product_id, direction, idempotency_key, response):
@@ -340,6 +347,8 @@ class PostgresWorkforceRepository:
           {"tenant":tenant_id,"external_tenant":external_tenant_id,"product":product_id,"direction":direction,"key":idempotency_key,
            "response":json.dumps(response)})
         if not item: raise PermissionError("Idempotency record unavailable or completed")
+        await self.append_audit("adapter.idempotency.completed","adapter_idempotency",idempotency_key,
+            product_id,{"direction":direction,"external_tenant_id":external_tenant_id})
 
     async def record_product_telemetry(self, *, tenant_id, external_tenant_id, product_id, event, correlation_id):
         if tenant_id != self.principal.tenant_id: raise PermissionError("Telemetry tenant mismatch")
@@ -763,10 +772,14 @@ class InMemoryWorkforceRepository:
           x["product_id"]==product_id and x["direction"]==direction and x["idempotency_key"]==idempotency_key),None)
         if item:
             if item["payload_hash"] != payload_hash: raise ValueError("Idempotency-Key reused with a different payload")
+            self._audit("adapter.idempotency.replayed","adapter_idempotency",idempotency_key,product_id,
+              {"direction":direction,"external_tenant_id":external_tenant_id,"correlation_id":correlation_id})
             return {"created":False,"response":item.get("response"),"status":item["status"]}
         self.adapter_idempotency.append({"tenant_id":tenant_id,"external_tenant_id":external_tenant_id,"product_id":product_id,"direction":direction,
           "idempotency_key":idempotency_key,"payload_hash":payload_hash,"status":"PROCESSING",
           "response":None,"correlation_id":correlation_id})
+        self._audit("adapter.idempotency.claimed","adapter_idempotency",idempotency_key,product_id,
+          {"direction":direction,"external_tenant_id":external_tenant_id,"correlation_id":correlation_id})
         return {"created":True,"response":None}
 
     async def complete_adapter_idempotency(self, *, tenant_id, external_tenant_id, product_id, direction, idempotency_key, response):
@@ -776,6 +789,8 @@ class InMemoryWorkforceRepository:
           x["product_id"]==product_id and x["direction"]==direction and x["idempotency_key"]==idempotency_key),None)
         if not item or item["status"]!="PROCESSING": raise PermissionError("Idempotency record unavailable or completed")
         item.update(status="COMPLETED",response=response)
+        self._audit("adapter.idempotency.completed","adapter_idempotency",idempotency_key,product_id,
+          {"direction":direction,"external_tenant_id":external_tenant_id})
 
     async def record_product_telemetry(self, *, tenant_id, external_tenant_id, product_id, event, correlation_id):
         if tenant_id != self.principal.tenant_id: raise PermissionError("Telemetry tenant mismatch")
