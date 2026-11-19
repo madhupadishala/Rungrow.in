@@ -31,8 +31,9 @@ class PhotoStudioGrowthOSAdapter:
         if context.product_id != self.product_id: raise PermissionError("Product adapter binding mismatch")
         if not self.secret: raise RuntimeError("STUDIO_GROWTH_OS_SERVICE_SECRET is required")
         timestamp = str(int(time.time()))
-        signature = hmac.new(self.secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
-        headers = {"X-RunGrow-Signature":"sha256="+signature, "X-RunGrow-Timestamp":timestamp,
+        signature = self.verifier.sign(body, timestamp, tenant_id=context.tenant_id,
+            product_id=self.product_id, workforce_tenant_id=context.workforce_tenant_id)
+        headers = {"X-RunGrow-Signature":signature, "X-RunGrow-Timestamp":timestamp,
                    "X-Correlation-ID":context.correlation_id, "X-RunGrow-Tenant-ID":context.tenant_id,
                    "X-RunGrow-Product-ID":self.product_id, "Content-Type":"application/json"}
         tenant_token = self.tenant_service_tokens.get(context.tenant_id)
@@ -147,8 +148,10 @@ class PhotoStudioGrowthOSAdapter:
     async def handle_webhook(self, *, body, signature, timestamp, tenant_id, product_id,
                              idempotency_key, correlation_id, repository):
         if not self.verifier: raise RuntimeError("STUDIO_GROWTH_OS_SERVICE_SECRET is required")
-        self.verifier.verify(body, signature, timestamp, tenant_id=tenant_id, product_id=product_id)
         payload = json.loads(body)
+        workforce_tenant_id = payload.get("workforce_tenant_id")
+        self.verifier.verify(body, signature, timestamp, tenant_id=tenant_id,
+            product_id=product_id, workforce_tenant_id=workforce_tenant_id)
         if payload.get("tenant_id") != tenant_id or payload.get("product_id") != self.product_id:
             raise PermissionError("Webhook tenant/product binding mismatch")
         workforce_tenant_id = payload.get("workforce_tenant_id")
