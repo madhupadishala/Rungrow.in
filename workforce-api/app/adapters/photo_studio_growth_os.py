@@ -1,10 +1,9 @@
 """Photo Studio Growth OS v1 adapter; product remains its own system of record."""
 from __future__ import annotations
-import hashlib, hmac, json, os, time
+import hashlib, json, os, time
 from uuid import uuid4
 from decimal import Decimal, InvalidOperation
 from datetime import datetime
-from typing import Any
 import httpx
 from .base import AdapterContext, IdempotencyStore, PRODUCT_ID, SignedWebhookVerifier
 from ..execution_boundary import ToolDefinition
