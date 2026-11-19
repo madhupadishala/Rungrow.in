@@ -36,6 +36,7 @@ class ReportingRepositoryMixin:
         if event_type!="investor_lead" and not approval_id:
             raise ValueError("A verified approval_id is required for this investment event")
         when=occurred_at or datetime.now(timezone.utc)
+        event_id=str(uuid4())
         if hasattr(self,"session"):
             item=await self._one("""INSERT INTO investment_capital_events
               (tenant_id,event_type,investor_ref,amount_inr,is_received,approval_id,source_ref,
@@ -59,7 +60,8 @@ class ReportingRepositoryMixin:
                 and float((a.get("payload") or {}).get("amount_inr",-1))==amount),None)
             if not approval: raise PermissionError("Investment event requires a matching, verified, unused approval")
             approval["consumed_at"]=when
-        item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,"event_type":event_type,
+            approval["execution_run_id"]=event_id
+        item={"id":event_id,"tenant_id":self.principal.tenant_id,"event_type":event_type,
           "investor_ref":investor_ref,"amount_inr":amount,"is_received":is_received,
           "approval_id":approval_id,"source_ref":source_ref,"metadata":metadata or {},
           "occurred_at":when,"recorded_at":datetime.now(timezone.utc),"created_by":self.principal.user_id}
