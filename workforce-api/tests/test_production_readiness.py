@@ -87,10 +87,10 @@ def test_production_startup_rejects_missing_required_secrets():
 def test_production_startup_rejects_static_development_jwt_secret():
     env = {
         "APP_ENV": "production",
-        "DATABASE_URL": "postgresql://user:pass@host/db",
+        "DATABASE_URL": "postgresql://user:pass@host/db?sslmode=require",
         "JWT_JWKS_URL": "https://issuer.example/.well-known/jwks.json",
-        "STUDIO_GROWTH_OS_SERVICE_SECRET": "a-real-secret",
-        "RUNGROW_ADAPTER_WEBHOOK_SECRET": "another-real-secret",
+        "STUDIO_GROWTH_OS_SERVICE_SECRET": "a-real-secret-value-with-at-least-32-bytes",
+        "RUNGROW_ADAPTER_WEBHOOK_SECRET": "another-real-secret-value-with-at-least-32-bytes",
         "JWT_SECRET": "local-development-secret-change-before-deploy",
     }
     with pytest.raises(RuntimeError, match="Static development/test JWT"):
