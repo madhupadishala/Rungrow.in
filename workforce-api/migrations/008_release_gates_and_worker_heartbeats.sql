@@ -50,6 +50,10 @@ DROP TRIGGER IF EXISTS release_gate_signoffs_no_mutation ON release_gate_signoff
 CREATE TRIGGER release_gate_signoffs_no_mutation
   BEFORE UPDATE OR DELETE ON release_gate_signoffs
   FOR EACH ROW EXECUTE FUNCTION wf_release_signoffs_append_only();
+DROP TRIGGER IF EXISTS release_gate_signoffs_no_truncate ON release_gate_signoffs;
+CREATE TRIGGER release_gate_signoffs_no_truncate
+  BEFORE TRUNCATE ON release_gate_signoffs
+  FOR EACH STATEMENT EXECUTE FUNCTION wf_release_signoffs_append_only();
 
 -- Shared PostgreSQL event store makes rate limits consistent across API replicas.
 CREATE TABLE IF NOT EXISTS rate_limit_events (
