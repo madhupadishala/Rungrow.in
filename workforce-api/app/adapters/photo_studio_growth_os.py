@@ -7,6 +7,7 @@ from datetime import datetime
 import httpx
 from .base import AdapterContext, IdempotencyStore, PRODUCT_ID, SignedWebhookVerifier
 from ..execution_boundary import ToolDefinition
+from ..commercial_intelligence import AI_IDENTITY_DISCLOSURE
 
 class PhotoStudioGrowthOSAdapter:
     product_id = PRODUCT_ID
@@ -117,6 +118,8 @@ class PhotoStudioGrowthOSAdapter:
                                   idempotency_key, correlation_id, repository):
         ctx = AdapterContext(tenant_id, scopes=frozenset({self.WRITE_SCOPE}),
             correlation_id=correlation_id, workforce_tenant_id=workforce_tenant_id)
+        if message_payload.get("ai_identity_disclosure") != AI_IDENTITY_DISCLOSURE:
+            raise PermissionError("Outbound follow-up requires the approved RunGrow AI identity disclosure")
         quote_id = message_payload.get("quote_id")
         if not quote_id:
             raise ValueError("message_payload.quote_id is required by the Studio Growth OS send_quote tool")
@@ -127,7 +130,7 @@ class PhotoStudioGrowthOSAdapter:
         if quote.get("tenant_id") != tenant_id or quote.get("lead_id") != lead_id:
             raise PermissionError("Quote does not belong to the supplied external tenant and lead")
         tool_call = {"tool":"send_quote","arguments":{"quote_id":quote_id,"channel":channel,
-            "template_vars":message_payload.get("template_vars") or {}},
+            "template_vars":{**(message_payload.get("template_vars") or {}),"ai_identity_disclosure":AI_IDENTITY_DISCLOSURE}},
             "idempotency_key":idempotency_key}
         return await self._governed_write("/api/v1/agent/execute-tool",
             tool_call, ctx, idempotency_key, repository)
