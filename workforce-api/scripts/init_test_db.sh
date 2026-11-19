@@ -6,6 +6,10 @@ OWNER="${PGUSER:-rungrow_migrator}"
 APP_USER="rungrow_app_user"
 APP_PASSWORD="${RUNGROW_APP_PASSWORD:-rungrow_app_local_only}"
 COMPOSE=(docker compose -f "$ROOT/docker-compose.test.yml")
+if [[ ! -f "$ROOT/migrations/005_product_adapters_and_telemetry.sql" ]]; then
+  echo "Required migration 005_product_adapters_and_telemetry.sql is missing" >&2
+  exit 1
+fi
 ready=false
 for attempt in {1..30}; do
   if "${COMPOSE[@]}" exec -T postgres pg_isready -U "$OWNER" -d "$DB" >/dev/null 2>&1; then
@@ -43,5 +47,5 @@ ALTER DEFAULT PRIVILEGES FOR ROLE $OWNER IN SCHEMA public
 ALTER DEFAULT PRIVILEGES FOR ROLE $OWNER IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO $APP_USER;
 SQL
-echo "Migration bootstrap complete. App role: $APP_USER (NOSUPERUSER NOCREATEDB NOCREATEROLE)."
+echo "Migrations 001..005 applied. App role: $APP_USER (NOSUPERUSER NOCREATEDB NOCREATEROLE)."
 echo "RUNGROW_TEST_DATABASE_URL=postgresql+asyncpg://$APP_USER:$APP_PASSWORD@localhost:55432/$DB"
