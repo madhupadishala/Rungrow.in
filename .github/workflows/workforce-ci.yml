@@ -55,8 +55,18 @@ jobs:
           pip install -e '.[dev]'
       - name: Apply migrations 001–006 and provision restricted role
         run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
+          # Runner package mirrors can transiently fail. Retry installation without
+          # making PostgreSQL migration validation dependent on a single mirror request.
+          for attempt in 1 2 3; do
+            if sudo apt-get update && sudo apt-get install -y postgresql-client; then
+              break
+            fi
+            if [[ "$attempt" == "3" ]]; then
+              echo "Unable to install PostgreSQL client after 3 attempts" >&2
+              exit 1
+            fi
+            sleep 8
+          done
           mkdir -p /tmp/ci-bin
           cat > /tmp/ci-bin/docker <<'SH'
           #!/usr/bin/env bash
