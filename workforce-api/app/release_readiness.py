@@ -22,7 +22,8 @@ class ReleaseReadinessService:
         signoffs=await self.repository.list_release_gate_signoffs()
         heartbeats=await self.repository.list_worker_heartbeats()
         expected={v for v,_,_ in migration_files()}
-        migration_ok=bool(settings.database_url) and expected=={v for v,_,_ in migration_files()}
+        migration_state=await self.repository.verify_migration_chain()
+        migration_ok=bool(migration_state.get("ok"))
         adapters=self.adapter_registry.readiness() if self.adapter_registry else []
         results={}
         for layer in LAYERS:
