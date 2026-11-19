@@ -40,7 +40,7 @@ class ProductAdapterProtocol(Protocol):
         approval_id: str, idempotency_key: str, **boundary_context) -> dict: ...
 
 class SignedWebhookVerifier:
-    """HMAC-SHA256 over timestamp + dot + exact raw request body."""
+    """HMAC-SHA256 over timestamp, external tenant, internal org, product and exact raw body."""
     def __init__(self, secret: str, tolerance_seconds: int = 300):
         if not secret: raise ValueError("A product webhook secret is required")
         if tolerance_seconds < 1 or tolerance_seconds > 300:
