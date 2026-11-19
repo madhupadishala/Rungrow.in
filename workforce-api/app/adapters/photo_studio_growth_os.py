@@ -53,6 +53,8 @@ class PhotoStudioGrowthOSAdapter:
     def _bind(tenant_id, context, scope):
         if tenant_id != context.tenant_id: raise PermissionError("External customer tenant mismatch")
         if context.product_id != PRODUCT_ID: raise PermissionError("Product scope mismatch")
+        if not context.workforce_tenant_id or context.workforce_tenant_id == context.tenant_id:
+            raise PermissionError("External and internal tenant scopes must remain distinct")
         context.require(scope)
 
     async def get_tenant_summary(self, tenant_id, *, context):
@@ -87,23 +89,28 @@ class PhotoStudioGrowthOSAdapter:
         self._bind(context.tenant_id, context, self.WRITE_SCOPE)
         if context.is_sandbox: raise PermissionError("Product writes are prohibited in sandbox mode")
         store = IdempotencyStore(repository)
-        claim = await store.begin(tenant_id=context.tenant_id, product_id=self.product_id,
+        claim = await store.begin(tenant_id=context.workforce_tenant_id,
+            external_tenant_id=context.tenant_id, product_id=self.product_id,
             direction="outbound", key=key, payload=payload, correlation_id=context.correlation_id)
         if not claim.get("created"): return claim.get("response") or {"status":"duplicate","idempotent":True}
         result = await self._request("POST", path, context, payload=payload, idempotency_key=key)
-        await store.complete(tenant_id=context.tenant_id, product_id=self.product_id,
+        await store.complete(tenant_id=context.workforce_tenant_id,
+            external_tenant_id=context.tenant_id, product_id=self.product_id,
             direction="outbound", key=key, response=result)
         return result
 
-    async def _send_lead_followup(self, tenant_id, lead_id, message_payload, idempotency_key,
-                                  correlation_id, repository):
-        ctx = AdapterContext(tenant_id, scopes=frozenset({self.WRITE_SCOPE}), correlation_id=correlation_id)
+    async def _send_lead_followup(self, tenant_id, workforce_tenant_id, lead_id, message_payload,
+                                  idempotency_key, correlation_id, repository):
+        ctx = AdapterContext(tenant_id, scopes=frozenset({self.WRITE_SCOPE}),
+            correlation_id=correlation_id, workforce_tenant_id=workforce_tenant_id)
         return await self._governed_write("/api/v1/agent/execute-tool",
             {"tool":"send_quote","arguments":{"lead_id":lead_id,**message_payload},
              "idempotency_key":idempotency_key}, ctx, idempotency_key, repository)
 
-    async def _handoff_prospect(self, tenant_id, prospect_payload, idempotency_key, correlation_id, repository):
-        ctx = AdapterContext(tenant_id, scopes=frozenset({self.WRITE_SCOPE}), correlation_id=correlation_id)
+    async def _handoff_prospect(self, tenant_id, workforce_tenant_id, prospect_payload,
+                                idempotency_key, correlation_id, repository):
+        ctx = AdapterContext(tenant_id, scopes=frozenset({self.WRITE_SCOPE}),
+            correlation_id=correlation_id, workforce_tenant_id=workforce_tenant_id)
         return await self._governed_write("/api/v1/leads", prospect_payload, ctx, idempotency_key, repository)
 
     async def dispatch_governed_lead_followup(self, tenant_id, lead_id, message_payload,
@@ -111,7 +118,8 @@ class PhotoStudioGrowthOSAdapter:
         if tenant_id != principal.tenant_id: raise PermissionError("Outbound tenant does not match authenticated principal")
         ctx = AdapterContext(tenant_id, scopes=frozenset({self.WRITE_SCOPE}),
             correlation_id=correlation_id or str(uuid4()), is_sandbox=bool(run.get("is_sandbox")))
-        payload = {"tenant_id":tenant_id,"lead_id":lead_id,"message_payload":message_payload,
+        payload = {"tenant_id":tenant_id,"workforce_tenant_id":principal.tenant_id,
+                   "lead_id":lead_id,"message_payload":message_payload,
                    "idempotency_key":idempotency_key,"correlation_id":ctx.correlation_id}
         from ..execution_boundary import ExecutionBoundaryGuard, ToolRegistry
         registry = ToolRegistry()
@@ -125,8 +133,9 @@ class PhotoStudioGrowthOSAdapter:
         if tenant_id != principal.tenant_id: raise PermissionError("Outbound tenant does not match authenticated principal")
         ctx = AdapterContext(tenant_id, scopes=frozenset({self.WRITE_SCOPE}),
             correlation_id=correlation_id or str(uuid4()), is_sandbox=bool(run.get("is_sandbox")))
-        payload = {"tenant_id":tenant_id,"prospect_payload":prospect_payload,
-                   "idempotency_key":idempotency_key,"correlation_id":ctx.correlation_id}
+        payload = {"tenant_id":tenant_id,"workforce_tenant_id":principal.tenant_id,
+                   "prospect_payload":prospect_payload,"idempotency_key":idempotency_key,
+                   "correlation_id":ctx.correlation_id}
         from ..execution_boundary import ExecutionBoundaryGuard, ToolRegistry
         registry = ToolRegistry()
         registry.register(ToolDefinition("studio_growth_os.prospect_handoff",frozenset({self.WRITE_SCOPE}),
@@ -141,6 +150,9 @@ class PhotoStudioGrowthOSAdapter:
         payload = json.loads(body)
         if payload.get("tenant_id") != tenant_id or payload.get("product_id") != self.product_id:
             raise PermissionError("Webhook tenant/product binding mismatch")
+        workforce_tenant_id = payload.get("workforce_tenant_id")
+        if workforce_tenant_id != repository.principal.tenant_id or workforce_tenant_id == tenant_id:
+            raise PermissionError("Webhook internal Workforce tenant binding mismatch")
         event_id = str(payload.get("event_id") or idempotency_key)
         event_type = payload.get("event_type")
         allowed = {"studio_tenant_onboarded","trial_started","lead_converted","booking_confirmed",
@@ -162,16 +174,18 @@ class PhotoStudioGrowthOSAdapter:
                  "occurred_at":occurred_at,"source_ref":payload.get("source_ref"),
                  "metadata":payload.get("metadata") or {}}
         store = IdempotencyStore(repository)
-        claim = await store.begin(tenant_id=tenant_id,product_id=self.product_id,direction="inbound",
-            key=idempotency_key,payload=payload,correlation_id=correlation_id)
+        claim = await store.begin(tenant_id=workforce_tenant_id,external_tenant_id=tenant_id,
+            product_id=self.product_id,direction="inbound",key=idempotency_key,
+            payload=payload,correlation_id=correlation_id)
         if not claim.get("created"):
             return {"status":"accepted","idempotent":True,"event_id":event_id,"correlation_id":correlation_id}
-        inserted = await repository.record_product_telemetry(tenant_id=tenant_id,
-            product_id=self.product_id,event=event,correlation_id=correlation_id)
+        inserted = await repository.record_product_telemetry(tenant_id=workforce_tenant_id,
+            external_tenant_id=tenant_id,product_id=self.product_id,event=event,
+            correlation_id=correlation_id)
         response = {"status":"accepted","idempotent":not bool(inserted),
                     "event_id":event_id,"correlation_id":correlation_id}
-        await store.complete(tenant_id=tenant_id,product_id=self.product_id,direction="inbound",
-            key=idempotency_key,response=response)
+        await store.complete(tenant_id=workforce_tenant_id,external_tenant_id=tenant_id,
+            product_id=self.product_id,direction="inbound",key=idempotency_key,response=response)
         return response
 
 def register_photo_studio_growth_os_tools(registry, adapter, repository_factory):
@@ -181,32 +195,37 @@ def register_photo_studio_growth_os_tools(registry, adapter, repository_factory)
             raise PermissionError("Adapter request tenant does not match authenticated repository principal")
     async def read_leads(tenant_id, status=None, limit=50, correlation_id=None):
         assert_tenant(tenant_id)
-        ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),correlation_id=correlation_id or str(uuid4()))
+        ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),
+            correlation_id=correlation_id or str(uuid4()),workforce_tenant_id=repository_factory.principal.tenant_id)
         return await adapter.list_leads(tenant_id,status,limit,context=ctx)
     async def read_quotes(tenant_id,status=None,limit=50,correlation_id=None):
         assert_tenant(tenant_id)
-        ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),correlation_id=correlation_id or str(uuid4()))
+        ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),
+            correlation_id=correlation_id or str(uuid4()),workforce_tenant_id=repository_factory.principal.tenant_id)
         return await adapter.list_quotes(tenant_id,status,limit,context=ctx)
     async def read_bookings(tenant_id,status=None,limit=50,correlation_id=None):
         assert_tenant(tenant_id)
-        ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),correlation_id=correlation_id or str(uuid4()))
+        ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),
+            correlation_id=correlation_id or str(uuid4()),workforce_tenant_id=repository_factory.principal.tenant_id)
         return await adapter.list_bookings(tenant_id,status,limit,context=ctx)
     async def read_summary(tenant_id,correlation_id=None):
         assert_tenant(tenant_id)
-        ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),correlation_id=correlation_id or str(uuid4()))
+        ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),
+            correlation_id=correlation_id or str(uuid4()),workforce_tenant_id=repository_factory.principal.tenant_id)
         return await adapter.get_tenant_summary(tenant_id,context=ctx)
     async def read_conversation(tenant_id,lead_id,correlation_id=None):
         assert_tenant(tenant_id)
-        ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),correlation_id=correlation_id or str(uuid4()))
+        ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),
+            correlation_id=correlation_id or str(uuid4()),workforce_tenant_id=repository_factory.principal.tenant_id)
         return await adapter.get_conversation_context(tenant_id,lead_id,context=ctx)
     async def governed_followup(tenant_id, lead_id, message_payload, idempotency_key, correlation_id):
         assert_tenant(tenant_id)
-        return await adapter._send_lead_followup(tenant_id,lead_id,message_payload,idempotency_key,
-            correlation_id,repository_factory)
+        return await adapter._send_lead_followup(tenant_id,repository_factory.principal.tenant_id,
+            lead_id,message_payload,idempotency_key,correlation_id,repository_factory)
     async def governed_handoff(tenant_id, prospect_payload, idempotency_key, correlation_id):
         assert_tenant(tenant_id)
-        return await adapter._handoff_prospect(tenant_id,prospect_payload,idempotency_key,
-            correlation_id,repository_factory)
+        return await adapter._handoff_prospect(tenant_id,repository_factory.principal.tenant_id,
+            prospect_payload,idempotency_key,correlation_id,repository_factory)
     for name,handler in (("studio_growth_os.summary.read",read_summary),
                          ("studio_growth_os.leads.read",read_leads),
                          ("studio_growth_os.quotes.read",read_quotes),
