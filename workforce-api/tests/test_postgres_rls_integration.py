@@ -321,6 +321,12 @@ async def test_product_telemetry_and_adapter_idempotency_are_forced_and_tenant_p
                       VALUES(gen_random_uuid(),'adapter-tenant-a','photo-studio-growth-os','bad-revenue',
                         'trial_started',100,'{}'::jsonb,'corr-a')
                     """))
+            with pytest.raises(Exception):
+                async with conn.begin_nested():
+                    await conn.execute(text("UPDATE product_telemetry_events SET recognised_revenue_inr=0 WHERE event_id='invoice-event-1'"))
+            with pytest.raises(Exception):
+                async with conn.begin_nested():
+                    await conn.execute(text("UPDATE adapter_idempotency_keys SET payload_hash=repeat('b',64) WHERE idempotency_key='webhook-event-1'"))
         async with engine.begin() as conn:
             await conn.execute(text("SELECT set_config('app.current_tenant_id','adapter-tenant-b',true)"))
             await conn.execute(text("SELECT set_config('app.product_ids','photo-studio-growth-os',true)"))
