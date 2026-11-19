@@ -87,29 +87,29 @@ CREATE POLICY wf_tenant_product_scope ON wf_model_usage FOR ALL
 -- Approval payload and hash are immutable after request creation. Decisions only
 -- change decision metadata; execution consumption only changes consumption metadata.
 CREATE OR REPLACE FUNCTION wf_reject_approval_payload_mutation() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql AS $fn$
 BEGIN
  IF NEW.payload IS DISTINCT FROM OLD.payload OR NEW.payload_hash IS DISTINCT FROM OLD.payload_hash THEN
    RAISE EXCEPTION 'approval payload and digest are immutable';
  END IF;
  RETURN NEW;
 END;
-$$;
+$fn$;
 DROP TRIGGER IF EXISTS wf_approval_payload_immutable ON wf_approvals;
 CREATE TRIGGER wf_approval_payload_immutable BEFORE UPDATE OF payload,payload_hash ON wf_approvals
 FOR EACH ROW EXECUTE FUNCTION wf_reject_approval_payload_mutation();
 
-DO $$
+DO $do$
 BEGIN
  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='wf_agent_runs_execution_state_check') THEN
   ALTER TABLE wf_agent_runs ADD CONSTRAINT wf_agent_runs_execution_state_check
    CHECK(execution_state IN ('QUEUED','RUNNING','AWAITING_APPROVAL','COMPLETED','RETRY_SCHEDULED','DEAD_LETTER','CANCELLED')) NOT VALID;
  END IF;
-END $$;
+END $do$;
 ALTER TABLE wf_agent_runs VALIDATE CONSTRAINT wf_agent_runs_execution_state_check;
 
 CREATE OR REPLACE FUNCTION wf_enforce_task_state_transition() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql AS $fn$
 BEGIN
  IF NEW.status=OLD.status THEN RETURN NEW; END IF;
  IF NOT (
@@ -122,13 +122,13 @@ BEGIN
  END IF;
  RETURN NEW;
 END;
-$$;
+$fn$;
 DROP TRIGGER IF EXISTS wf_task_state_transition ON wf_tasks;
 CREATE TRIGGER wf_task_state_transition BEFORE UPDATE OF status ON wf_tasks
 FOR EACH ROW EXECUTE FUNCTION wf_enforce_task_state_transition();
 
 CREATE OR REPLACE FUNCTION wf_enforce_agent_run_state_transition() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql AS $fn$
 BEGIN
  IF NEW.execution_state=OLD.execution_state THEN RETURN NEW; END IF;
  IF NOT (
@@ -141,22 +141,22 @@ BEGIN
  END IF;
  RETURN NEW;
 END;
-$$;
+$fn$;
 DROP TRIGGER IF EXISTS wf_agent_run_state_transition ON wf_agent_runs;
 CREATE TRIGGER wf_agent_run_state_transition BEFORE UPDATE OF execution_state ON wf_agent_runs
 FOR EACH ROW EXECUTE FUNCTION wf_enforce_agent_run_state_transition();
 
-DO $$
+DO $do$
 BEGIN
  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='wf_approvals_expiry_after_creation') THEN
   ALTER TABLE wf_approvals ADD CONSTRAINT wf_approvals_expiry_after_creation
    CHECK(expires_at > created_at) NOT VALID;
  END IF;
-END $$;
+END $do$;
 ALTER TABLE wf_approvals VALIDATE CONSTRAINT wf_approvals_expiry_after_creation;
 
 CREATE OR REPLACE FUNCTION wf_guard_approval_state_transition() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql AS $fn$
 BEGIN
  IF OLD.status <> 'PENDING' AND NEW.status <> OLD.status THEN
    RAISE EXCEPTION 'approval decision is immutable once recorded';
@@ -170,7 +170,7 @@ BEGIN
  END IF;
  RETURN NEW;
 END;
-$$;
+$fn$;
 DROP TRIGGER IF EXISTS wf_approval_state_transition ON wf_approvals;
 CREATE TRIGGER wf_approval_state_transition BEFORE UPDATE ON wf_approvals
 FOR EACH ROW EXECUTE FUNCTION wf_guard_approval_state_transition();
