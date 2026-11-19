@@ -102,6 +102,12 @@ class DigitalCEOService:
         for row in task_rows:
             if row["dead_lettered"]: risks.append({"severity":"high","type":"dead_letter","scope":row["product"],"count":row["dead_lettered"]})
             if row["active"]>=10: risks.append({"severity":"medium","type":"queue_bottleneck","scope":row["product"],"count":row["active"]})
+        for task in tasks:
+            due=_dt(task.get("sla_due_at") or task.get("due_at"))
+            if due and due.tzinfo is None: due=due.replace(tzinfo=timezone.utc)
+            if due and due < now and str(task.get("status","")).upper() in {"QUEUED","RUNNING","RETRY_SCHEDULED","AWAITING_APPROVAL"}:
+                risks.append({"severity":"high","type":"sla_breach","scope":task.get("product_id") or task.get("department") or "Company",
+                  "task_id":str(task.get("id")),"due_at":due.isoformat()})
         actions=[]
         if pending: actions.append({"priority":"P1","action":"Review pending human approvals before expiry","count":len(pending)})
         if any(r["type"]=="dead_letter" for r in risks): actions.append({"priority":"P1","action":"Triage dead-lettered work and repair root causes"})
