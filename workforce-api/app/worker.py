@@ -45,6 +45,7 @@ async def run_worker():
                     task=await orchestrator.claim()
                     if task:
                         status="BUSY"
+                        await repo.heartbeat(worker_id,"BUSY")
                         try:
                             gateway=get_model_gateway(repo)
                             plan,telemetry=await gateway.generate_structured(
