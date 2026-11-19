@@ -1,13 +1,15 @@
 """Standalone durable worker process. Each poll uses a fresh tenant-scoped DB transaction."""
 from __future__ import annotations
 import asyncio, os, signal, uuid
-from app.config import settings
+from app.config import settings, validate_production_environment
 from app.policy import Principal
 from app.repositories import PostgresWorkforceRepository, session_factory
 from app.main import _WorkItemPlan, get_model_gateway
 from app.orchestrator import DurableTaskOrchestrator
 
 async def run_worker():
+    if settings.app_env == "production":
+        validate_production_environment()
     tenant=os.getenv("WORKFORCE_WORKER_TENANT_ID")
     user=os.getenv("WORKFORCE_WORKER_USER_ID","rungrow-worker")
     if not tenant:
