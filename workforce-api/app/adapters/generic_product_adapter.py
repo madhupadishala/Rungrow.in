@@ -115,7 +115,7 @@ class GenericProductAdapter:
             raise AdapterGovernanceError("Adapter handoff product binding mismatch")
         if context.workforce_tenant_id != principal.tenant_id or run.get("tenant_id") != principal.tenant_id:
             raise AdapterGovernanceError("Adapter handoff tenant binding mismatch")
-        if self.product_id == "growtoys" and self.commercial_stage == "DISCOVERY_ONLY" and not context.is_sandbox:
+        if self.product_id == "growtoys" and self.commercial_stage == "DISCOVERY_ONLY" and not (context.is_sandbox or run.get("is_sandbox")):
             raise AdapterGovernanceError("Growtoys is DISCOVERY_ONLY; live sales handoff is disabled", 403)
         if context.is_sandbox or run.get("is_sandbox"):
             await repository.append_audit("adapter.handoff.sandbox_simulated", "product_adapter",
