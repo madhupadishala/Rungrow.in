@@ -354,7 +354,7 @@ async def test_capital_and_ceo_ledgers_are_tenant_scoped_and_append_only():
               INSERT INTO ceo_briefings
                 (tenant_id,generated_at,query_started_at,query_completed_at,source_provenance,snapshot,created_by)
               VALUES ('tenant-finance-a',now(),now(),now(),'["wf_tasks"]'::jsonb,CAST(:snapshot AS jsonb),'founder')
-            """),{"snapshot":'{"operating_revenue":{"actual_inr":0}}'}))
+            """),{"snapshot":'{"operating_revenue":{"actual_inr":0}}'})
             assert (await conn.execute(text("SELECT count(*) FROM investment_capital_events"))).scalar_one()==1
             assert (await conn.execute(text("SELECT count(*) FROM ceo_briefings"))).scalar_one()==1
             with pytest.raises(Exception):
