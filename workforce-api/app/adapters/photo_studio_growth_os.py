@@ -153,7 +153,7 @@ class PhotoStudioGrowthOSAdapter:
         from ..execution_boundary import ExecutionBoundaryGuard, ToolRegistry
         registry = ToolRegistry()
         registry.register(ToolDefinition("studio_growth_os.lead_followup",frozenset({self.WRITE_SCOPE}),
-            True,False,"whatsapp.send",lambda **kw:self._send_lead_followup(**kw,repository=repository)))
+            True,False,"outreach.send",lambda **kw:self._send_lead_followup(**kw,repository=repository)))
         return await ExecutionBoundaryGuard(repository,registry).execute(tool_name="studio_growth_os.lead_followup",
             principal=principal,employee=employee,run=run,payload=payload,approval_id=approval_id)
 
@@ -268,7 +268,7 @@ def register_photo_studio_growth_os_tools(registry, adapter, repository_factory)
                          ("studio_growth_os.conversation.read",read_conversation)):
         registry.register(ToolDefinition(name,frozenset({adapter.READ_SCOPE}),False,True,"product.read",handler))
     registry.register(ToolDefinition("studio_growth_os.lead_followup",frozenset({adapter.WRITE_SCOPE}),
-        True,False,"whatsapp.send",governed_followup))
+        True,False,"outreach.send",governed_followup))
     registry.register(ToolDefinition("studio_growth_os.prospect_handoff",frozenset({adapter.WRITE_SCOPE}),
         True,False,"lead.bulk_contact",governed_handoff))
     return registry
