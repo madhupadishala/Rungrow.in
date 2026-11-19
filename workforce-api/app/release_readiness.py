@@ -33,6 +33,11 @@ class ReleaseReadinessService:
         results={}
         for layer in LAYERS:
             layer_gates=[]
+            latest_by_gate={}
+            for item in signoffs:
+                if item["release_layer"]==layer and item["gate_name"] not in latest_by_gate:
+                    latest_by_gate[item["gate_name"]]=item
+            reference=latest_by_gate.get("ENGINEERING") or next(iter(latest_by_gate.values()),None)
             for index,(gate_name,signoff_key) in enumerate(GATES):
                 missing=[]
                 matching=[s for s in signoffs if s["release_layer"]==layer and s["gate_name"]==signoff_key]
@@ -94,6 +99,11 @@ class ReleaseReadinessService:
                             if not isinstance(value,dict) or str(value.get("status","")).upper()!="PASS" or not value.get("evidence_ref"):
                                 missing.append("Reconciled "+item+" evidence_ref")
 
+                if latest and reference and (
+                    latest.get("candidate_sha")!=reference.get("candidate_sha")
+                    or latest.get("environment")!=reference.get("environment")
+                ):
+                    missing.append("Signoff candidate SHA/environment does not match the release layer's engineering baseline")
                 if not latest:
                     missing.append(f"Explicit {signoff_key} signoff for {layer}")
                 elif latest["status"]=="BLOCKED":
@@ -116,6 +126,8 @@ class ReleaseReadinessService:
                 layer_gates.append({"gate":gate_name,"signoff_gate":signoff_key,"status":status,
                     "missing_evidence":list(dict.fromkeys(missing)),"signoff":latest})
             results[layer]={"decision":"GO" if all(x["status"] in {"PASS","DEFERRED_WITH_ACCEPTANCE"} for x in layer_gates) else "NO_GO",
+                "candidate_sha":reference.get("candidate_sha") if reference else None,
+                "environment":reference.get("environment") if reference else None,
                 "gates":layer_gates}
         overall="GO" if all(v["decision"]=="GO" for v in results.values()) else "NO_GO"
         return {"overall_decision":overall,"release_layers":results,
