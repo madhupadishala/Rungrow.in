@@ -1,0 +1,90 @@
+-- Priority 5: segregated investment capital ledger and immutable CEO briefing snapshots.
+CREATE TABLE IF NOT EXISTS investment_capital_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id text NOT NULL,
+  event_type text NOT NULL CHECK (event_type IN ('investor_lead','term_sheet_signed','commitment_approved','capital_received')),
+  investor_ref text NOT NULL CHECK (length(trim(investor_ref)) BETWEEN 1 AND 240),
+  amount_inr numeric(16,2) NOT NULL DEFAULT 0 CHECK (amount_inr >= 0),
+  currency char(3) NOT NULL DEFAULT 'INR' CHECK (currency='INR'),
+  is_received boolean NOT NULL DEFAULT false,
+  approval_id uuid REFERENCES wf_approvals(id) ON DELETE RESTRICT,
+  source_ref text,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  occurred_at timestamptz NOT NULL,
+  recorded_at timestamptz NOT NULL DEFAULT now(),
+  created_by text NOT NULL,
+  CONSTRAINT investment_received_type CHECK (
+    (event_type='capital_received' AND is_received=true AND amount_inr>0)
+    OR (event_type<>'capital_received' AND is_received=false)
+  ),
+  CONSTRAINT investment_approval_required CHECK (
+    event_type='investor_lead' OR approval_id IS NOT NULL
+  )
+);
+CREATE INDEX IF NOT EXISTS investment_capital_tenant_time
+ ON investment_capital_events(tenant_id,occurred_at DESC);
+ALTER TABLE investment_capital_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE investment_capital_events FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS investment_capital_tenant_scope ON investment_capital_events;
+CREATE POLICY investment_capital_tenant_scope ON investment_capital_events
+ FOR ALL USING (tenant_id=current_setting('app.current_tenant_id',true))
+ WITH CHECK (tenant_id=current_setting('app.current_tenant_id',true));
+
+CREATE OR REPLACE FUNCTION wf_validate_investment_approval() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE a wf_approvals%ROWTYPE;
+BEGIN
+ IF NEW.event_type <> 'investor_lead' THEN
+   SELECT * INTO a FROM wf_approvals
+    WHERE id=NEW.approval_id AND tenant_id=NEW.tenant_id
+      AND status='APPROVED' AND approver_id IS NOT NULL
+      AND approver_id<>requester_id AND expires_at>NEW.recorded_at;
+   IF NOT FOUND THEN RAISE EXCEPTION 'investment event requires a verified, unexpired, separately approved decision'; END IF;
+ END IF;
+ RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS investment_capital_approval_guard ON investment_capital_events;
+CREATE TRIGGER investment_capital_approval_guard
+ BEFORE INSERT ON investment_capital_events
+ FOR EACH ROW EXECUTE FUNCTION wf_validate_investment_approval();
+
+CREATE OR REPLACE FUNCTION wf_reject_investment_mutation() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'investment capital events are append-only'; END;
+$$;
+DROP TRIGGER IF EXISTS investment_capital_append_only ON investment_capital_events;
+CREATE TRIGGER investment_capital_append_only
+ BEFORE UPDATE OR DELETE ON investment_capital_events
+ FOR EACH ROW EXECUTE FUNCTION wf_reject_investment_mutation();
+
+CREATE TABLE IF NOT EXISTS ceo_briefings (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ tenant_id text NOT NULL,
+ generated_at timestamptz NOT NULL,
+ query_started_at timestamptz NOT NULL,
+ query_completed_at timestamptz NOT NULL,
+ briefing_version text NOT NULL DEFAULT '1.0',
+ source_provenance jsonb NOT NULL,
+ snapshot jsonb NOT NULL,
+ created_by text NOT NULL,
+ CHECK (query_completed_at >= query_started_at),
+ CHECK (jsonb_typeof(source_provenance)='array'),
+ CHECK (jsonb_typeof(snapshot)='object')
+);
+CREATE INDEX IF NOT EXISTS ceo_briefings_tenant_generated
+ ON ceo_briefings(tenant_id,generated_at DESC);
+ALTER TABLE ceo_briefings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ceo_briefings FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS ceo_briefings_tenant_scope ON ceo_briefings;
+CREATE POLICY ceo_briefings_tenant_scope ON ceo_briefings
+ FOR ALL USING (tenant_id=current_setting('app.current_tenant_id',true))
+ WITH CHECK (tenant_id=current_setting('app.current_tenant_id',true));
+CREATE OR REPLACE FUNCTION wf_reject_ceo_briefing_mutation() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN RAISE EXCEPTION 'CEO briefing snapshots are immutable'; END;
+$$;
+DROP TRIGGER IF EXISTS ceo_briefings_immutable ON ceo_briefings;
+CREATE TRIGGER ceo_briefings_immutable
+ BEFORE UPDATE OR DELETE ON ceo_briefings
+ FOR EACH ROW EXECUTE FUNCTION wf_reject_ceo_briefing_mutation();
