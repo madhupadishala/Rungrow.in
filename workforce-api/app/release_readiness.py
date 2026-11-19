@@ -98,8 +98,11 @@ class ReleaseReadinessService:
                     missing.append(f"Explicit {signoff_key} signoff for {layer}")
                 elif latest["status"]=="BLOCKED":
                     missing.append(f"Latest {signoff_key} signoff is BLOCKED")
-                elif latest["status"]=="DEFERRED_WITH_ACCEPTANCE" and not evidence.get("accepted_risk"):
-                    missing.append("Deferred gate requires accepted_risk, owner, due_date and compensating_control in signoff evidence")
+                elif latest["status"]=="DEFERRED_WITH_ACCEPTANCE":
+                    required_acceptance=("accepted_risk","owner","due_date","compensating_control")
+                    absent=[key for key in required_acceptance if not evidence.get(key)]
+                    if absent:
+                        missing.append("Deferred gate acceptance missing: "+", ".join(absent))
                 if gate_name=="FINAL_RELEASE_AUTHORIZATION":
                     prior=[x for x in layer_gates if x["status"] not in {"PASS","DEFERRED_WITH_ACCEPTANCE"}]
                     if prior:
