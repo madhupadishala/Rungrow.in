@@ -18,7 +18,7 @@ BOOKINGS=[{"id":"booking-hyd-001","tenant_id":TENANT,"lead_id":"lead-hyd-001","s
 
 async def _tenant(request,tenant_id):
  if request.headers.get("X-RunGrow-Tenant-ID")!=tenant_id: raise HTTPException(403,"external tenant binding mismatch")
- org_id=request.headers.get("X-RunGrow-Org-ID","")
+ org_id=request.headers.get("X-RunGrow-Tenant-ID","")
  if not org_id or org_id==tenant_id: raise HTTPException(403,"internal/external tenant separation required")
  if request.headers.get("X-RunGrow-Product-ID")!="photo-studio-growth-os": raise HTTPException(403,"product binding mismatch")
  secret=os.getenv("STUDIO_GROWTH_OS_SERVICE_SECRET","")
@@ -28,8 +28,12 @@ async def _tenant(request,tenant_id):
  except (TypeError,ValueError): raise HTTPException(401,"invalid service timestamp")
  if not secret or abs(time.time()-issued)>300: raise HTTPException(401,"service signature outside replay window")
  body=await request.body()
- binding=".".join((timestamp,tenant_id,org_id,"photo-studio-growth-os")).encode()
- expected="sha256="+hmac.new(secret.encode(),binding+b"."+body,hashlib.sha256).hexdigest()
+ scopes=request.headers.get("X-RunGrow-Scopes","")
+ canonical=",".join(sorted(set(filter(None,scopes.split(",")))))
+ if scopes != canonical: raise HTTPException(401,"non-canonical workforce scopes")
+ body_hash=hashlib.sha256(body).hexdigest()
+ binding=".".join((timestamp,"photo-studio-growth-os",org_id,tenant_id,scopes,body_hash)).encode()
+ expected="sha256="+hmac.new(secret.encode(),binding,hashlib.sha256).hexdigest()
  if not hmac.compare_digest(expected,signature): raise HTTPException(401,"invalid service signature")
 
 @app.get("/api/v1/leads")
@@ -86,3 +90,69 @@ async def execute_tool(request:Request):
  if payload.get("tool")=="send_quote" and not payload.get("arguments",{}).get("quote_id"):
   raise HTTPException(422,"quote_id required for send_quote")
  return {"status":"accepted","tool":payload.get("tool"),"idempotency_key":key,"is_synthetic":True}
+
+
+# Workforce contract fixture; all records are synthetic test data.
+@app.get("/api/v1/workforce/tenant-summary")
+async def workforce_summary(request: Request):
+    tenant=request.headers.get("X-RunGrow-External-Tenant-Id","")
+    await _tenant(request,tenant)
+    return {"tenant_id":tenant,"lead_count":sum(x["tenant_id"]==tenant for x in LEADS),
+            "quote_count":sum(x["tenant_id"]==tenant for x in QUOTES),
+            "booking_count":sum(x["tenant_id"]==tenant for x in BOOKINGS),
+            "recognised_revenue_inr":0,"is_synthetic":True}
+
+@app.get("/api/v1/workforce/leads")
+async def workforce_leads(request: Request, page:int=1, page_size:int=50, stage:str|None=None):
+    tenant=request.headers.get("X-RunGrow-External-Tenant-Id","")
+    await _tenant(request,tenant)
+    rows=[x for x in LEADS if x["tenant_id"]==tenant and (not stage or x["stage"]==stage)]
+    return {"leads":rows[(page-1)*page_size:page*page_size],"total":len(rows),"page":page,"page_size":page_size,"is_synthetic":True}
+
+@app.get("/api/v1/workforce/quotes")
+async def workforce_quotes(request: Request, status:str|None=None, page:int=1, page_size:int=50):
+    tenant=request.headers.get("X-RunGrow-External-Tenant-Id","")
+    await _tenant(request,tenant)
+    return [x for x in QUOTES if x["tenant_id"]==tenant and (not status or x["status"]==status)][(page-1)*page_size:page*page_size]
+
+@app.get("/api/v1/workforce/quotes/{quote_id}")
+async def workforce_quote_detail(request: Request, quote_id:str):
+    tenant=request.headers.get("X-RunGrow-External-Tenant-Id","")
+    await _tenant(request,tenant)
+    row=next((x for x in QUOTES if x["id"]==quote_id and x["tenant_id"]==tenant),None)
+    if row is None: raise HTTPException(404,"Quote not found")
+    return row
+
+@app.get("/api/v1/workforce/bookings")
+async def workforce_bookings(request: Request, state:str|None=None, page:int=1, page_size:int=50):
+    tenant=request.headers.get("X-RunGrow-External-Tenant-Id","")
+    await _tenant(request,tenant)
+    return [x for x in BOOKINGS if x["tenant_id"]==tenant and (not state or x["state"]==state)][(page-1)*page_size:page*page_size]
+
+@app.get("/api/v1/workforce/conversations/{lead_id}")
+async def workforce_conversation(request: Request, lead_id:str):
+    tenant=request.headers.get("X-RunGrow-External-Tenant-Id","")
+    await _tenant(request,tenant)
+    if not any(x["id"]==lead_id and x["tenant_id"]==tenant for x in LEADS): raise HTTPException(404,"Lead not found")
+    return {"lead_id":lead_id,"tenant_id":tenant,"channel":"whatsapp","status":"open","messages":[{"direction":"inbound","content":"Please share wedding package details","is_synthetic":True}],"is_synthetic":True}
+
+@app.post("/api/v1/workforce/leads/{lead_id}/followup")
+async def workforce_followup(request: Request, lead_id:str):
+    tenant=request.headers.get("X-RunGrow-External-Tenant-Id","")
+    await _tenant(request,tenant)
+    key=request.headers.get("Idempotency-Key")
+    if not key: raise HTTPException(400,"Idempotency-Key required")
+    payload=await request.json()
+    if not any(x["id"]==lead_id and x["tenant_id"]==tenant for x in LEADS): raise HTTPException(404,"Lead not found")
+    if not payload.get("ai_identity_disclosure"): raise HTTPException(422,"AI identity disclosure required")
+    return {"status":"accepted","lead_id":lead_id,"idempotency_key":key,"is_synthetic":True}
+
+@app.post("/api/v1/workforce/prospects/handoff")
+async def workforce_handoff(request: Request):
+    tenant=request.headers.get("X-RunGrow-External-Tenant-Id","")
+    await _tenant(request,tenant)
+    key=request.headers.get("Idempotency-Key")
+    if not key: raise HTTPException(400,"Idempotency-Key required")
+    payload=await request.json()
+    if not payload.get("contact_id"): raise HTTPException(422,"contact_id required")
+    return {"status":"accepted","tenant_id":tenant,"external_reference":"synthetic-handoff-001","idempotency_key":key,"is_synthetic":True}
