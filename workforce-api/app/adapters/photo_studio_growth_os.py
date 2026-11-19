@@ -30,6 +30,7 @@ class PhotoStudioGrowthOSAdapter:
             raise ValueError("STUDIO_GROWTH_OS_TENANT_MAP must be a JSON object") from exc
         if not isinstance(self.tenant_map, dict):
             raise ValueError("STUDIO_GROWTH_OS_TENANT_MAP must be a JSON object")
+        self.require_tenant_jwt = os.getenv("STUDIO_GROWTH_OS_REQUIRE_SERVICE_JWT", "true").lower() in {"1","true","yes"}
         self.transport, self.timeout = transport, timeout
 
     def _headers(self, context: AdapterContext, body=b""):
@@ -43,6 +44,8 @@ class PhotoStudioGrowthOSAdapter:
                    "X-RunGrow-Org-ID":context.workforce_tenant_id,
                    "X-RunGrow-Product-ID":self.product_id, "Content-Type":"application/json"}
         tenant_token = self.tenant_service_tokens.get(context.tenant_id)
+        if self.require_tenant_jwt and not tenant_token:
+            raise RuntimeError("A tenant-bound Studio Growth OS service JWT is required for protected product routes")
         if tenant_token:
             headers["Authorization"] = "Bearer " + tenant_token
         return headers
