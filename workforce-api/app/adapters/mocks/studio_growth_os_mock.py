@@ -1,4 +1,5 @@
 """ASGI mock matching the standalone Studio Growth OS v2 HTTP contract."""
+import hashlib, hmac, os, time
 from fastapi import FastAPI, HTTPException, Query, Request
 app=FastAPI(title="Synthetic Studio Growth OS ingress",version="2.0.0")
 TENANT="studio-hyd-001"
@@ -15,13 +16,22 @@ QUOTES=[{"id":"quote-hyd-001","tenant_id":TENANT,"lead_id":"lead-hyd-001","revis
 BOOKINGS=[{"id":"booking-hyd-001","tenant_id":TENANT,"lead_id":"lead-hyd-001","state":"confirmed",
  "event_date":"2026-12-12T00:00:00+05:30","is_synthetic":True}]
 
-def _tenant(request,tenant_id):
+async def _tenant(request,tenant_id):
  if request.headers.get("X-RunGrow-Tenant-ID")!=tenant_id: raise HTTPException(403,"tenant binding mismatch")
  if request.headers.get("X-RunGrow-Product-ID")!="photo-studio-growth-os": raise HTTPException(403,"product binding mismatch")
+ secret=os.getenv("STUDIO_GROWTH_OS_SERVICE_SECRET","")
+ timestamp=request.headers.get("X-RunGrow-Timestamp","")
+ signature=request.headers.get("X-RunGrow-Signature","")
+ try: issued=int(timestamp)
+ except (TypeError,ValueError): raise HTTPException(401,"invalid service timestamp")
+ if not secret or abs(time.time()-issued)>300: raise HTTPException(401,"service signature outside replay window")
+ body=await request.body()
+ expected="sha256="+hmac.new(secret.encode(),timestamp.encode()+b"."+body,hashlib.sha256).hexdigest()
+ if not hmac.compare_digest(expected,signature): raise HTTPException(401,"invalid service signature")
 
 @app.get("/api/v1/leads")
 async def leads(request:Request,page:int=1,page_size:int=50,stage:str|None=None):
- tenant=request.headers.get("X-RunGrow-Tenant-ID",""); _tenant(request,tenant)
+ tenant=request.headers.get("X-RunGrow-Tenant-ID",""); await _tenant(request,tenant)
  rows=[x for x in LEADS if x["tenant_id"]==tenant and (not stage or x["stage"]==stage)]
  return {"leads":rows[:page_size],"total":len(rows),"page":page,"page_size":page_size,"is_synthetic":True}
 
