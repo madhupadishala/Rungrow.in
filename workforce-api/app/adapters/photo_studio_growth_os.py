@@ -2,6 +2,7 @@
 from __future__ import annotations
 import hashlib, hmac, json, os, time
 from uuid import uuid4
+from decimal import Decimal, InvalidOperation
 from typing import Any
 import httpx
 from .base import AdapterContext, IdempotencyStore, PRODUCT_ID, SignedWebhookVerifier
@@ -132,8 +133,11 @@ class PhotoStudioGrowthOSAdapter:
         allowed = {"studio_tenant_onboarded","trial_started","lead_converted","booking_confirmed",
                    "invoice_recognised","churn_risk_flagged"}
         if event_type not in allowed: raise ValueError("Unsupported product telemetry event type")
-        revenue = int(payload.get("recognised_revenue_inr",0) or 0)
-        if revenue < 0 or (event_type != "invoice_recognised" and revenue != 0):
+        try:
+            revenue = Decimal(str(payload.get("recognised_revenue_inr",0) or 0))
+        except (InvalidOperation, ValueError) as exc:
+            raise ValueError("Recognised revenue must be a valid INR amount") from exc
+        if not revenue.is_finite() or revenue < 0 or (event_type != "invoice_recognised" and revenue != 0):
             raise ValueError("Recognised revenue is allowed only on invoice_recognised events")
         event = {"event_id":event_id,"event_type":event_type,"recognised_revenue_inr":revenue,
                  "occurred_at":payload.get("occurred_at"),"source_ref":payload.get("source_ref"),
