@@ -269,6 +269,107 @@ class PostgresWorkforceRepository(ReportingRepositoryMixin):
                "actor": self.principal.user_id, "action": action, "type": resource_type,
                "resource": resource_id, "details": json.dumps(details)})
 
+    async def upsert_prospect(self, *, product_id, dedupe_key, business_name, city, segment,
+                             decision_maker_name, public_contact_channel, source_url, evidence_urls,
+                             evidence_snippet, confidence_score, icp_fit_tier, is_synthetic, metadata):
+        self._product(product_id)
+        if not 0 <= float(confidence_score) <= 1:
+            raise ValueError("confidence_score must be between 0 and 1")
+        return await self._one("""
+          INSERT INTO prospect_records
+            (id,tenant_id,product_id,dedupe_key,business_name,city,segment,decision_maker_name,
+             public_contact_channel,source_url,evidence_urls,evidence_snippet,confidence_score,
+             icp_fit_tier,is_synthetic,metadata)
+          VALUES (:id,:tenant,:product,:dedupe,:name,:city,:segment,:decision_maker,
+             :contact,:source,CAST(:evidence_urls AS jsonb),:snippet,:confidence,:tier,:synthetic,
+             CAST(:metadata AS jsonb))
+          ON CONFLICT (tenant_id,product_id,dedupe_key) DO UPDATE SET
+            evidence_urls=(
+              SELECT COALESCE(jsonb_agg(DISTINCT value),'[]'::jsonb)
+              FROM jsonb_array_elements(prospect_records.evidence_urls || EXCLUDED.evidence_urls) AS value
+            ),
+            source_url=EXCLUDED.source_url,
+            evidence_snippet=CASE WHEN length(EXCLUDED.evidence_snippet)>length(prospect_records.evidence_snippet)
+              THEN EXCLUDED.evidence_snippet ELSE prospect_records.evidence_snippet END,
+            confidence_score=GREATEST(prospect_records.confidence_score,EXCLUDED.confidence_score),
+            icp_fit_tier=CASE
+              WHEN EXCLUDED.icp_fit_tier='HIGH' OR prospect_records.icp_fit_tier='HIGH' THEN 'HIGH'
+              WHEN EXCLUDED.icp_fit_tier='MEDIUM' OR prospect_records.icp_fit_tier='MEDIUM' THEN 'MEDIUM'
+              ELSE EXCLUDED.icp_fit_tier END,
+            is_synthetic=prospect_records.is_synthetic AND EXCLUDED.is_synthetic,
+            metadata=prospect_records.metadata || EXCLUDED.metadata,
+            last_evidenced_at=now(),updated_at=now()
+          RETURNING *
+        """, {"id":str(uuid4()),"tenant":self.principal.tenant_id,"product":product_id,
+              "dedupe":dedupe_key,"name":business_name,"city":city,"segment":segment,
+              "decision_maker":decision_maker_name,"contact":public_contact_channel,
+              "source":source_url,"evidence_urls":json.dumps(sorted(set(evidence_urls))),
+              "snippet":evidence_snippet,"confidence":confidence_score,"tier":icp_fit_tier,
+              "synthetic":is_synthetic,"metadata":json.dumps(metadata or {})})
+
+    async def list_prospects(self, product_id=None, limit=200):
+        self._product(product_id)
+        if product_id is None:
+            return await self._rows("SELECT * FROM prospect_records WHERE tenant_id=:tenant ORDER BY discovered_at DESC LIMIT :limit",
+                {"tenant":self.principal.tenant_id,"limit":limit})
+        return await self._rows("SELECT * FROM prospect_records WHERE tenant_id=:tenant AND product_id=:product ORDER BY discovered_at DESC LIMIT :limit",
+            {"tenant":self.principal.tenant_id,"product":product_id,"limit":limit})
+
+    async def create_campaign(self, *, product_id, name, target_icp_segment, channel,
+                              messaging_brief, ai_identity_disclosure, is_sandbox, created_by, metadata):
+        self._product(product_id)
+        return await self._one("""
+          INSERT INTO campaign_plans
+            (tenant_id,product_id,name,target_icp_segment,channel,messaging_brief,
+             ai_identity_disclosure,is_sandbox,created_by,metadata)
+          VALUES (:tenant,:product,:name,:segment,:channel,:brief,:disclosure,:sandbox,:actor,
+                  CAST(:metadata AS jsonb)) RETURNING *
+        """, {"tenant":self.principal.tenant_id,"product":product_id,"name":name,
+              "segment":target_icp_segment,"channel":channel,"brief":messaging_brief,
+              "disclosure":ai_identity_disclosure,"sandbox":is_sandbox,"actor":created_by,
+              "metadata":json.dumps(metadata or {})})
+
+    async def get_campaign(self, campaign_id):
+        return await self._one("SELECT * FROM campaign_plans WHERE id=:id AND tenant_id=:tenant",
+            {"id":campaign_id,"tenant":self.principal.tenant_id})
+
+    async def list_campaigns(self, product_id=None, limit=200):
+        self._product(product_id)
+        if product_id is None:
+            return await self._rows("SELECT * FROM campaign_plans WHERE tenant_id=:tenant ORDER BY created_at DESC LIMIT :limit",
+                {"tenant":self.principal.tenant_id,"limit":limit})
+        return await self._rows("SELECT * FROM campaign_plans WHERE tenant_id=:tenant AND product_id=:product ORDER BY created_at DESC LIMIT :limit",
+            {"tenant":self.principal.tenant_id,"product":product_id,"limit":limit})
+
+    async def request_campaign_approval(self, *, campaign_id, product_id, employee_id, messaging_brief):
+        campaign=await self.get_campaign(campaign_id)
+        if not campaign or campaign["product_id"]!=product_id:
+            raise LookupError("Campaign not found in this tenant/product scope")
+        if campaign["status"] not in {"DRAFT","PAUSED"} or campaign["is_sandbox"]:
+            raise PermissionError("Only a live draft campaign can request activation approval")
+        approval=await self.create_approval(product_id=product_id,employee_id=employee_id,
+            action_type="campaign.activate",
+            payload={"campaign_id":str(campaign_id),"messaging_brief":messaging_brief},
+            expires_at=datetime.now(timezone.utc)+__import__("datetime").timedelta(hours=24))
+        await self._one("UPDATE campaign_plans SET status='AWAITING_APPROVAL' WHERE id=:id AND tenant_id=:tenant RETURNING id",
+            {"id":campaign_id,"tenant":self.principal.tenant_id})
+        return approval
+
+    async def transition_campaign(self, campaign_id, *, status, approval_id, execution_run_id):
+        if status not in {"APPROVED","ACTIVE","PAUSED"}:
+            raise ValueError("Unsupported campaign transition")
+        item=await self._one("""
+          UPDATE campaign_plans SET status=:status,approval_id=:approval,
+            execution_run_id=:run,updated_at=now()
+          WHERE id=:id AND tenant_id=:tenant RETURNING *
+        """, {"status":status,"approval":approval_id,"run":execution_run_id,
+              "id":campaign_id,"tenant":self.principal.tenant_id})
+        if not item:
+            raise LookupError("Campaign not found")
+        await self.append_audit("campaign."+status.lower(),"campaign",str(campaign_id),
+            item["product_id"],{"approval_id":str(approval_id),"execution_run_id":str(execution_run_id)})
+        return item
+
     async def start_agent_run(self, run_id):
         item=await self._one("""
           UPDATE wf_agent_runs SET execution_state='RUNNING',status='running',updated_at=now()
@@ -527,6 +628,14 @@ class WorkforceRepositoryProtocol(Protocol):
     async def validate_approval(self, approval_id, **kwargs): ...
     async def append_audit(self, action, resource_type, resource_id, product_id, details): ...
     async def list_audit(self, product_id=None): ...
+    async def upsert_prospect(self, **kwargs): ...
+    async def list_prospects(self, product_id=None, limit=200): ...
+    async def create_campaign(self, **kwargs): ...
+    async def get_campaign(self, campaign_id): ...
+    async def list_campaigns(self, product_id=None, limit=200): ...
+    async def request_campaign_approval(self, **kwargs): ...
+    async def transition_campaign(self, campaign_id, **kwargs): ...
+
     async def claim_adapter_idempotency(self, **kwargs): ...
     async def complete_adapter_idempotency(self, **kwargs): ...
     async def record_product_telemetry(self, **kwargs): ...
@@ -829,6 +938,108 @@ class InMemoryWorkforceRepository(ReportingRepositoryMixin):
         run.update(status="planned",execution_state="QUEUED")
         self._audit("agent_run.resumed","agent_run",run_id,run.get("product_id"),{"approval_id":approval_id})
         return run
+
+    async def upsert_prospect(self, *, product_id, dedupe_key, business_name, city, segment,
+                             decision_maker_name=None, public_contact_channel=None, source_url,
+                             evidence_urls, evidence_snippet="", confidence_score=0.5,
+                             icp_fit_tier="UNASSESSED", is_synthetic=False, metadata=None):
+        self._scope(product_id)
+        if not 0 <= float(confidence_score) <= 1:
+            raise ValueError("confidence_score must be between 0 and 1")
+        rows=getattr(self,"prospects",None)
+        if rows is None:
+            self.prospects=[]; rows=self.prospects
+        item=next((x for x in rows if x["tenant_id"]==self.principal.tenant_id
+            and x["product_id"]==product_id and x["dedupe_key"]==dedupe_key),None)
+        now=datetime.now(timezone.utc).isoformat()
+        if item:
+            item["evidence_urls"]=sorted(set(item.get("evidence_urls",[]))|set(evidence_urls))
+            item["source_url"]=source_url
+            if len(evidence_snippet)>len(item.get("evidence_snippet","")): item["evidence_snippet"]=evidence_snippet
+            item["confidence_score"]=max(float(item["confidence_score"]),float(confidence_score))
+            ranks={"LOW":1,"MEDIUM":2,"HIGH":3,"UNASSESSED":0}
+            if ranks.get(icp_fit_tier,0)>ranks.get(item["icp_fit_tier"],0): item["icp_fit_tier"]=icp_fit_tier
+            item["is_synthetic"]=bool(item["is_synthetic"] and is_synthetic)
+            item["metadata"]={**item.get("metadata",{}),**(metadata or {})}
+            item["last_evidenced_at"]=now; item["updated_at"]=now
+        else:
+            item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,"product_id":product_id,
+                "dedupe_key":dedupe_key,"business_name":business_name,"city":city,"segment":segment,
+                "decision_maker_name":decision_maker_name,"public_contact_channel":public_contact_channel,
+                "source_url":source_url,"evidence_urls":sorted(set(evidence_urls)),
+                "evidence_snippet":evidence_snippet,"discovered_at":now,"last_evidenced_at":now,
+                "confidence_score":float(confidence_score),"icp_fit_tier":icp_fit_tier,
+                "stage":"DISCOVERED","is_synthetic":bool(is_synthetic),"metadata":metadata or {},
+                "created_at":now,"updated_at":now}
+            rows.append(item)
+        self._audit("prospect.upserted","prospect",item["id"],product_id,
+            {"dedupe_key":dedupe_key,"evidence_count":len(item["evidence_urls"])})
+        return item
+
+    async def list_prospects(self, product_id=None, limit=200):
+        self._scope(product_id)
+        rows=getattr(self,"prospects",[])
+        return [x for x in rows if x["tenant_id"]==self.principal.tenant_id
+            and (x["product_id"]==product_id if product_id else
+                 "*" in self.principal.permissions or x["product_id"] in self.principal.product_ids)][:limit]
+
+    async def create_campaign(self, *, product_id, name, target_icp_segment, channel,
+                              messaging_brief, ai_identity_disclosure, is_sandbox, created_by, metadata):
+        self._scope(product_id)
+        if not hasattr(self,"campaigns"): self.campaigns=[]
+        if any(x["tenant_id"]==self.principal.tenant_id and x["product_id"]==product_id and x["name"]==name for x in self.campaigns):
+            raise ValueError("Campaign name already exists in this tenant/product scope")
+        now=datetime.now(timezone.utc).isoformat()
+        item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,"product_id":product_id,
+            "name":name,"target_icp_segment":target_icp_segment,"channel":channel,
+            "messaging_brief":messaging_brief,"ai_identity_disclosure":ai_identity_disclosure,
+            "status":"DRAFT","approval_id":None,"execution_run_id":None,"is_sandbox":is_sandbox,
+            "metadata":metadata or {},"created_by":created_by,"created_at":now,"updated_at":now,
+            "activated_at":None}
+        self.campaigns.append(item); self._audit("campaign.created","campaign",item["id"],product_id); return item
+
+    async def get_campaign(self, campaign_id):
+        return next((x for x in getattr(self,"campaigns",[]) if x["id"]==str(campaign_id)
+            and x["tenant_id"]==self.principal.tenant_id),None)
+
+    async def list_campaigns(self, product_id=None, limit=200):
+        self._scope(product_id)
+        return [x for x in getattr(self,"campaigns",[]) if x["tenant_id"]==self.principal.tenant_id
+            and (x["product_id"]==product_id if product_id else
+                 "*" in self.principal.permissions or x["product_id"] in self.principal.product_ids)][:limit]
+
+    async def request_campaign_approval(self, *, campaign_id, product_id, employee_id, messaging_brief):
+        campaign=await self.get_campaign(campaign_id)
+        if not campaign or campaign["product_id"]!=product_id: raise LookupError("Campaign not found")
+        if campaign["status"] not in {"DRAFT","PAUSED"} or campaign["is_sandbox"]:
+            raise PermissionError("Only a live draft campaign can request activation approval")
+        approval=await self.create_approval(product_id=product_id,employee_id=employee_id,
+            action_type="campaign.activate",payload={"campaign_id":str(campaign_id),"messaging_brief":messaging_brief},
+            expires_at=datetime.now(timezone.utc)+__import__("datetime").timedelta(hours=24))
+        campaign["status"]="AWAITING_APPROVAL"; campaign["updated_at"]=datetime.now(timezone.utc).isoformat()
+        return approval
+
+    async def transition_campaign(self, campaign_id, *, status, approval_id, execution_run_id):
+        campaign=await self.get_campaign(campaign_id)
+        if not campaign: raise LookupError("Campaign not found")
+        approval=next((x for x in self.approvals if x["id"]==str(approval_id)
+            and x["tenant_id"]==self.principal.tenant_id),None)
+        if status=="APPROVED":
+            if campaign["status"]!="AWAITING_APPROVAL" or not approval or approval["status"]!="APPROVED"                 or approval.get("consumed_at") is None or approval.get("execution_run_id")!=str(execution_run_id)                 or approval.get("action_type")!="campaign.activate"                 or (approval.get("payload") or {}).get("campaign_id")!=str(campaign_id):
+                raise PermissionError("Campaign requires a matching, consumed, single-use approval")
+            campaign.update(status="APPROVED",approval_id=str(approval_id),execution_run_id=str(execution_run_id))
+        elif status=="ACTIVE":
+            if campaign["status"]!="APPROVED" or campaign["approval_id"]!=str(approval_id)                 or campaign["execution_run_id"]!=str(execution_run_id):
+                raise PermissionError("Campaign activation approval binding is invalid")
+            campaign["status"]="ACTIVE"; campaign["activated_at"]=datetime.now(timezone.utc).isoformat()
+        elif status=="PAUSED":
+            campaign["status"]="PAUSED"
+        else:
+            raise ValueError("Unsupported campaign transition")
+        campaign["updated_at"]=datetime.now(timezone.utc).isoformat()
+        self._audit("campaign."+status.lower(),"campaign",str(campaign_id),campaign["product_id"],
+            {"approval_id":str(approval_id),"execution_run_id":str(execution_run_id)})
+        return campaign
 
     async def append_audit(self, action, resource_type, resource_id, product_id, details):
         self._scope(product_id)
