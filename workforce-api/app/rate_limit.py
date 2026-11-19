@@ -87,6 +87,8 @@ class RateLimitMiddleware:
         client=scope.get("client")
         ip=client[0] if client else "unknown"
         normalized_path=path.split("?")[0]
+        if normalized_path in {"/v1/workforce/orchestrator/dispatch","/v1/workforce/orchestrator/step"}:
+            normalized_path="/v1/workforce/orchestrator/dispatch"
         ip_key=hashlib.sha256(f"{normalized_path}|ip|{ip}".encode()).hexdigest()
         tenant_key=hashlib.sha256(f"{normalized_path}|tenant|{tenant}|{ip}".encode()).hexdigest()
         scope_keys=[ip_key,tenant_key]
