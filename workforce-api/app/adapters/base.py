@@ -15,9 +15,12 @@ class AdapterContext:
     correlation_id: str = field(default_factory=lambda: str(uuid4()))
     actor_id: str = "rungrow-workforce"
     is_sandbox: bool = False
+    workforce_tenant_id: str = ""
     def __post_init__(self):
-        if not self.tenant_id or self.product_id != PRODUCT_ID or not self.correlation_id:
-            raise ValueError("Adapter tenant, product and correlation bindings are required")
+        if not self.tenant_id or not self.workforce_tenant_id or self.tenant_id == self.workforce_tenant_id:
+            raise ValueError("External customer tenant and internal Workforce tenant must be distinct")
+        if self.product_id != PRODUCT_ID or not self.correlation_id:
+            raise ValueError("Adapter product and correlation bindings are required")
     def require(self, scope: str):
         if scope not in self.scopes and "*" not in self.scopes:
             raise PermissionError(f"Missing adapter scope: {scope}")
@@ -61,11 +64,13 @@ class SignedWebhookVerifier:
 class IdempotencyStore:
     """Durable tenant/product/direction scoped idempotency ledger."""
     def __init__(self, repository): self.repository = repository
-    async def begin(self, *, tenant_id, product_id, direction, key, payload, correlation_id):
+    async def begin(self, *, tenant_id, external_tenant_id, product_id, direction, key, payload, correlation_id):
         if not key or len(key) > 200: raise ValueError("A valid Idempotency-Key is required")
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str).encode()).hexdigest()
-        return await self.repository.claim_adapter_idempotency(tenant_id=tenant_id, product_id=product_id,
-            direction=direction, idempotency_key=key, payload_hash=digest, correlation_id=correlation_id)
-    async def complete(self, *, tenant_id, product_id, direction, key, response):
-        await self.repository.complete_adapter_idempotency(tenant_id=tenant_id, product_id=product_id,
-            direction=direction, idempotency_key=key, response=response)
+        return await self.repository.claim_adapter_idempotency(tenant_id=tenant_id,
+            external_tenant_id=external_tenant_id, product_id=product_id, direction=direction,
+            idempotency_key=key, payload_hash=digest, correlation_id=correlation_id)
+    async def complete(self, *, tenant_id, external_tenant_id, product_id, direction, key, response):
+        await self.repository.complete_adapter_idempotency(tenant_id=tenant_id,
+            external_tenant_id=external_tenant_id, product_id=product_id, direction=direction,
+            idempotency_key=key, response=response)
