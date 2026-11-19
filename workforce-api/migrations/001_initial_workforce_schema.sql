@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS outbox_events (
  created_at timestamptz NOT NULL DEFAULT now()
 );
 
-DO $$
+DO $do$
 DECLARE t text;
 BEGIN
  FOREACH t IN ARRAY ARRAY['workforce_employees','workforce_tasks','agent_runs','workforce_memory','approvals','audit_events','outbox_events'] LOOP
@@ -58,4 +58,4 @@ BEGIN
   EXECUTE format('DROP POLICY IF EXISTS tenant_scope_guard ON %I',t);
   EXECUTE format('CREATE POLICY tenant_scope_guard ON %I AS PERMISSIVE FOR ALL USING (tenant_id = current_setting(''app.current_tenant_id'',true)) WITH CHECK (tenant_id = current_setting(''app.current_tenant_id'',true))',t);
  END LOOP;
-END $$;
+END $do$;
