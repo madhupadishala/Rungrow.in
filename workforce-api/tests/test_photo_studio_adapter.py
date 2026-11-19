@@ -153,6 +153,7 @@ async def test_webhook_rejects_invalid_signature_expired_timestamp_and_wrong_pro
 @pytest.mark.asyncio
 async def test_non_revenue_lifecycle_event_cannot_carry_revenue(test_app, monkeypatch):
     monkeypatch.setenv("STUDIO_GROWTH_OS_SERVICE_SECRET", SECRET)
+    monkeypatch.setenv("RUNGROW_INTERNAL_TENANT_ID", WORKFORCE_TENANT)
     raw, headers = _signed_headers(_webhook_payload("trial-001",100,"trial_started"))
     async with AsyncClient(transport=ASGITransport(app=test_app),base_url="http://workforce") as client:
         response = await client.post("/v1/adapters/photo-studio-growth-os/webhooks",content=raw,headers=headers)
