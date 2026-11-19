@@ -14,6 +14,7 @@ POLICIES={
  "/v1/workforce/orchestrator/step":(30,60),
  "/v1/ceo/directives":(20,60),
  "/v1/commercial/prospects/discover":(10,60),
+ "/v1/":(300,60),
 }
 _events=defaultdict(deque)
 
