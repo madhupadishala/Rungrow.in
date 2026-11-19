@@ -107,8 +107,12 @@ async def test_webhook_is_signed_idempotent_and_records_recognised_revenue(test_
     async with AsyncClient(transport=ASGITransport(app=test_app),base_url="http://workforce") as client:
         first = await client.post("/v1/adapters/photo-studio-growth-os/webhooks",content=raw,headers=headers)
         second = await client.post("/v1/adapters/photo-studio-growth-os/webhooks",content=raw,headers=headers)
+        event_replay_headers = dict(headers)
+        event_replay_headers["Idempotency-Key"] = "different-delivery-key"
+        event_replay = await client.post("/v1/adapters/photo-studio-growth-os/webhooks",content=raw,headers=event_replay_headers)
     assert first.status_code == 200 and first.json()["status"] == "accepted"
     assert second.status_code == 200 and second.json()["idempotent"] is True
+    assert event_replay.status_code == 200 and event_replay.json()["idempotent"] is True
     assert len(install_test_repository.product_telemetry) == 1
     assert install_test_repository.product_telemetry[0]["recognised_revenue_inr"] == 125000
 
