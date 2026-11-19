@@ -29,8 +29,13 @@ from .digital_ceo import DigitalCEOService, is_synthetic_event
 from .commercial_intelligence import (CommercialIntelligenceService, RobotsCompliantHttpFetcher, MockDirectoryFetcher, PRODUCT_PLAYBOOKS)
 from .adapters.generic_product_adapter import GENERIC_PRODUCT_IDS, GenericAdapterContext, AdapterGovernanceError
 from .adapters.registry import build_product_adapter_registry
+from .health import router as health_router
+from .rate_limit import RateLimitMiddleware
+from .release_readiness import ReleaseReadinessService
 
-app = FastAPI(title="RunGrow Workforce API", version="0.4.0")
+app = FastAPI(title="RunGrow Workforce API", version="0.5.0")
+app.add_middleware(RateLimitMiddleware)
+app.include_router(health_router)
 app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins,
     allow_credentials=True, allow_methods=["GET","POST"],
     allow_headers=["Authorization","Content-Type","Idempotency-Key","X-RunGrow-Signature","X-RunGrow-Timestamp","X-RunGrow-Tenant-ID","X-RunGrow-External-Tenant-Id","X-RunGrow-Product-ID","X-RunGrow-Org-ID","X-RunGrow-Scopes","X-Correlation-ID"])
@@ -840,5 +845,43 @@ async def request_investment_approval(body: InvestmentApprovalRequest,
             expires_at=datetime.now(timezone.utc)+timedelta(hours=24))
         return {"approval_id":str(approval["id"]),"status":approval["status"],
                 "event_type":body.event_type,"execution":"not_started"}
+    except Exception as exc:
+        translate_repo_error(exc)
+
+
+class ReleaseSignoffRequest(BaseModel):
+    release_layer: str
+    gate_name: str
+    status: str
+    evidence: dict
+    candidate_sha: str | None = None
+    environment: str = "production"
+
+
+@app.get("/v1/release/readiness")
+async def release_readiness(
+    p: Principal = Depends(require_permission("workforce.read")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo),
+):
+    try:
+        return await ReleaseReadinessService(repo, adapter_registry=PRODUCT_ADAPTERS).evaluate()
+    except Exception as exc:
+        translate_repo_error(exc)
+
+
+@app.post("/v1/release/signoffs")
+async def record_release_signoff(
+    body: ReleaseSignoffRequest,
+    p: Principal = Depends(require_permission("release.approve")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo),
+):
+    verifier_type = "AUTOMATED" if getattr(p, "actor_type", "human") == "service" else "HUMAN"
+    try:
+        return await repo.record_release_gate_signoff(
+            release_layer=body.release_layer, gate_name=body.gate_name,
+            status=body.status, evidence=body.evidence, verifier_type=verifier_type,
+            verifier_id=p.user_id, candidate_sha=body.candidate_sha,
+            environment=body.environment,
+        )
     except Exception as exc:
         translate_repo_error(exc)
