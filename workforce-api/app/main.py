@@ -23,7 +23,8 @@ from .orchestrator import DurableTaskOrchestrator
 from .execution_boundary import ToolRegistry, ExecutionBoundaryGuard, ApprovalBoundaryError, SandboxViolation
 from .schemas import OrchestratorDispatchRequest, ToolExecutionRequest
 from .adapters.base import SignedWebhookVerifier
-from .adapters.photo_studio_growth_os import PhotoStudioGrowthOSAdapter, register_photo_studio_growth_os_tools\nfrom .digital_ceo import DigitalCEOService\nfrom .schemas import BaseModel as _SchemaBaseModel
+from .adapters.photo_studio_growth_os import PhotoStudioGrowthOSAdapter, register_photo_studio_growth_os_tools
+from .digital_ceo import DigitalCEOService
 
 app = FastAPI(title="RunGrow Workforce API", version="0.4.0")
 app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins,
@@ -448,7 +449,8 @@ async def execute_registered_tool(body: ToolExecutionRequest,
     except KeyError as exc: raise HTTPException(404,str(exc)) from exc
     except Exception as exc: translate_repo_error(exc)
 
-\nclass CEODirectiveRequest(_SchemaBaseModel):
+
+class CEODirectiveRequest(BaseModel):
     directive: str = Field(min_length=8, max_length=5000)
     product_ids: list[str] = Field(default_factory=list)
     is_sandbox: bool = True
