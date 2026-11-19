@@ -194,7 +194,7 @@ class PostgresWorkforceRepository(ReportingRepositoryMixin):
             (id,tenant_id,product_id,employee_id,action_type,payload,payload_hash,
              requester_id,status,expires_at,created_at)
           VALUES (:id,:tenant,:product,:employee,:action,CAST(:payload AS jsonb),:hash,
-                  :requester,'pending',:expires,now()) RETURNING *
+                  :requester,'PENDING',:expires,now()) RETURNING *
         """, {"id": approval_id, "tenant": self.principal.tenant_id, "product": product_id,
               "employee": employee_id, "action": action_type, "payload": json.dumps(payload),
               "hash": digest, "requester": self.principal.user_id, "expires": expires_at})
@@ -209,9 +209,9 @@ class PostgresWorkforceRepository(ReportingRepositoryMixin):
           UPDATE wf_approvals SET status=:decision, approver_id=:approver,
                  decision_reason=:reason, decided_at=now()
           WHERE id=:id AND tenant_id=:tenant AND product_id IS NOT DISTINCT FROM :product
-            AND status='pending' AND requester_id <> :approver AND expires_at > now()
+            AND status='PENDING' AND requester_id <> :approver AND expires_at > now()
           RETURNING *
-        """, {"decision": decision.lower(), "approver": self.principal.user_id, "reason": reason,
+        """, {"decision": decision.upper(), "approver": self.principal.user_id, "reason": reason,
               "id": approval_id, "tenant": self.principal.tenant_id, "product": product_id})
         if not item:
             raise PermissionError("Approval is unavailable, expired, already decided, or separation of duties failed")
@@ -225,7 +225,7 @@ class PostgresWorkforceRepository(ReportingRepositoryMixin):
         item = await self._one("""
           SELECT * FROM wf_approvals WHERE id=:id AND tenant_id=:tenant
             AND product_id IS NOT DISTINCT FROM :product AND employee_id=:employee
-            AND action_type=:action AND status='approved' AND expires_at > now() AND consumed_at IS NULL
+            AND action_type=:action AND status='APPROVED' AND expires_at > now() AND consumed_at IS NULL
             AND approver_id IS NOT NULL AND approver_id <> requester_id
           FOR UPDATE
         """, {"id": approval_id, "tenant": self.principal.tenant_id, "product": product_id,
@@ -308,7 +308,7 @@ class PostgresWorkforceRepository(ReportingRepositoryMixin):
           WHERE r.id=:run AND r.tenant_id=:tenant AND r.execution_state='AWAITING_APPROVAL'
             AND EXISTS (SELECT 1 FROM wf_approvals a WHERE a.id=:approval AND a.tenant_id=r.tenant_id
               AND a.product_id IS NOT DISTINCT FROM r.product_id AND a.employee_id=r.employee_id
-              AND a.status='approved' AND a.expires_at>now() AND a.consumed_at IS NULL)
+              AND a.status='APPROVED' AND a.expires_at>now() AND a.consumed_at IS NULL)
           RETURNING r.*
         """,{"run":run_id,"tenant":self.principal.tenant_id,"approval":approval_id})
         if not item: raise PermissionError("Run cannot resume without matching live approval")
@@ -389,7 +389,7 @@ class PostgresWorkforceRepository(ReportingRepositoryMixin):
           WHERE t.id=:task AND t.tenant_id=:tenant AND t.status='AWAITING_APPROVAL'
             AND EXISTS (SELECT 1 FROM wf_approvals a WHERE a.id=:approval AND a.tenant_id=t.tenant_id
               AND a.product_id IS NOT DISTINCT FROM t.product_id AND a.employee_id=t.assignee_role_id
-              AND a.status='approved' AND a.expires_at>now() AND a.consumed_at IS NULL)
+              AND a.status='APPROVED' AND a.expires_at>now() AND a.consumed_at IS NULL)
           RETURNING t.*
         """,{"task":task_id,"tenant":self.principal.tenant_id,"approval":approval_id})
         if not item: raise PermissionError("Task cannot resume without a matching live approval")
@@ -484,7 +484,7 @@ class PostgresWorkforceRepository(ReportingRepositoryMixin):
         item=await self._one("""
           UPDATE wf_approvals SET consumed_at=now(),execution_run_id=:run
           WHERE id=:id AND tenant_id=:tenant AND product_id IS NOT DISTINCT FROM :product
-            AND employee_id=:employee AND action_type=:action AND status='approved'
+            AND employee_id=:employee AND action_type=:action AND status='APPROVED'
             AND approver_id IS NOT NULL AND approver_id<>requester_id
             AND expires_at>now() AND consumed_at IS NULL AND payload_hash=:hash
           RETURNING *
