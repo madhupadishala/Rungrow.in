@@ -97,6 +97,7 @@ class PhotoStudioGrowthOSAdapter:
 
     async def dispatch_governed_lead_followup(self, tenant_id, lead_id, message_payload,
             approval_id, idempotency_key, *, repository, principal, employee, run, correlation_id=None):
+        if tenant_id != principal.tenant_id: raise PermissionError("Outbound tenant does not match authenticated principal")
         ctx = AdapterContext(tenant_id, scopes=frozenset({self.WRITE_SCOPE}),
             correlation_id=correlation_id or str(uuid4()), is_sandbox=bool(run.get("is_sandbox")))
         payload = {"tenant_id":tenant_id,"lead_id":lead_id,"message_payload":message_payload,
@@ -110,6 +111,7 @@ class PhotoStudioGrowthOSAdapter:
 
     async def register_qualified_prospect_handoff(self, tenant_id, prospect_payload, approval_id,
             idempotency_key, *, repository, principal, employee, run, correlation_id=None):
+        if tenant_id != principal.tenant_id: raise PermissionError("Outbound tenant does not match authenticated principal")
         ctx = AdapterContext(tenant_id, scopes=frozenset({self.WRITE_SCOPE}),
             correlation_id=correlation_id or str(uuid4()), is_sandbox=bool(run.get("is_sandbox")))
         payload = {"tenant_id":tenant_id,"prospect_payload":prospect_payload,
