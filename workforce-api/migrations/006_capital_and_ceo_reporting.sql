@@ -31,19 +31,30 @@ CREATE POLICY investment_capital_tenant_scope ON investment_capital_events
  WITH CHECK (tenant_id=current_setting('app.current_tenant_id',true));
 
 CREATE OR REPLACE FUNCTION wf_validate_investment_approval() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql AS $
 DECLARE a wf_approvals%ROWTYPE;
 BEGIN
  IF NEW.event_type <> 'investor_lead' THEN
    SELECT * INTO a FROM wf_approvals
     WHERE id=NEW.approval_id AND tenant_id=NEW.tenant_id
       AND lower(status)='approved' AND approver_id IS NOT NULL
-      AND approver_id<>requester_id AND expires_at>NEW.recorded_at;
-   IF NOT FOUND THEN RAISE EXCEPTION 'investment event requires a verified, unexpired, separately approved decision'; END IF;
+      AND approver_id<>requester_id AND expires_at>NEW.recorded_at
+      AND consumed_at IS NULL
+    FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'investment event requires a verified, unexpired, unused approval'; END IF;
+   IF a.action_type NOT IN ('investment.commit','investor.commit','securities.commit')
+      OR a.payload->>'event_type' IS DISTINCT FROM NEW.event_type
+      OR a.payload->>'investor_ref' IS DISTINCT FROM NEW.investor_ref
+      OR COALESCE((a.payload->>'amount_inr')::numeric,-1) <> NEW.amount_inr THEN
+     RAISE EXCEPTION 'investment approval does not match event type, investor and amount';
+   END IF;
+   UPDATE wf_approvals SET consumed_at=NEW.recorded_at
+    WHERE id=NEW.approval_id AND tenant_id=NEW.tenant_id AND consumed_at IS NULL;
+   IF NOT FOUND THEN RAISE EXCEPTION 'investment approval has already been consumed'; END IF;
  END IF;
  RETURN NEW;
 END;
-$$;
+$;
 DROP TRIGGER IF EXISTS investment_capital_approval_guard ON investment_capital_events;
 CREATE TRIGGER investment_capital_approval_guard
  BEFORE INSERT ON investment_capital_events
