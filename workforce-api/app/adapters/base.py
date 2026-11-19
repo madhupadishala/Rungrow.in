@@ -47,12 +47,16 @@ class SignedWebhookVerifier:
             raise ValueError("Replay window must be between 1 and 300 seconds")
         self.secret, self.tolerance_seconds = secret.encode(), tolerance_seconds
     def sign(self, body: bytes, timestamp: int | str, *, tenant_id: str = "",
-             product_id: str = PRODUCT_ID, workforce_tenant_id: str = "") -> str:
-        binding = ".".join((str(timestamp), tenant_id, workforce_tenant_id, product_id)).encode("utf-8")
-        message = binding + b"." + body
-        return "sha256=" + hmac.new(self.secret, message, hashlib.sha256).hexdigest()
+             product_id: str = PRODUCT_ID, workforce_tenant_id: str = "",
+             scopes: frozenset[str] | set[str] | tuple[str, ...] = ()) -> str:
+        canonical_scopes = ",".join(sorted(set(scopes)))
+        body_digest = hashlib.sha256(body).hexdigest()
+        binding = ".".join((str(timestamp), product_id, workforce_tenant_id,
+                            tenant_id, canonical_scopes, body_digest)).encode("utf-8")
+        return "sha256=" + hmac.new(self.secret, binding, hashlib.sha256).hexdigest()
     def verify(self, body: bytes, signature: str | None, timestamp: str | None, *,
                tenant_id: str, product_id: str, workforce_tenant_id: str = "",
+               scopes: frozenset[str] | set[str] | tuple[str, ...] = (),
                now: float | None = None):
         if product_id != PRODUCT_ID or not tenant_id: raise PermissionError("Invalid product or tenant binding")
         if workforce_tenant_id and workforce_tenant_id == tenant_id:
@@ -63,7 +67,7 @@ class SignedWebhookVerifier:
         if abs((time.time() if now is None else now) - issued) > self.tolerance_seconds:
             raise PermissionError("Service signature timestamp outside replay window")
         expected = self.sign(body, issued, tenant_id=tenant_id, product_id=product_id,
-                             workforce_tenant_id=workforce_tenant_id)
+                             workforce_tenant_id=workforce_tenant_id, scopes=scopes)
         supplied = signature if signature.startswith("sha256=") else "sha256=" + signature
         if not hmac.compare_digest(expected, supplied): raise PermissionError("Invalid service signature")
 
