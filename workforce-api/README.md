@@ -80,6 +80,8 @@ The adapter treats `studio-growth-os` as the authoritative source for its tenant
 
 Configure:
 - `STUDIO_GROWTH_OS_API_URL`: standalone Studio Growth OS API base URL.
+- `RUNGROW_INTERNAL_TENANT_ID`: internal RunGrow organization tenant used for Workforce RLS; never set this to an external Studio tenant ID.
+- `STUDIO_GROWTH_OS_TENANT_MAP`: JSON mapping of external Studio tenant IDs to their owning internal RunGrow organization tenant IDs.
 - `STUDIO_GROWTH_OS_SERVICE_SECRET`: shared HMAC-SHA256 secret; never expose it to browser clients.
 - `STUDIO_GROWTH_OS_TENANT_SERVICE_TOKENS`: JSON object mapping each external Studio Growth OS tenant ID to its short-lived service JWT. Existing protected Studio Growth OS routes require tenant membership JWTs; the adapter sends the tenant-matched JWT in addition to its HMAC signature when configured.
 - `DATABASE_URL`: required for durable adapter idempotency and telemetry.
