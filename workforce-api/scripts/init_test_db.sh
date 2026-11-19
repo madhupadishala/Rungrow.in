@@ -7,7 +7,7 @@ APP_USER="rungrow_app_user"
 APP_PASSWORD="${RUNGROW_APP_PASSWORD:-rungrow_app_local_only}"
 COMPOSE=(docker compose -f "$ROOT/docker-compose.test.yml")
 if [[ ! -f "$ROOT/migrations/006_capital_and_ceo_reporting.sql" ]]; then
-  echo "Required migration 005_product_adapters_and_telemetry.sql is missing" >&2
+  echo "Required migration 006_capital_and_ceo_reporting.sql is missing" >&2
   exit 1
 fi
 ready=false
