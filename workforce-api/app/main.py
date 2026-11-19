@@ -26,6 +26,9 @@ from .schemas import OrchestratorDispatchRequest, ToolExecutionRequest
 from .adapters.base import SignedWebhookVerifier
 from .adapters.photo_studio_growth_os import PhotoStudioGrowthOSAdapter, register_photo_studio_growth_os_tools
 from .digital_ceo import DigitalCEOService, is_synthetic_event
+from .commercial_intelligence import (CommercialIntelligenceService, RobotsCompliantHttpFetcher, MockDirectoryFetcher, PRODUCT_PLAYBOOKS)
+from .adapters.generic_product_adapter import GENERIC_PRODUCT_IDS, GenericAdapterContext, AdapterGovernanceError
+from .adapters.registry import build_product_adapter_registry
 
 app = FastAPI(title="RunGrow Workforce API", version="0.4.0")
 app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins,
@@ -36,6 +39,7 @@ _PORTFOLIO_PATH = Path(__file__).resolve().parents[2] / "data" / "workforce" / "
 with _PORTFOLIO_PATH.open("r", encoding="utf-8") as f:
     _portfolio = json.load(f)
 PRODUCTS = {x["product_id"]: x for x in _portfolio.get("products", [])}
+PRODUCT_ADAPTERS = build_product_adapter_registry()
 PRODUCT_ROLE_IDS = {e.product_id:e.id for e in EMPLOYEES if e.product_id}
 if set(PRODUCT_ROLE_IDS) != set(PRODUCTS):
     raise RuntimeError("Product portfolio and Product Growth Manager registries do not match")
@@ -272,6 +276,28 @@ def get_model_gateway(repo):
     return ModelGateway(providers,primary_provider=provider_name,primary_model=model,
         fallback_provider=fallback,fallback_model=os.getenv("WORKFORCE_FALLBACK_MODEL"),repository=repo)
 
+
+def get_commercial_intelligence_service(repo: WorkforceRepositoryProtocol):
+    if settings.app_env == "test":
+        provider = MockModelProvider([{
+            "name": "Campaign planning brief",
+            "target_icp_segment": "Validated target segment",
+            "channel": "RESEARCH_ONLY",
+            "messaging_brief": "Research-led campaign plan. No outbound communication is sent.",
+            "success_metric": "Qualified prospects",
+        }])
+        gateway = ModelGateway({"mock": provider}, primary_provider="mock",
+            primary_model="commercial-intelligence-fixture", repository=repo)
+        fetcher = MockDirectoryFetcher()
+    else:
+        gateway = get_model_gateway(repo)
+        fetcher = RobotsCompliantHttpFetcher(
+            allow_domains=set(filter(None, os.getenv("RUNGROW_RESEARCH_ALLOW_DOMAINS", "").split(","))),
+            deny_domains=set(filter(None, os.getenv("RUNGROW_RESEARCH_DENY_DOMAINS", "").split(","))),
+            requests_per_second=float(os.getenv("RUNGROW_RESEARCH_REQUESTS_PER_SECOND", "0.5")))
+    return CommercialIntelligenceService(repo, fetcher, gateway)
+
+
 def get_tool_registry(repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo)):
     registry = ToolRegistry()
     adapter = PhotoStudioGrowthOSAdapter()
@@ -346,6 +372,186 @@ async def photo_studio_growth_os_webhook(
         raise HTTPException(401, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+
+async def get_generic_adapter_repo(
+    product_id: str,
+    tenant_id: str = Header(..., alias="X-RunGrow-Tenant-ID"),
+    org_id: str = Header(..., alias="X-RunGrow-Org-ID"),
+):
+    if product_id not in GENERIC_PRODUCT_IDS:
+        raise HTTPException(404, "Unknown generic adapter product")
+    internal_tenant_id = os.getenv("RUNGROW_INTERNAL_TENANT_ID", "")
+    if not internal_tenant_id:
+        raise HTTPException(503, "RUNGROW_INTERNAL_TENANT_ID is required for adapter isolation")
+    if org_id != internal_tenant_id or tenant_id == internal_tenant_id:
+        raise HTTPException(403, "External product tenant and internal Workforce tenant must be distinct")
+    if not settings.database_url:
+        raise HTTPException(503, "DATABASE_URL is required for durable adapter telemetry")
+    service = Principal("product-adapter-webhook", internal_tenant_id, "service",
+        frozenset({"product-telemetry:write"}), actor_type="service",
+        product_ids=frozenset({product_id}))
+    factory = session_factory()
+    async with factory() as session:
+        async with PostgresWorkforceRepository(session, service) as repository:
+            yield repository
+
+
+@app.post("/v1/adapters/{product_id}/webhooks")
+async def generic_product_webhook(
+    product_id: str,
+    request: Request,
+    repo: WorkforceRepositoryProtocol = Depends(get_generic_adapter_repo),
+    signature: str | None = Header(default=None, alias="X-RunGrow-Signature"),
+    timestamp: str | None = Header(default=None, alias="X-RunGrow-Timestamp"),
+    tenant_header: str | None = Header(default=None, alias="X-RunGrow-Tenant-ID"),
+    product_header: str | None = Header(default=None, alias="X-RunGrow-Product-ID"),
+    org_header: str | None = Header(default=None, alias="X-RunGrow-Org-ID"),
+    correlation_id: str | None = Header(default=None, alias="X-Correlation-ID"),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
+    if product_header != product_id:
+        raise HTTPException(403, "Webhook product binding mismatch")
+    if not tenant_header or not correlation_id or len(correlation_id) > 128 or not idempotency_key:
+        raise HTTPException(400, "Tenant, correlation and idempotency headers are required")
+    internal_tenant_id = os.getenv("RUNGROW_INTERNAL_TENANT_ID", "")
+    if not internal_tenant_id or org_header != internal_tenant_id or tenant_header == internal_tenant_id:
+        raise HTTPException(403, "Webhook tenant/org binding mismatch")
+    raw = await request.body()
+    adapter = PRODUCT_ADAPTERS.get(product_id)
+    try:
+        return await adapter.handle_webhook(raw_body=raw, signature=signature, timestamp=timestamp,
+            external_tenant_id=tenant_header, workforce_tenant_id=internal_tenant_id,
+            idempotency_key=idempotency_key, correlation_id=correlation_id, repository=repo)
+    except AdapterGovernanceError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(401, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/v1/adapters/readiness")
+async def adapter_readiness(p: Principal = Depends(require_permission("workforce.read"))):
+    return {"adapters": PRODUCT_ADAPTERS.readiness(), "count": len(PRODUCT_ADAPTERS.product_ids)}
+
+
+class ProspectDiscoveryRequest(BaseModel):
+    product_id: str
+    query: str = Field(min_length=2, max_length=300)
+    city: str = Field(min_length=2, max_length=160)
+    source_urls: list[str] = Field(default_factory=list, max_length=30)
+    is_sandbox: bool = False
+
+
+class CampaignPlanRequest(BaseModel):
+    product_id: str
+    target_icp_segment: str = Field(min_length=2, max_length=240)
+    channel: str = Field(pattern="^(EMAIL|WHATSAPP|PHONE|SOCIAL|IN_PRODUCT|PARTNER|RESEARCH_ONLY)$")
+    is_sandbox: bool = True
+
+
+class CampaignActivationRequest(BaseModel):
+    approval_id: str
+
+
+@app.post("/v1/commercial/prospects/discover")
+async def discover_prospects(body: ProspectDiscoveryRequest,
+    p: Principal = Depends(require_permission("research.public")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo)):
+    authorize_product_access(p, body.product_id)
+    try:
+        service = get_commercial_intelligence_service(repo)
+        return await service.discover(tenant_id=p.tenant_id, product_id=body.product_id,
+            query=body.query, city=body.city, source_urls=body.source_urls,
+            is_sandbox=body.is_sandbox)
+    except Exception as exc:
+        translate_repo_error(exc)
+
+
+@app.get("/v1/commercial/prospects")
+async def list_commercial_prospects(product_id: str | None = None,
+    p: Principal = Depends(require_permission("lead.enrich")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo)):
+    authorize_product_access(p, product_id)
+    try:
+        return await repo.list_prospects(product_id=product_id)
+    except Exception as exc:
+        translate_repo_error(exc)
+
+
+@app.post("/v1/commercial/campaigns")
+async def create_commercial_campaign(body: CampaignPlanRequest,
+    p: Principal = Depends(require_permission("campaign.draft")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo)):
+    authorize_product_access(p, body.product_id)
+    employee_id = PRODUCT_ROLE_IDS[body.product_id]
+    try:
+        service = get_commercial_intelligence_service(repo)
+        brief = await service.generate_campaign_brief(tenant_id=p.tenant_id,
+            product_id=body.product_id, segment=body.target_icp_segment,
+            channel=body.channel, employee_id=employee_id, is_sandbox=body.is_sandbox)
+        campaign = await service.create_campaign(product_id=body.product_id, brief=brief,
+            is_sandbox=body.is_sandbox, created_by=p.user_id)
+        return {"campaign": campaign, "execution": "draft_only"}
+    except Exception as exc:
+        translate_repo_error(exc)
+
+
+@app.get("/v1/commercial/campaigns")
+async def list_commercial_campaigns(product_id: str | None = None,
+    p: Principal = Depends(require_permission("campaign.read")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo)):
+    authorize_product_access(p, product_id)
+    try:
+        return await repo.list_campaigns(product_id=product_id)
+    except Exception as exc:
+        translate_repo_error(exc)
+
+
+@app.post("/v1/commercial/campaigns/{campaign_id}/request-approval")
+async def request_commercial_campaign_approval(campaign_id: str,
+    p: Principal = Depends(require_permission("campaign.draft")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo)):
+    try:
+        campaign = await repo.get_campaign(campaign_id)
+        if not campaign:
+            raise HTTPException(404, "Campaign not found")
+        authorize_product_access(p, campaign["product_id"])
+        employee_id = PRODUCT_ROLE_IDS[campaign["product_id"]]
+        service = get_commercial_intelligence_service(repo)
+        approval = await service.request_campaign_approval(campaign=campaign, employee_id=employee_id)
+        return {"campaign_id": campaign_id, "approval_id": approval["id"],
+                "status": "AWAITING_APPROVAL", "execution": "not_started"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        translate_repo_error(exc)
+
+
+@app.post("/v1/commercial/campaigns/{campaign_id}/activate")
+async def activate_commercial_campaign(campaign_id: str, body: CampaignActivationRequest,
+    p: Principal = Depends(require_permission("campaign.activate")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo)):
+    try:
+        campaign = await repo.get_campaign(campaign_id)
+        if not campaign:
+            raise HTTPException(404, "Campaign not found")
+        authorize_product_access(p, campaign["product_id"])
+        employee_id = PRODUCT_ROLE_IDS[campaign["product_id"]]
+        employee = BY_ID[employee_id]
+        run = await repo.create_agent_run(product_id=campaign["product_id"], employee_id=employee_id,
+            task=f"Governed campaign activation {campaign_id}", status="planned",
+            summary="Campaign activation through approval boundary", steps=[],
+            correlation_id=str(uuid4()), is_sandbox=bool(campaign.get("is_sandbox", False)))
+        service = get_commercial_intelligence_service(repo)
+        return await service.activate_campaign(campaign_id=campaign_id,
+            approval_id=body.approval_id, principal=p, employee=employee, run=run)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        translate_repo_error(exc)
 
 
 @app.post("/v1/workforce/orchestrator/tasks")
