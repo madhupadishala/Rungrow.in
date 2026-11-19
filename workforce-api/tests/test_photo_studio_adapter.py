@@ -13,6 +13,7 @@ from app.adapters.mocks.studio_growth_os_mock import app as studio_mock
 from app.execution_boundary import ApprovalBoundaryError, SandboxViolation
 from app.policy import Principal
 from app.repositories import InMemoryWorkforceRepository
+from app.commercial_intelligence import AI_IDENTITY_DISCLOSURE
 
 
 TENANT = "studio-customer-tenant-001"
@@ -198,7 +199,7 @@ async def test_governed_followup_consumes_third_party_approval_once(adapter):
         department="Sales & Revenue",product_id=PRODUCT)
     run = await repository.create_agent_run(product_id=PRODUCT,employee_id=employee.id,task="follow-up",
         status="planned",summary="",steps=[],correlation_id="corr-run",is_sandbox=False)
-    payload = {"tenant_id":TENANT,"workforce_tenant_id":WORKFORCE_TENANT,"lead_id":"lead-hyd-001","message_payload":{"quote_id":"quote-hyd-001","channel":"whatsapp","template_vars":{"lead_id":"lead-hyd-001"}},
+    payload = {"tenant_id":TENANT,"workforce_tenant_id":WORKFORCE_TENANT,"lead_id":"lead-hyd-001","message_payload":{"quote_id":"quote-hyd-001","channel":"whatsapp","template_vars":{"lead_id":"lead-hyd-001"},"ai_identity_disclosure":AI_IDENTITY_DISCLOSURE},
                "idempotency_key":"approved-write-001","correlation_id":"corr-approved"}
     approval = await repository.create_approval(product_id=PRODUCT,employee_id=employee.id,
         action_type="outreach.send",payload=payload,expires_at=datetime.now(timezone.utc)+timedelta(minutes=5))
@@ -213,7 +214,7 @@ async def test_governed_followup_consumes_third_party_approval_once(adapter):
         return httpx.Response(200,json={"status":"sent","is_synthetic":True})
     adapter.transport = httpx.MockTransport(fake_send)
     result = await adapter.dispatch_governed_lead_followup(TENANT,"lead-hyd-001",
-        {"quote_id":"quote-hyd-001","channel":"whatsapp","template_vars":{"lead_id":"lead-hyd-001"}},approval["id"],"approved-write-001",
+        {"quote_id":"quote-hyd-001","channel":"whatsapp","template_vars":{"lead_id":"lead-hyd-001"},"ai_identity_disclosure":AI_IDENTITY_DISCLOSURE},approval["id"],"approved-write-001",
         repository=repository,principal=principal,employee=employee,run=run,
         correlation_id="corr-approved")
     assert result["status"] == "sent"
@@ -224,7 +225,7 @@ async def test_governed_followup_consumes_third_party_approval_once(adapter):
     assert approval["consumed_at"] is not None
     with pytest.raises(ApprovalBoundaryError):
         await adapter.dispatch_governed_lead_followup(TENANT,"lead-hyd-001",
-            {"quote_id":"quote-hyd-001","channel":"whatsapp","template_vars":{"lead_id":"lead-hyd-001"}},approval["id"],"approved-write-001",
+            {"quote_id":"quote-hyd-001","channel":"whatsapp","template_vars":{"lead_id":"lead-hyd-001"},"ai_identity_disclosure":AI_IDENTITY_DISCLOSURE},approval["id"],"approved-write-001",
             repository=repository,principal=principal,employee=employee,run=run,
             correlation_id="corr-approved")
     assert len(sent) == 1
