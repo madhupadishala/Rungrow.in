@@ -278,12 +278,18 @@ def get_tool_registry(repo: WorkforceRepositoryProtocol = Depends(get_workforce_
 async def get_adapter_repo(
     tenant_id: str = Header(..., alias="X-RunGrow-Tenant-ID"),
     product_id: str = Header(..., alias="X-RunGrow-Product-ID"),
+    org_id: str = Header(..., alias="X-RunGrow-Org-ID"),
 ):
     if product_id != "photo-studio-growth-os":
         raise HTTPException(403, "Adapter product binding mismatch")
+    internal_tenant_id = os.getenv("RUNGROW_INTERNAL_TENANT_ID", "")
+    if not internal_tenant_id:
+        raise HTTPException(503, "RUNGROW_INTERNAL_TENANT_ID is required for adapter isolation")
+    if org_id != internal_tenant_id or org_id == tenant_id:
+        raise HTTPException(403, "External product tenant and internal Workforce tenant must be distinct")
     if not settings.database_url:
         raise HTTPException(503, "DATABASE_URL is required for durable adapter telemetry")
-    service = Principal("studio-growth-os-webhook", tenant_id, "service",
+    service = Principal("studio-growth-os-webhook", internal_tenant_id, "service",
         frozenset({"product-telemetry:write"}), actor_type="service",
         product_ids=frozenset({product_id}))
     factory = session_factory()
@@ -299,6 +305,7 @@ async def photo_studio_growth_os_webhook(
     timestamp: str | None = Header(default=None, alias="X-RunGrow-Timestamp"),
     tenant_header: str | None = Header(default=None, alias="X-RunGrow-Tenant-ID"),
     product_header: str | None = Header(default=None, alias="X-RunGrow-Product-ID"),
+    org_header: str | None = Header(default=None, alias="X-RunGrow-Org-ID"),
     correlation_id: str | None = Header(default=None, alias="X-Correlation-ID"),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
@@ -314,7 +321,10 @@ async def photo_studio_growth_os_webhook(
     if product_id != "photo-studio-growth-os" or product_header != product_id:
         raise HTTPException(403, "Webhook product binding mismatch")
     if not tenant_id or tenant_header != tenant_id:
-        raise HTTPException(403, "Webhook tenant binding mismatch")
+        raise HTTPException(403, "Webhook external tenant binding mismatch")
+    internal_tenant_id = os.getenv("RUNGROW_INTERNAL_TENANT_ID", "")
+    if not internal_tenant_id or payload.get("workforce_tenant_id") != internal_tenant_id or org_header != internal_tenant_id or internal_tenant_id == tenant_id:
+        raise HTTPException(403, "Webhook internal Workforce tenant binding mismatch")
     if not correlation_id or len(correlation_id) > 128:
         raise HTTPException(400, "A valid X-Correlation-ID is required")
     if not idempotency_key:
@@ -324,7 +334,8 @@ async def photo_studio_growth_os_webhook(
         raise HTTPException(503, "STUDIO_GROWTH_OS_SERVICE_SECRET is not configured")
     try:
         SignedWebhookVerifier(secret).verify(raw, signature, timestamp,
-            tenant_id=tenant_id, product_id=product_id)
+            tenant_id=tenant_id, product_id=product_id,
+            workforce_tenant_id=internal_tenant_id)
         adapter = PhotoStudioGrowthOSAdapter(service_secret=secret)
         return await adapter.handle_webhook(body=raw, signature=signature, timestamp=timestamp,
             tenant_id=tenant_id, product_id=product_id, idempotency_key=idempotency_key,
