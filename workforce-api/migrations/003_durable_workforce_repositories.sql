@@ -62,14 +62,14 @@ CREATE INDEX IF NOT EXISTS wf_approvals_tenant_product_status ON wf_approvals(te
 CREATE INDEX IF NOT EXISTS wf_audit_tenant_product_time ON wf_audit_events(tenant_id,product_id,occurred_at DESC);
 
 CREATE OR REPLACE FUNCTION wf_reject_audit_mutation() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql AS $fn$
 BEGIN RAISE EXCEPTION 'workforce audit events are append-only'; END;
-$$;
+$fn$;
 DROP TRIGGER IF EXISTS wf_audit_immutable ON wf_audit_events;
 CREATE TRIGGER wf_audit_immutable BEFORE UPDATE OR DELETE ON wf_audit_events
 FOR EACH ROW EXECUTE FUNCTION wf_reject_audit_mutation();
 
-DO $$
+DO $do$
 DECLARE t text;
 BEGIN
  FOREACH t IN ARRAY ARRAY['wf_tasks','wf_agent_runs','wf_memory','wf_approvals','wf_audit_events'] LOOP
@@ -88,7 +88,7 @@ BEGIN
          OR product_id = ANY(string_to_array(COALESCE(current_setting(''app.product_ids'',true),''''),'',''))))',
     t);
  END LOOP;
-END $$;
+END $do$;
 
 ALTER TABLE wf_product_registry ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wf_product_registry FORCE ROW LEVEL SECURITY;
