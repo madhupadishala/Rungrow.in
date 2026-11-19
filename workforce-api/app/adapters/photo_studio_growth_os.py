@@ -157,7 +157,8 @@ class PhotoStudioGrowthOSAdapter:
         from ..execution_boundary import ExecutionBoundaryGuard, ToolRegistry
         registry = ToolRegistry()
         registry.register(ToolDefinition("studio_growth_os.lead_followup",frozenset({self.WRITE_SCOPE}),
-            True,False,"outreach.send",lambda **kw:self._send_lead_followup(**kw,repository=repository)))
+            True,False,"outreach.send",lambda **kw:self._send_lead_followup(**kw,repository=repository),
+            frozenset({"Sales & Revenue","Customer Success"})))
         return await ExecutionBoundaryGuard(repository,registry).execute(tool_name="studio_growth_os.lead_followup",
             principal=principal,employee=employee,run=run,payload=payload,approval_id=approval_id)
 
@@ -174,7 +175,8 @@ class PhotoStudioGrowthOSAdapter:
         from ..execution_boundary import ExecutionBoundaryGuard, ToolRegistry
         registry = ToolRegistry()
         registry.register(ToolDefinition("studio_growth_os.prospect_handoff",frozenset({self.WRITE_SCOPE}),
-            True,False,"lead.bulk_contact",lambda **kw:self._handoff_prospect(**kw,repository=repository)))
+            True,False,"lead.bulk_contact",lambda **kw:self._handoff_prospect(**kw,repository=repository),
+            frozenset({"Sales & Revenue"})))
         return await ExecutionBoundaryGuard(repository,registry).execute(tool_name="studio_growth_os.prospect_handoff",
             principal=principal,employee=employee,run=run,payload=payload,approval_id=approval_id)
 
