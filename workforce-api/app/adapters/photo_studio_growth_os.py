@@ -39,11 +39,14 @@ class PhotoStudioGrowthOSAdapter:
         if not self.secret: raise RuntimeError("STUDIO_GROWTH_OS_SERVICE_SECRET is required")
         timestamp = str(int(time.time()))
         signature = self.verifier.sign(body, timestamp, tenant_id=context.tenant_id,
-            product_id=self.product_id, workforce_tenant_id=context.workforce_tenant_id)
+            product_id=self.product_id, workforce_tenant_id=context.workforce_tenant_id,
+            scopes=context.scopes)
+        canonical_scopes = ",".join(sorted(context.scopes))
         headers = {"X-RunGrow-Signature":signature, "X-RunGrow-Timestamp":timestamp,
                    "X-Correlation-ID":context.correlation_id, "X-RunGrow-Tenant-ID":context.tenant_id, "X-RunGrow-External-Tenant-Id":context.tenant_id,
                    "X-RunGrow-Org-ID":context.workforce_tenant_id,
-                   "X-RunGrow-Product-ID":self.product_id, "Content-Type":"application/json"}
+                   "X-RunGrow-Product-ID":self.product_id, "X-RunGrow-Scopes":canonical_scopes,
+                   "Content-Type":"application/json"}
         tenant_token = self.tenant_service_tokens.get(context.tenant_id)
         if self.require_tenant_jwt and not tenant_token:
             raise RuntimeError("A tenant-bound Studio Growth OS service JWT is required for protected product routes")
@@ -71,31 +74,30 @@ class PhotoStudioGrowthOSAdapter:
 
     async def get_tenant_summary(self, tenant_id, *, context):
         self._bind(tenant_id, context, self.READ_SCOPE)
-        return await self._request("GET", "/api/v1/analytics/dashboard", context, params={"range":"30d"})
+        return await self._request("GET", "/api/v1/workforce/tenant-summary", context, params={"range":"30d"})
 
     async def list_leads(self, tenant_id, status=None, limit=50, *, context):
         self._bind(tenant_id, context, self.READ_SCOPE)
         if not 1 <= limit <= 100: raise ValueError("limit must be between 1 and 100")
         params = {"page":1, "page_size":limit}
         if status: params["stage"] = status
-        return await self._request("GET", "/api/v1/leads", context, params=params)
+        return await self._request("GET", "/api/v1/workforce/leads", context, params=params)
 
     async def list_quotes(self, tenant_id, status=None, limit=50, *, context):
         self._bind(tenant_id, context, self.READ_SCOPE)
         if not 1 <= limit <= 100: raise ValueError("limit must be between 1 and 100")
-        return await self._request("GET", "/api/v1/quotes", context,
+        return await self._request("GET", "/api/v1/workforce/quotes", context,
                                    params={"status":status,"page":1,"page_size":limit})
 
     async def list_bookings(self, tenant_id, status=None, limit=50, *, context):
         self._bind(tenant_id, context, self.READ_SCOPE)
         if not 1 <= limit <= 100: raise ValueError("limit must be between 1 and 100")
-        return await self._request("GET", "/api/v1/bookings", context,
+        return await self._request("GET", "/api/v1/workforce/bookings", context,
                                    params={"state":status,"page":1,"page_size":limit})
 
     async def get_conversation_context(self, tenant_id, lead_id, *, context):
         self._bind(tenant_id, context, self.READ_SCOPE)
-        return await self._request("GET", "/api/v1/conversations", context,
-                                   params={"lead_id":lead_id,"include_messages":"true"})
+        return await self._request("GET",  f"/api/v1/workforce/conversations/{lead_id}", context)
 
     async def _governed_write(self, path, payload, context, key, repository):
         self._bind(context.tenant_id, context, self.WRITE_SCOPE)
@@ -126,13 +128,13 @@ class PhotoStudioGrowthOSAdapter:
         channel = message_payload.get("channel", "whatsapp")
         if channel not in {"whatsapp","email","instagram_dm"}:
             raise ValueError("Unsupported Studio Growth OS quote delivery channel")
-        quote = await self._request("GET", f"/api/v1/quotes/{quote_id}", ctx)
+        quote = await self._request("GET", f"/api/v1/workforce/quotes/{quote_id}", ctx)
         if quote.get("tenant_id") != tenant_id or quote.get("lead_id") != lead_id:
             raise PermissionError("Quote does not belong to the supplied external tenant and lead")
         tool_call = {"tool":"send_quote","arguments":{"quote_id":quote_id,"channel":channel,
             "template_vars":{**(message_payload.get("template_vars") or {}),"ai_identity_disclosure":AI_IDENTITY_DISCLOSURE}},
             "idempotency_key":idempotency_key}
-        return await self._governed_write("/api/v1/agent/execute-tool",
+        return await self._governed_write(f"/api/v1/workforce/leads/{lead_id}/followup",
             tool_call, ctx, idempotency_key, repository)
 
     async def _handoff_prospect(self, tenant_id, workforce_tenant_id, prospect_payload,
@@ -145,7 +147,7 @@ class PhotoStudioGrowthOSAdapter:
                            if k not in {"tenant_id","workforce_tenant_id"}}
         ctx = AdapterContext(tenant_id, scopes=frozenset({self.WRITE_SCOPE}),
             correlation_id=correlation_id, workforce_tenant_id=workforce_tenant_id)
-        return await self._governed_write("/api/v1/leads", product_payload, ctx, idempotency_key, repository)
+        return await self._governed_write("/api/v1/workforce/prospects/handoff", product_payload, ctx, idempotency_key, repository)
 
     async def dispatch_governed_lead_followup(self, tenant_id, lead_id, message_payload,
             approval_id, idempotency_key, *, repository, principal, employee, run, correlation_id=None):
