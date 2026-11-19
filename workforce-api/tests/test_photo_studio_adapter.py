@@ -75,6 +75,10 @@ def test_context_enforces_tenant_and_least_privilege(adapter):
         adapter._bind("another-tenant", AdapterContext(TENANT, scopes=frozenset({READ}), workforce_tenant_id=WORKFORCE_TENANT), READ)
     with pytest.raises(PermissionError):
         adapter._bind(TENANT, AdapterContext(TENANT, workforce_tenant_id=WORKFORCE_TENANT), READ)
+    wrong_org = AdapterContext(STUDIO_TENANT, scopes=frozenset({READ}),
+        workforce_tenant_id="unmapped-workforce-org")
+    with pytest.raises(PermissionError):
+        adapter._bind(STUDIO_TENANT, wrong_org, READ)
 
 
 def test_hmac_replay_window_and_product_binding():
