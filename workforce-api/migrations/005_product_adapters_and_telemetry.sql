@@ -86,6 +86,7 @@ CREATE OR REPLACE FUNCTION wf_guard_adapter_idempotency_identity() RETURNS trigg
 LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
+     OR NEW.external_tenant_id IS DISTINCT FROM OLD.external_tenant_id
      OR NEW.product_id IS DISTINCT FROM OLD.product_id
      OR NEW.direction IS DISTINCT FROM OLD.direction
      OR NEW.idempotency_key IS DISTINCT FROM OLD.idempotency_key
