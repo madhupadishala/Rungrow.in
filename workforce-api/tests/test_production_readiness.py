@@ -88,6 +88,7 @@ def test_production_startup_rejects_static_development_jwt_secret():
     env = {
         "APP_ENV": "production",
         "DATABASE_URL": "postgresql://user:pass@host/db?sslmode=require",
+        "RUNGROW_INTERNAL_TENANT_ID": "rungrow-internal",
         "JWT_JWKS_URL": "https://issuer.example/.well-known/jwks.json",
         "STUDIO_GROWTH_OS_SERVICE_SECRET": "a-real-secret-value-with-at-least-32-bytes",
         "RUNGROW_ADAPTER_WEBHOOK_SECRET": "another-real-secret-value-with-at-least-32-bytes",
