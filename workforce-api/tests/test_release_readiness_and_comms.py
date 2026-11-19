@@ -178,3 +178,28 @@ async def test_in_memory_worker_heartbeat_counts_and_freshness(install_test_repo
     assert rows[0]["processed_count"]==2
     assert rows[0]["dead_letter_count"]==1
     assert rows[0]["is_fresh"] is True
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_api_returns_503_and_audits_missing_live_provider(client,install_test_repository,monkeypatch):
+    monkeypatch.delenv("WHATSAPP_ACCESS_TOKEN",raising=False)
+    monkeypatch.delenv("WHATSAPP_PHONE_NUMBER_ID",raising=False)
+    repo=install_test_repository
+    run=await repo.create_agent_run(product_id="photo-studio-growth-os",
+        employee_id="pgm-photo-studio-growth-os",task="Send approved customer update",
+        status="planned",summary="test",steps=[],correlation_id="release-test",is_sandbox=False)
+    response=await client.post("/v1/communications/whatsapp/send",json={
+        "run_id":str(run["id"]),"to":"919999999999","message":"Booking update",
+        "approval_id":"not-consumed"
+    })
+    assert response.status_code==503
+    assert any(event[0]=="communication.integration_not_configured" for event in repo.audit)
+
+@pytest.mark.asyncio
+async def test_release_signoff_requires_full_commit_sha(client):
+    response=await client.post("/v1/release/signoffs",json={
+        "release_layer":"RELEASE_1_WORKFORCE","gate_name":"ENGINEERING","status":"PASS",
+        "evidence":{"ci_run":"https://github.com/example/actions/runs/1"},
+        "candidate_sha":"abc123","environment":"staging"
+    })
+    assert response.status_code==422
