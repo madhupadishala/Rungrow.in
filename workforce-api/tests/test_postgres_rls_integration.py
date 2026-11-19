@@ -387,7 +387,7 @@ async def test_capital_event_requires_matching_approval_and_consumes_it_once():
                 (id,tenant_id,product_id,employee_id,action_type,payload,payload_hash,
                  requester_id,approver_id,status,expires_at,decided_at,created_at)
               VALUES (gen_random_uuid(),'tenant-capital-test',NULL,'finance','investment.commit',
-                CAST(:payload AS jsonb),:hash,'finance-user','founder-user','approved',
+                CAST(:payload AS jsonb),:hash,'finance-user','founder-user','APPROVED',
                 now()+interval '1 hour',now(),now()) RETURNING id
             """),{"payload":json.dumps(payload),"hash":"0"*64})).scalar_one()
             await conn.execute(text("""
