@@ -8,7 +8,7 @@ import re
 import os
 from pydantic import BaseModel, Field
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from .agent_runtime import AgentInput, AgentOrchestrator
@@ -22,11 +22,13 @@ from .model_gateway import ModelGateway, MockModelProvider, OpenAICompatibleProv
 from .orchestrator import DurableTaskOrchestrator
 from .execution_boundary import ToolRegistry, ExecutionBoundaryGuard, ApprovalBoundaryError, SandboxViolation
 from .schemas import OrchestratorDispatchRequest, ToolExecutionRequest
+from .adapters.base import SignedWebhookVerifier
+from .adapters.photo_studio_growth_os import PhotoStudioGrowthOSAdapter, register_photo_studio_growth_os_tools
 
 app = FastAPI(title="RunGrow Workforce API", version="0.4.0")
 app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins,
     allow_credentials=True, allow_methods=["GET","POST"],
-    allow_headers=["Authorization","Content-Type","Idempotency-Key"])
+    allow_headers=["Authorization","Content-Type","Idempotency-Key","X-RunGrow-Signature","X-RunGrow-Timestamp","X-RunGrow-Tenant-ID","X-RunGrow-Product-ID","X-Correlation-ID"])
 
 _PORTFOLIO_PATH = Path(__file__).resolve().parents[2] / "data" / "workforce" / "product-portfolio.json"
 with _PORTFOLIO_PATH.open("r", encoding="utf-8") as f:
@@ -268,8 +270,67 @@ def get_model_gateway(repo):
     return ModelGateway(providers,primary_provider=provider_name,primary_model=model,
         fallback_provider=fallback,fallback_model=os.getenv("WORKFORCE_FALLBACK_MODEL"),repository=repo)
 
-def get_tool_registry():
-    return getattr(app.state,"tool_registry",ToolRegistry())
+def get_tool_registry(repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo)):
+    registry = ToolRegistry()
+    adapter = PhotoStudioGrowthOSAdapter()
+    return register_photo_studio_growth_os_tools(registry, adapter, repo)
+
+async def get_adapter_repo(
+    tenant_id: str = Header(..., alias="X-RunGrow-Tenant-ID"),
+    product_id: str = Header(..., alias="X-RunGrow-Product-ID"),
+):
+    if product_id != "photo-studio-growth-os":
+        raise HTTPException(403, "Adapter product binding mismatch")
+    if not settings.database_url:
+        raise HTTPException(503, "DATABASE_URL is required for durable adapter telemetry")
+    service = Principal("studio-growth-os-webhook", tenant_id, "service",
+        frozenset({"product-telemetry:write"}), actor_type="service",
+        product_ids=frozenset({product_id}))
+    factory = session_factory()
+    async with factory() as session:
+        async with PostgresWorkforceRepository(session, service) as repository:
+            yield repository
+
+@app.post("/v1/adapters/photo-studio-growth-os/webhooks")
+async def photo_studio_growth_os_webhook(
+    request: Request,
+    repo: WorkforceRepositoryProtocol = Depends(get_adapter_repo),
+    signature: str | None = Header(default=None, alias="X-RunGrow-Signature"),
+    timestamp: str | None = Header(default=None, alias="X-RunGrow-Timestamp"),
+    tenant_header: str | None = Header(default=None, alias="X-RunGrow-Tenant-ID"),
+    product_header: str | None = Header(default=None, alias="X-RunGrow-Product-ID"),
+    correlation_id: str | None = Header(default=None, alias="X-Correlation-ID"),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
+    raw = await request.body()
+    try:
+        payload = json.loads(raw)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, "Invalid webhook JSON") from exc
+    tenant_id = payload.get("tenant_id")
+    product_id = payload.get("product_id")
+    if product_id != "photo-studio-growth-os" or product_header != product_id:
+        raise HTTPException(403, "Webhook product binding mismatch")
+    if not tenant_id or tenant_header != tenant_id:
+        raise HTTPException(403, "Webhook tenant binding mismatch")
+    if not correlation_id:
+        raise HTTPException(400, "X-Correlation-ID is required")
+    if not idempotency_key:
+        raise HTTPException(400, "Idempotency-Key is required")
+    secret = os.getenv("STUDIO_GROWTH_OS_SERVICE_SECRET", "")
+    if not secret:
+        raise HTTPException(503, "STUDIO_GROWTH_OS_SERVICE_SECRET is not configured")
+    try:
+        SignedWebhookVerifier(secret).verify(raw, signature, timestamp,
+            tenant_id=tenant_id, product_id=product_id)
+        adapter = PhotoStudioGrowthOSAdapter(service_secret=secret)
+        return await adapter.handle_webhook(body=raw, signature=signature, timestamp=timestamp,
+            tenant_id=tenant_id, product_id=product_id, idempotency_key=idempotency_key,
+            correlation_id=correlation_id, repository=repo)
+    except PermissionError as exc:
+        raise HTTPException(401, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.post("/v1/workforce/orchestrator/tasks")
