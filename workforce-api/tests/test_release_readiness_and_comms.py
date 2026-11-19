@@ -115,3 +115,47 @@ async def test_rate_limiter_returns_429_and_retry_after(client,monkeypatch):
     assert first.status_code in {401,403,422}
     assert second.status_code==429
     assert int(second.headers["retry-after"])>=1
+
+
+@pytest.mark.asyncio
+async def test_health_live_is_independent_of_database(client):
+    response=await client.get("/health/live")
+    assert response.status_code==200
+    assert response.json()["status"]=="alive"
+
+@pytest.mark.asyncio
+async def test_health_ready_requires_postgres_migrations_oidc_and_hmac(client,monkeypatch):
+    from types import SimpleNamespace
+    from app import health
+    class Result:
+        def __init__(self,rows=()): self.rows=rows
+        def mappings(self): return self
+        def all(self): return self.rows
+    class Session:
+        async def __aenter__(self): return self
+        async def __aexit__(self,*args): return None
+        async def execute(self,query):
+            if "SELECT version,filename,checksum_sha256" in str(query):
+                return Result([{"version":v,"filename":name,"checksum_sha256":checksum}
+                    for v,name,checksum in expected])
+            return Result()
+    expected=[(f"{n:03d}",f"{n:03d}_migration.sql",f"checksum-{n}") for n in range(1,9)]
+    monkeypatch.setattr(health.settings,"database_url","postgresql+asyncpg://test")
+    monkeypatch.setattr(health.settings,"app_env","production")
+    monkeypatch.setattr(health,"migration_files",lambda:[
+        (v,SimpleNamespace(name=name),checksum) for v,name,checksum in expected])
+    monkeypatch.setattr(health,"session_factory",lambda:lambda:Session())
+    monkeypatch.setenv("JWT_JWKS_URL","https://identity.example.com/.well-known/jwks.json")
+    monkeypatch.setenv("STUDIO_GROWTH_OS_SERVICE_SECRET","s"*40)
+    monkeypatch.setenv("RUNGROW_ADAPTER_WEBHOOK_SECRET","h"*40)
+    response=await client.get("/health/ready")
+    assert response.status_code==200
+    assert response.json()["checks"]["migrations"]["expected_versions"]==[f"{n:03d}" for n in range(1,9)]
+
+@pytest.mark.asyncio
+async def test_health_ready_returns_503_when_database_is_missing(client,monkeypatch):
+    from app import health
+    monkeypatch.setattr(health.settings,"database_url","")
+    response=await client.get("/health/ready")
+    assert response.status_code==503
+    assert "postgresql" in response.json()["failed_checks"]
