@@ -287,7 +287,8 @@ async def test_model_usage_ledger_is_tenant_product_scoped_and_state_machine_is_
             assert list(rows)==[]
         async with engine.begin() as conn:
             await conn.execute(text("SELECT set_config('app.current_tenant_id','usage-tenant-a',true)"))
-            with pytest.raises(Exception):
+            await conn.execute(text("SELECT set_config('app.product_ids','photo-studio-growth-os',true)"))
+            with pytest.raises(Exception, match="invalid workforce task state transition"):
                 async with conn.begin_nested():
                     await conn.execute(text("UPDATE wf_tasks SET status='RUNNING' WHERE id=:id"),{"id":str(task_id)})
     finally:
