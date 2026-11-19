@@ -162,15 +162,23 @@ def register_photo_studio_growth_os_tools(registry, adapter, repository_factory)
     async def read_bookings(tenant_id,status=None,limit=50,correlation_id=None):
         ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),correlation_id=correlation_id or str(uuid4()))
         return await adapter.list_bookings(tenant_id,status,limit,context=ctx)
+    async def read_summary(tenant_id,correlation_id=None):
+        ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),correlation_id=correlation_id or str(uuid4()))
+        return await adapter.get_tenant_summary(tenant_id,context=ctx)
+    async def read_conversation(tenant_id,lead_id,correlation_id=None):
+        ctx=AdapterContext(tenant_id,scopes=frozenset({adapter.READ_SCOPE}),correlation_id=correlation_id or str(uuid4()))
+        return await adapter.get_conversation_context(tenant_id,lead_id,context=ctx)
     async def governed_followup(tenant_id, lead_id, message_payload, idempotency_key, correlation_id):
         return await adapter._send_lead_followup(tenant_id,lead_id,message_payload,idempotency_key,
             correlation_id,repository_factory)
     async def governed_handoff(tenant_id, prospect_payload, idempotency_key, correlation_id):
         return await adapter._handoff_prospect(tenant_id,prospect_payload,idempotency_key,
             correlation_id,repository_factory)
-    for name,handler in (("studio_growth_os.leads.read",read_leads),
+    for name,handler in (("studio_growth_os.summary.read",read_summary),
+                         ("studio_growth_os.leads.read",read_leads),
                          ("studio_growth_os.quotes.read",read_quotes),
-                         ("studio_growth_os.bookings.read",read_bookings)):
+                         ("studio_growth_os.bookings.read",read_bookings),
+                         ("studio_growth_os.conversation.read",read_conversation)):
         registry.register(ToolDefinition(name,frozenset({adapter.READ_SCOPE}),False,True,"product.read",handler))
     registry.register(ToolDefinition("studio_growth_os.lead_followup",frozenset({adapter.WRITE_SCOPE}),
         True,False,"whatsapp.send",governed_followup))
