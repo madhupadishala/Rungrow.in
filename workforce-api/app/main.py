@@ -476,7 +476,7 @@ async def ceo_briefing(p: Principal=Depends(require_permission("reports.read")),
 
 @app.post("/v1/ceo/directives")
 async def ceo_directive(body: CEODirectiveRequest,
-    p: Principal=Depends(require_permission("work.assign")),
+    p: Principal=Depends(require_permission("ceo.directive")),
     repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
     if not body.directive.strip(): raise HTTPException(422,"Directive cannot be empty")
     products=body.product_ids or list(PRODUCTS)
@@ -516,6 +516,7 @@ async def executive_dashboard(p: Principal=Depends(require_permission("reports.r
         assigned=[t for t in tasks if t.get("assignee_role_id")==employee.id]
         workload.append({"employee_id":employee.id,"title":employee.title,"department":employee.department,
           "product_id":employee.product_id,"active_tasks":sum(str(t.get("status","")).upper() in {"QUEUED","RUNNING","RETRY_SCHEDULED","AWAITING_APPROVAL"} for t in assigned),
+          "availability":"occupied" if any(str(t.get("status","")).upper() in {"RUNNING","AWAITING_APPROVAL"} for t in assigned) else "available",
           "completed_tasks":sum(str(t.get("status","")).upper()=="COMPLETED" for t in assigned)})
     return {"tasks":tasks,"agent_runs":runs,"employee_workload":workload,
       "sandbox_runs":sum(bool(x.get("is_sandbox")) for x in tasks+runs),
