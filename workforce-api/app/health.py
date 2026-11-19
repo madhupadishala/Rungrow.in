@@ -52,8 +52,8 @@ async def ready():
     checks["oidc"]={"ok":oidc}
     checks["hmac"]={"ok":service_secret and webhook_secret,
         "service_secret_configured":service_secret,"webhook_secret_configured":webhook_secret}
-    if production and not oidc: failures.append("oidc")
-    if production and not (service_secret and webhook_secret): failures.append("hmac")
+    if not oidc: failures.append("oidc")
+    if not (service_secret and webhook_secret): failures.append("hmac")
     if failures:
         return JSONResponse(status_code=503,content={"status":"not_ready","checks":checks,"failed_checks":sorted(set(failures))})
     return {"status":"ready","checks":checks,"failed_checks":[]}
