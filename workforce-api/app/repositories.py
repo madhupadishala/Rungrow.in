@@ -194,7 +194,7 @@ class PostgresWorkforceRepository(ReportingRepositoryMixin):
             (id,tenant_id,product_id,employee_id,action_type,payload,payload_hash,
              requester_id,status,expires_at,created_at)
           VALUES (:id,:tenant,:product,:employee,:action,CAST(:payload AS jsonb),:hash,
-                  :requester,'PENDING',:expires,now()) RETURNING *
+                  :requester,'pending',:expires,now()) RETURNING *
         """, {"id": approval_id, "tenant": self.principal.tenant_id, "product": product_id,
               "employee": employee_id, "action": action_type, "payload": json.dumps(payload),
               "hash": digest, "requester": self.principal.user_id, "expires": expires_at})
@@ -389,7 +389,7 @@ class PostgresWorkforceRepository(ReportingRepositoryMixin):
           WHERE t.id=:task AND t.tenant_id=:tenant AND t.status='AWAITING_APPROVAL'
             AND EXISTS (SELECT 1 FROM wf_approvals a WHERE a.id=:approval AND a.tenant_id=t.tenant_id
               AND a.product_id IS NOT DISTINCT FROM t.product_id AND a.employee_id=t.assignee_role_id
-              AND a.status='APPROVED' AND a.expires_at>now() AND a.consumed_at IS NULL)
+              AND a.status='approved' AND a.expires_at>now() AND a.consumed_at IS NULL)
           RETURNING t.*
         """,{"task":task_id,"tenant":self.principal.tenant_id,"approval":approval_id})
         if not item: raise PermissionError("Task cannot resume without a matching live approval")
