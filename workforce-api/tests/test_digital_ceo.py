@@ -69,3 +69,16 @@ async def test_synthetic_invoice_telemetry_is_excluded_from_recognised_revenue(p
     snapshot=await DigitalCEOService(repo,BY_ID,PRODUCTS).briefing("test-founder")
     assert snapshot["operating_revenue"]["actual_inr"] == 0
     assert snapshot["operating_revenue"]["source_event_count"] == 0
+
+\n@pytest.mark.asyncio
+async def test_capital_pipeline_nets_received_tranches_without_double_counting(principal, install_test_repository):
+    repo=install_test_repository
+    repo.investment_capital_events.extend([
+      {"tenant_id":principal.tenant_id,"investor_ref":"INV-NET","event_type":"term_sheet_signed","amount_inr":600000,"is_received":False},
+      {"tenant_id":principal.tenant_id,"investor_ref":"INV-NET","event_type":"commitment_approved","amount_inr":500000,"is_received":False},
+      {"tenant_id":principal.tenant_id,"investor_ref":"INV-NET","event_type":"capital_received","amount_inr":200000,"is_received":True},
+    ])
+    snapshot=await DigitalCEOService(repo,BY_ID,PRODUCTS).briefing("test-founder")
+    assert snapshot["investment_capital"]["received_inr"] == 200000
+    assert snapshot["investment_capital"]["committed_pipeline_inr"] == 300000
+    assert snapshot["investment_capital"]["term_sheet_pipeline_inr"] == 100000
