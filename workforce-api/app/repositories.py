@@ -176,7 +176,7 @@ class PostgresWorkforceRepository(ReportingRepositoryMixin):
         self._product(product_id)
         return await self._rows("""
           SELECT id,tenant_id,product_id,role_id,department,content,source_ref,retention_days,created_at
-          FROM wf_memory WHERE tenant_id=:tenant AND (:product IS NULL OR product_id=:product)
+          FROM wf_memory WHERE tenant_id=:tenant AND (CAST(:product AS text) IS NULL OR product_id=CAST(:product AS text))
           ORDER BY created_at DESC
         """, {"tenant": self.principal.tenant_id, "product": product_id})
 
