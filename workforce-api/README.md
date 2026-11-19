@@ -83,7 +83,8 @@ Configure:
 - `RUNGROW_INTERNAL_TENANT_ID`: internal RunGrow organization tenant used for Workforce RLS; never set this to an external Studio tenant ID.
 - `STUDIO_GROWTH_OS_TENANT_MAP`: JSON mapping of external Studio tenant IDs to their owning internal RunGrow organization tenant IDs.
 - `STUDIO_GROWTH_OS_SERVICE_SECRET`: shared HMAC-SHA256 secret; never expose it to browser clients.
-- `STUDIO_GROWTH_OS_TENANT_SERVICE_TOKENS`: JSON object mapping each external Studio Growth OS tenant ID to its short-lived service JWT. Existing protected Studio Growth OS routes require tenant membership JWTs; the adapter sends the tenant-matched JWT in addition to its HMAC signature when configured.
+- `STUDIO_GROWTH_OS_TENANT_SERVICE_TOKENS`: JSON object mapping each external Studio Growth OS tenant ID to its short-lived service JWT. Existing protected Studio Growth OS routes require tenant membership JWTs; the adapter sends the tenant-matched JWT in addition to its HMAC signature.
+- `STUDIO_GROWTH_OS_REQUIRE_SERVICE_JWT`: defaults to `true`; the adapter fails closed if the tenant-matched JWT is absent. Set `false` only for the HMAC-verifying local ASGI mock.
 - `DATABASE_URL`: required for durable adapter idempotency and telemetry.
 
 Outbound requests sign the exact request body using `X-RunGrow-Timestamp` and `X-RunGrow-Signature`, and propagate `X-RunGrow-Tenant-ID`, `X-RunGrow-Product-ID`, `X-Correlation-ID`, and `Idempotency-Key`. The verifier rejects timestamps outside a 300-second replay window. Product read and write scopes are distinct. All write tools are registered with `ExecutionBoundaryGuard`; outreach/handoff actions require a matching, unexpired, third-party-approved, single-use approval and are prohibited in sandbox runs.
