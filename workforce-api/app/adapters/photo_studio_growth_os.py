@@ -103,10 +103,10 @@ class PhotoStudioGrowthOSAdapter:
             correlation_id=correlation_id or str(uuid4()), is_sandbox=bool(run.get("is_sandbox")))
         payload = {"tenant_id":tenant_id,"lead_id":lead_id,"message_payload":message_payload,
                    "idempotency_key":idempotency_key,"correlation_id":ctx.correlation_id}
-        registry = __import__("app.execution_boundary", fromlist=["ToolRegistry"]).ToolRegistry()
+        from ..execution_boundary import ExecutionBoundaryGuard, ToolRegistry
+        registry = ToolRegistry()
         registry.register(ToolDefinition("studio_growth_os.lead_followup",frozenset({self.WRITE_SCOPE}),
             True,False,"whatsapp.send",lambda **kw:self._send_lead_followup(**kw,repository=repository)))
-        from ..execution_boundary import ExecutionBoundaryGuard
         return await ExecutionBoundaryGuard(repository,registry).execute(tool_name="studio_growth_os.lead_followup",
             principal=principal,employee=employee,run=run,payload=payload,approval_id=approval_id)
 
