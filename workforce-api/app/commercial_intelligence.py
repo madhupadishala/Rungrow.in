@@ -116,7 +116,7 @@ class RobotsCompliantHttpFetcher:
     """
     def __init__(self, *, user_agent: str = "RunGrowResearchBot/1.0 (+https://rungrow.in)",
                  requests_per_second: float = 0.5, allow_domains: set[str] | None = None,
-                 deny_domains: set[str] | None = None, timeout_seconds: float = 12.0):
+                 deny_domains: set[str] | None = None, timeout_seconds: float = 12.0, transport=None):
         if requests_per_second <= 0:
             raise ValueError("requests_per_second must be positive")
         self.user_agent = user_agent
@@ -124,6 +124,7 @@ class RobotsCompliantHttpFetcher:
         self.allow_domains = {x.lower().lstrip(".") for x in (allow_domains or set())}
         self.deny_domains = {x.lower().lstrip(".") for x in (deny_domains or set())}
         self.timeout_seconds = timeout_seconds
+        self.transport = transport
         self._last_request: dict[str, float] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._robots: dict[str, RobotFileParser] = {}
@@ -171,7 +172,7 @@ class RobotsCompliantHttpFetcher:
         await self._throttle(host)
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds, follow_redirects=False,
-                                         headers={"User-Agent": self.user_agent}) as client:
+                                         headers={"User-Agent": self.user_agent}, transport=self.transport) as client:
                 response = await client.get(robots_url)
             if response.status_code == 404:
                 parser.parse([])
