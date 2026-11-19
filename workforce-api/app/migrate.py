@@ -16,6 +16,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import asyncpg
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
+MIGRATION_LOCK_KEY = 731_904_007
 VERSIONED_SQL = re.compile(r"^(?P<version>\d{3})_(?!workforce\.sql$).+\.sql$")
 
 
@@ -91,11 +92,17 @@ async def apply_migrations(connection, directory: Path = MIGRATIONS_DIR) -> list
 async def run(database_url: str | None = None) -> list[str]:
     dsn, ssl = asyncpg_dsn(database_url or os.getenv("DATABASE_URL", ""))
     connection = await asyncpg.connect(dsn=dsn, ssl=ssl)
+    locked = False
     try:
+        # A session advisory lock serializes concurrent deploys across API/worker services.
+        await connection.execute("SELECT pg_advisory_lock($1)", MIGRATION_LOCK_KEY)
+        locked = True
         applied = await apply_migrations(connection)
         print("Migration chain verified; newly applied: " + (", ".join(applied) if applied else "none"))
         return applied
     finally:
+        if locked:
+            await connection.execute("SELECT pg_advisory_unlock($1)", MIGRATION_LOCK_KEY)
         await connection.close()
 
 
