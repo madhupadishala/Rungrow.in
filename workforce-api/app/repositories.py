@@ -770,6 +770,8 @@ class InMemoryWorkforceRepository:
         return {"created":True,"response":None}
 
     async def complete_adapter_idempotency(self, *, tenant_id, product_id, direction, idempotency_key, response):
+        if tenant_id != self.principal.tenant_id: raise PermissionError("Adapter tenant mismatch")
+        self._scope(product_id)
         item=next((x for x in self.adapter_idempotency if x["tenant_id"]==tenant_id and
           x["product_id"]==product_id and x["direction"]==direction and x["idempotency_key"]==idempotency_key),None)
         if not item or item["status"]!="PROCESSING": raise PermissionError("Idempotency record unavailable or completed")
