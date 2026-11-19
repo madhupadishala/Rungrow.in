@@ -356,7 +356,7 @@ class PostgresWorkforceRepository:
            "metadata":json.dumps(event.get("metadata") or {}),"correlation":correlation_id})
         if item:
             await self.append_audit("product.telemetry.received","product_telemetry",event["event_id"],
-              product_id,{"event_type":event["event_type"],"recognised_revenue_inr":event["recognised_revenue_inr"],
+              product_id,{"event_type":event["event_type"],"recognised_revenue_inr":str(event["recognised_revenue_inr"]),
               "correlation_id":correlation_id})
             return True
         return False
