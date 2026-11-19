@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 import json
@@ -458,7 +459,7 @@ class CEODirectiveRequest(BaseModel):
 class InvestmentCapitalEventRequest(BaseModel):
     event_type: str
     investor_ref: str = Field(min_length=1, max_length=240)
-    amount_inr: float = Field(default=0, ge=0)
+    amount_inr: Decimal = Field(default=Decimal('0'), ge=0)
     is_received: bool = False
     approval_id: str | None = None
     source_ref: str | None = Field(default=None, max_length=1000)
@@ -468,7 +469,7 @@ class InvestmentCapitalEventRequest(BaseModel):
 class InvestmentApprovalRequest(BaseModel):
     event_type: str
     investor_ref: str = Field(min_length=1, max_length=240)
-    amount_inr: float = Field(gt=0)
+    amount_inr: Decimal = Field(gt=0)
 
 def _ceo_service(repo):
     return DigitalCEOService(repo, BY_ID, PRODUCTS)
