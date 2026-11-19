@@ -88,3 +88,31 @@ DROP TRIGGER IF EXISTS ceo_briefings_immutable ON ceo_briefings;
 CREATE TRIGGER ceo_briefings_immutable
  BEFORE UPDATE OR DELETE ON ceo_briefings
  FOR EACH ROW EXECUTE FUNCTION wf_reject_ceo_briefing_mutation();
+
+-- Executive company-wide reporting is permitted only when the verified principal
+-- carries the company-admin claim; tenant isolation remains mandatory.
+DROP POLICY IF EXISTS adapter_idempotency_tenant_product_scope ON adapter_idempotency_keys;
+CREATE POLICY adapter_idempotency_tenant_product_scope ON adapter_idempotency_keys
+ FOR ALL USING (
+   tenant_id=current_setting('app.current_tenant_id',true)
+   AND (COALESCE(current_setting('app.is_company_admin',true),'false')='true'
+     OR product_id=ANY(string_to_array(COALESCE(current_setting('app.product_ids',true),''),',')))
+ )
+ WITH CHECK (
+   tenant_id=current_setting('app.current_tenant_id',true)
+   AND (COALESCE(current_setting('app.is_company_admin',true),'false')='true'
+     OR product_id=ANY(string_to_array(COALESCE(current_setting('app.product_ids',true),''),',')))
+ );
+
+DROP POLICY IF EXISTS product_telemetry_tenant_product_scope ON product_telemetry_events;
+CREATE POLICY product_telemetry_tenant_product_scope ON product_telemetry_events
+ FOR ALL USING (
+   tenant_id=current_setting('app.current_tenant_id',true)
+   AND (COALESCE(current_setting('app.is_company_admin',true),'false')='true'
+     OR product_id=ANY(string_to_array(COALESCE(current_setting('app.product_ids',true),''),',')))
+ )
+ WITH CHECK (
+   tenant_id=current_setting('app.current_tenant_id',true)
+   AND (COALESCE(current_setting('app.is_company_admin',true),'false')='true'
+     OR product_id=ANY(string_to_array(COALESCE(current_setting('app.product_ids',true),''),',')))
+ );
