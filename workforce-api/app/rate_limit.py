@@ -65,12 +65,10 @@ class RateLimitMiddleware:
         limit,window=policy
         headers={k.decode("latin1").lower():v.decode("latin1") for k,v in scope.get("headers",[])}
         tenant=headers.get("x-rungrow-tenant-id") or headers.get("x-rungrow-external-tenant-id") or "anonymous"
-        # Bearer token hash partitions authenticated users without retaining credentials.
-        auth=headers.get("authorization","")
-        actor=hashlib.sha256(auth.encode()).hexdigest()[:16] if auth else "anonymous"
         client=scope.get("client")
         ip=client[0] if client else "unknown"
-        scope_key=hashlib.sha256(f"{path.split('?')[0]}|{tenant}|{actor}|{ip}".encode()).hexdigest()
+        # Tenant+IP key cannot be bypassed by rotating bearer tokens.
+        scope_key=hashlib.sha256(f"{path.split('?')[0]}|{tenant}|{ip}".encode()).hexdigest()
         try:
             allowed,retry=await _allow_postgres(scope_key,limit,window) if settings.database_url else await _allow_local(scope_key,limit,window)
         except Exception:
