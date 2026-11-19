@@ -17,7 +17,9 @@ BOOKINGS=[{"id":"booking-hyd-001","tenant_id":TENANT,"lead_id":"lead-hyd-001","s
  "event_date":"2026-12-12T00:00:00+05:30","is_synthetic":True}]
 
 async def _tenant(request,tenant_id):
- if request.headers.get("X-RunGrow-Tenant-ID")!=tenant_id: raise HTTPException(403,"tenant binding mismatch")
+ if request.headers.get("X-RunGrow-Tenant-ID")!=tenant_id: raise HTTPException(403,"external tenant binding mismatch")
+ org_id=request.headers.get("X-RunGrow-Org-ID","")
+ if not org_id or org_id==tenant_id: raise HTTPException(403,"internal/external tenant separation required")
  if request.headers.get("X-RunGrow-Product-ID")!="photo-studio-growth-os": raise HTTPException(403,"product binding mismatch")
  secret=os.getenv("STUDIO_GROWTH_OS_SERVICE_SECRET","")
  timestamp=request.headers.get("X-RunGrow-Timestamp","")
@@ -26,7 +28,8 @@ async def _tenant(request,tenant_id):
  except (TypeError,ValueError): raise HTTPException(401,"invalid service timestamp")
  if not secret or abs(time.time()-issued)>300: raise HTTPException(401,"service signature outside replay window")
  body=await request.body()
- expected="sha256="+hmac.new(secret.encode(),timestamp.encode()+b"."+body,hashlib.sha256).hexdigest()
+ binding=".".join((timestamp,tenant_id,org_id,"photo-studio-growth-os")).encode()
+ expected="sha256="+hmac.new(secret.encode(),binding+b"."+body,hashlib.sha256).hexdigest()
  if not hmac.compare_digest(expected,signature): raise HTTPException(401,"invalid service signature")
 
 @app.get("/api/v1/leads")
