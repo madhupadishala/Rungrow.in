@@ -32,6 +32,12 @@ class CommunicationGateway:
                 self.tool_name,run.get("product_id"),{"run_id":run.get("id")})
             await self.repository.commit_boundary()
             raise PermissionError("Outbound communication is prohibited in sandbox mode")
+        missing=[key for key in self.required_env if not os.getenv(key,"").strip()]
+        if missing:
+            await self.repository.append_audit("communication.integration_not_configured","communication",
+                self.tool_name,run.get("product_id"),{"run_id":run.get("id"),"missing_configuration":missing})
+            await self.repository.commit_boundary()
+            raise IntegrationNotConfiguredError("Live communication provider is not configured: "+", ".join(missing))
         registry=ToolRegistry()
         async def handler(**data):
             missing=[key for key in self.required_env if not os.getenv(key,"").strip()]
