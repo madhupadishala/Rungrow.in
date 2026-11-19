@@ -885,3 +885,55 @@ async def record_release_signoff(
         )
     except Exception as exc:
         translate_repo_error(exc)
+
+
+class CommunicationSendRequest(BaseModel):
+    run_id: str = Field(min_length=2, max_length=100)
+    to: str = Field(min_length=3, max_length=320)
+    message: str = Field(min_length=1, max_length=10000)
+    approval_id: str | None = None
+
+class EmailSendRequest(CommunicationSendRequest):
+    subject: str = Field(min_length=1, max_length=240)
+
+
+async def _execute_governed_communication(channel: str, body, principal: Principal, repo):
+    from .communications import IntegrationNotConfiguredError, TransactionalEmailGateway, WhatsAppCloudGateway
+    run=await repo.get_agent_run(body.run_id)
+    if not run:
+        raise HTTPException(404,"Agent run not found in this tenant")
+    authorize_product_access(principal,run.get("product_id"))
+    employee=BY_ID.get(run.get("employee_id"))
+    if employee is None:
+        raise HTTPException(403,"Agent role is unavailable")
+    payload={"to":body.to,"message":body.message}
+    if channel=="email":
+        payload["subject"]=body.subject
+        gateway=TransactionalEmailGateway(repo)
+    else:
+        gateway=WhatsAppCloudGateway(repo)
+    try:
+        return await gateway.send(principal=principal,employee=employee,run=run,
+            payload=payload,approval_id=body.approval_id)
+    except IntegrationNotConfiguredError as exc:
+        raise HTTPException(503,str(exc)) from exc
+    except ApprovalBoundaryError as exc:
+        raise HTTPException(exc.status_code,{"detail":str(exc),"approval_id":exc.approval_id}) from exc
+    except SandboxViolation as exc:
+        raise HTTPException(403,str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403,str(exc)) from exc
+
+
+@app.post("/v1/communications/whatsapp/send")
+async def send_governed_whatsapp(body: CommunicationSendRequest,
+    p: Principal=Depends(require_permission("communication.send")),
+    repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    return await _execute_governed_communication("whatsapp",body,p,repo)
+
+
+@app.post("/v1/communications/email/send")
+async def send_governed_email(body: EmailSendRequest,
+    p: Principal=Depends(require_permission("communication.send")),
+    repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    return await _execute_governed_communication("email",body,p,repo)
