@@ -41,7 +41,7 @@ def _iso(value):
     dt=_dt(value)
     return dt.astimezone(timezone.utc).isoformat() if dt else None
 
-def _is_synthetic_event(event):
+def is_synthetic_event(event):
     metadata=event.get("metadata") or {}
     if isinstance(metadata,str):
         try: metadata=json.loads(metadata)
@@ -83,7 +83,7 @@ class DigitalCEOService:
               "dead_lettered":sum(str(t.get("status","")).upper() in {"DEAD_LETTER","FAILED"} for t in scoped)})
         by_product={p:Decimal("0") for p in PRODUCT_ALLOCATIONS}
         for event in telemetry:
-            if event.get("event_type")=="invoice_recognised" and not _is_synthetic_event(event):
+            if event.get("event_type")=="invoice_recognised" and not is_synthetic_event(event):
                 pid=event.get("product_id")
                 if pid in by_product: by_product[pid]+=Decimal(str(event.get("recognised_revenue_inr") or 0))
         revenue=sum(by_product.values(),Decimal("0"))
@@ -101,7 +101,10 @@ class DigitalCEOService:
             if str(a.get("status","")).upper()!="PENDING": continue
             expiry=_dt(a.get("expires_at"))
             pending.append({"approval_id":str(a.get("id")),"product_id":a.get("product_id"),
-             "employee_id":a.get("employee_id"),"action_type":a.get("action_type"),
+             "employee_id":a.get("employee_id"),
+             "employee_title":getattr(self.registry.get(a.get("employee_id")),"title",a.get("employee_id")),
+             "product":PRODUCT_LABELS.get(a.get("product_id"),"Shared corporate"),
+             "action_type":a.get("action_type"),
              "created_at":_iso(a.get("created_at")),"expires_at":_iso(expiry),
              "age_seconds":max(0,int((now-(_dt(a.get("created_at")) or now)).total_seconds())),
              "seconds_until_expiry":max(0,int((expiry-now).total_seconds())) if expiry else None})
@@ -126,7 +129,7 @@ class DigitalCEOService:
           "operating_revenue":{"actual_inr":float(revenue),"target_inr":REVENUE_TARGET_INR,
             "remaining_inr":max(0,REVENUE_TARGET_INR-float(revenue)),"data_source":"product_telemetry_events",
             "event_filter":"invoice_recognised","is_synthetic":False,"is_provisional":False,
-            "source_event_count":sum(1 for e in telemetry if e.get("event_type")=="invoice_recognised" and not _is_synthetic_event(e)),
+            "source_event_count":sum(1 for e in telemetry if e.get("event_type")=="invoice_recognised" and not is_synthetic_event(e)),
             "as_of":completed_at.isoformat(),
             "by_product":revenue_rows},
           "investment_capital":{"received_inr":float(received),"committed_pipeline_inr":float(committed),
