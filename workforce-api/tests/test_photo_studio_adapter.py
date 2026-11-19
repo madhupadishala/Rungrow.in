@@ -1,7 +1,4 @@
-import hashlib
-import hmac
 import json
-import os
 import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -14,7 +11,6 @@ from app.adapters.base import AdapterContext, SignedWebhookVerifier
 from app.adapters.photo_studio_growth_os import PhotoStudioGrowthOSAdapter
 from app.adapters.mocks.studio_growth_os_mock import app as studio_mock
 from app.execution_boundary import ApprovalBoundaryError, SandboxViolation
-from app.main import app as workforce_app
 from app.policy import Principal
 from app.repositories import InMemoryWorkforceRepository
 
