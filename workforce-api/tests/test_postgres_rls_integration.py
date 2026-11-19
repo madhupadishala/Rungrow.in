@@ -17,10 +17,10 @@ async def test_postgres_role_is_restricted_and_rls_is_forced():
               SELECT c.relname,c.relforcerowsecurity
               FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
               WHERE n.nspname='public' AND c.relname IN
-                ('wf_tasks','wf_agent_runs','wf_memory','wf_approvals','wf_audit_events','wf_model_usage')
+                ('wf_tasks','wf_agent_runs','wf_memory','wf_approvals','wf_audit_events','wf_model_usage','adapter_idempotency_keys','product_telemetry_events')
             """))
             rows=list(forced)
-            assert len(rows)==6
+            assert len(rows)==8
             assert all(row.relforcerowsecurity for row in rows)
             owners=await conn.execute(text("""
               SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -290,5 +290,43 @@ async def test_model_usage_ledger_is_tenant_product_scoped_and_state_machine_is_
             with pytest.raises(Exception):
                 async with conn.begin_nested():
                     await conn.execute(text("UPDATE wf_tasks SET status='RUNNING' WHERE id=:id"),{"id":str(task_id)})
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_product_telemetry_and_adapter_idempotency_are_forced_and_tenant_product_scoped():
+    engine=create_async_engine(URL)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','adapter-tenant-a',true)"))
+            await conn.execute(text("SELECT set_config('app.product_ids','photo-studio-growth-os',true)"))
+            await conn.execute(text("""
+              INSERT INTO product_telemetry_events(id,tenant_id,product_id,event_id,event_type,
+                recognised_revenue_inr,metadata,correlation_id)
+              VALUES(gen_random_uuid(),'adapter-tenant-a','photo-studio-growth-os','invoice-event-1',
+                'invoice_recognised',125000,'{}'::jsonb,'corr-a')
+            """))
+            await conn.execute(text("""
+              INSERT INTO adapter_idempotency_keys(id,tenant_id,product_id,direction,idempotency_key,
+                payload_hash,status,correlation_id)
+              VALUES(gen_random_uuid(),'adapter-tenant-a','photo-studio-growth-os','inbound',
+                'webhook-event-1',repeat('a',64),'PROCESSING','corr-a')
+            """))
+            with pytest.raises(Exception):
+                async with conn.begin_nested():
+                    await conn.execute(text("""
+                      INSERT INTO product_telemetry_events(id,tenant_id,product_id,event_id,event_type,
+                        recognised_revenue_inr,metadata,correlation_id)
+                      VALUES(gen_random_uuid(),'adapter-tenant-a','photo-studio-growth-os','bad-revenue',
+                        'trial_started',100,'{}'::jsonb,'corr-a')
+                    """))
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','adapter-tenant-b',true)"))
+            await conn.execute(text("SELECT set_config('app.product_ids','photo-studio-growth-os',true)"))
+            telemetry=await conn.execute(text("SELECT * FROM product_telemetry_events WHERE tenant_id='adapter-tenant-a'"))
+            keys=await conn.execute(text("SELECT * FROM adapter_idempotency_keys WHERE tenant_id='adapter-tenant-a'"))
+            assert list(telemetry)==[]
+            assert list(keys)==[]
     finally:
         await engine.dispose()
