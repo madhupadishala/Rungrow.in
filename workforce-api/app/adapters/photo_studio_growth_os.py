@@ -41,7 +41,7 @@ class PhotoStudioGrowthOSAdapter:
         signature = self.verifier.sign(body, timestamp, tenant_id=context.tenant_id,
             product_id=self.product_id, workforce_tenant_id=context.workforce_tenant_id)
         headers = {"X-RunGrow-Signature":signature, "X-RunGrow-Timestamp":timestamp,
-                   "X-Correlation-ID":context.correlation_id, "X-RunGrow-Tenant-ID":context.tenant_id,
+                   "X-Correlation-ID":context.correlation_id, "X-RunGrow-Tenant-ID":context.tenant_id, "X-RunGrow-External-Tenant-Id":context.tenant_id,
                    "X-RunGrow-Org-ID":context.workforce_tenant_id,
                    "X-RunGrow-Product-ID":self.product_id, "Content-Type":"application/json"}
         tenant_token = self.tenant_service_tokens.get(context.tenant_id)
