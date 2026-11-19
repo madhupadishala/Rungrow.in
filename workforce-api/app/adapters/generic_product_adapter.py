@@ -10,6 +10,7 @@ from typing import Any
 
 from .base import IdempotencyStore
 from ..execution_boundary import ExecutionBoundaryGuard, ToolDefinition, ToolRegistry
+from ..commercial_intelligence import AI_IDENTITY_DISCLOSURE
 
 GENERIC_PRODUCT_IDS = (
     "photo-studio-billing",
@@ -124,6 +125,8 @@ class GenericProductAdapter:
                 self.product_id, self.product_id, {"outbound_actions": 0, "is_sandbox": True})
             return {"status": "SIMULATED", "product_id": self.product_id,
                     "api_version": self.api_version, "outbound_actions": 0}
+        if payload.get("ai_identity_disclosure") != AI_IDENTITY_DISCLOSURE:
+            raise AdapterGovernanceError("Live handoff requires the approved RunGrow AI identity disclosure", 422)
         if handoff_handler is None:
             async def handoff_handler(**data):
                 # No network delivery is performed here; this records a governed
