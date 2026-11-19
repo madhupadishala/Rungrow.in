@@ -488,3 +488,22 @@ async def test_release_signoffs_are_tenant_scoped_and_append_only():
                     await conn.execute(text("UPDATE release_gate_signoffs SET status='BLOCKED' WHERE id=:id"),{"id":signoff_id})
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_worker_heartbeats_are_tenant_scoped():
+    engine=create_async_engine(URL)
+    worker_id="rls-worker-"+str(__import__("uuid").uuid4())
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','heartbeat-tenant-a',true)"))
+            await conn.execute(text("""
+              INSERT INTO worker_heartbeats(worker_id,tenant_id,status,last_heartbeat_at,processed_count,dead_letter_count)
+              VALUES (:worker,'heartbeat-tenant-a','IDLE',now(),4,1)
+            """),{"worker":worker_id})
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','heartbeat-tenant-b',true)"))
+            hidden=await conn.execute(text("SELECT count(*) FROM worker_heartbeats WHERE worker_id=:worker"),{"worker":worker_id})
+            assert hidden.scalar_one()==0
+    finally:
+        await engine.dispose()
