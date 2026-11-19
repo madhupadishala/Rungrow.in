@@ -107,8 +107,9 @@ def _signed_headers(payload, key="event-key-001", signature_override=None, times
     signature = SignedWebhookVerifier(SECRET).sign(raw, timestamp, tenant_id=TENANT,
         product_id=PRODUCT, workforce_tenant_id=WORKFORCE_TENANT)
     return raw, {"X-RunGrow-Signature":signature_override or signature,
-        "X-RunGrow-Timestamp":timestamp,"X-RunGrow-Tenant-ID":TENANT,
-        "X-RunGrow-Product-ID":PRODUCT,"X-RunGrow-Org-ID":WORKFORCE_TENANT,"X-Correlation-ID":"corr-webhook-001",
+        "X-RunGrow-Timestamp":timestamp,"X-RunGrow-External-Tenant-Id":TENANT,
+        "X-RunGrow-Tenant-ID":WORKFORCE_TENANT,
+        "X-RunGrow-Product-ID":PRODUCT,"X-Correlation-ID":"corr-webhook-001",
         "Idempotency-Key":key}
 
 
