@@ -32,6 +32,7 @@ async def _allow_postgres(scope_keys: list[str], limit: int, window: int):
         async with session.begin():
             for key in sorted(scope_keys):
                 await session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:scope))"),{"scope":key})
+            await session.execute(text("DELETE FROM rate_limit_events WHERE occurred_at < now() - interval '1 day'"))
             retry=0
             for key in scope_keys:
                 await session.execute(text("DELETE FROM rate_limit_events WHERE scope_key=:scope AND occurred_at < now() - make_interval(secs => :window)"),
