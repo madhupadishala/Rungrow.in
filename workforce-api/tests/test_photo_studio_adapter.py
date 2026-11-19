@@ -34,6 +34,7 @@ def tenant_mapping_env(monkeypatch):
 @pytest.fixture
 def adapter(monkeypatch):
     monkeypatch.setenv("STUDIO_GROWTH_OS_SERVICE_SECRET", SECRET)
+    monkeypatch.setenv("STUDIO_GROWTH_OS_REQUIRE_SERVICE_JWT", "false")
     monkeypatch.setenv("STUDIO_GROWTH_OS_TENANT_MAP", json.dumps({TENANT:WORKFORCE_TENANT,STUDIO_TENANT:WORKFORCE_TENANT}))
     return PhotoStudioGrowthOSAdapter(base_url="http://studio-mock", service_secret=SECRET,
         transport=ASGITransport(app=studio_mock))
