@@ -80,7 +80,7 @@ def test_hmac_replay_window_and_product_binding():
         verifier.verify(body, "sha256=" + "0" * 64, str(timestamp),
                         tenant_id=TENANT, product_id=PRODUCT, workforce_tenant_id=WORKFORCE_TENANT)
     with pytest.raises(PermissionError):
-        verifier.verify(body, signature, str(timestamp - 301), tenant_id=TENANT, product_id=PRODUCT)
+        verifier.verify(body, signature, str(timestamp - 301), tenant_id=TENANT, product_id=PRODUCT, workforce_tenant_id=WORKFORCE_TENANT)
     with pytest.raises(PermissionError):
         verifier.verify(body, signature, str(timestamp), tenant_id=TENANT, product_id="wrong-product", workforce_tenant_id=WORKFORCE_TENANT)
 
@@ -106,6 +106,7 @@ def _signed_headers(payload, key="event-key-001", signature_override=None, times
 @pytest.mark.asyncio
 async def test_webhook_is_signed_idempotent_and_records_recognised_revenue(test_app, install_test_repository, monkeypatch):
     monkeypatch.setenv("STUDIO_GROWTH_OS_SERVICE_SECRET", SECRET)
+    monkeypatch.setenv("RUNGROW_INTERNAL_TENANT_ID", WORKFORCE_TENANT)
     payload = _webhook_payload()
     raw, headers = _signed_headers(payload)
     async with AsyncClient(transport=ASGITransport(app=test_app),base_url="http://workforce") as client:
@@ -127,6 +128,7 @@ async def test_webhook_is_signed_idempotent_and_records_recognised_revenue(test_
 async def test_webhook_rejects_invalid_signature_expired_timestamp_and_wrong_product(
         test_app, monkeypatch):
     monkeypatch.setenv("STUDIO_GROWTH_OS_SERVICE_SECRET", SECRET)
+    monkeypatch.setenv("RUNGROW_INTERNAL_TENANT_ID", WORKFORCE_TENANT)
     async with AsyncClient(transport=ASGITransport(app=test_app),base_url="http://workforce") as client:
         payload = _webhook_payload()
         raw, headers = _signed_headers(payload,signature_override="sha256=" + "0" * 64)
@@ -154,7 +156,7 @@ def _boundary_context(repository, *, sandbox=False):
         permissions=(READ,WRITE,"crm.read","work.assign"),department="Sales & Revenue",
         product_id=PRODUCT)
     principal = repository.principal
-    run = {"id":"run-adapter-001","tenant_id":TENANT,"product_id":PRODUCT,
+    run = {"id":"run-adapter-001","tenant_id":WORKFORCE_TENANT,"product_id":PRODUCT,
            "employee_id":employee.id,"is_sandbox":sandbox,"execution_state":"QUEUED"}
     return principal, employee, run
 
@@ -180,7 +182,7 @@ async def test_governed_followup_blocks_sandbox_and_missing_approval(adapter):
 
 @pytest.mark.asyncio
 async def test_governed_followup_consumes_third_party_approval_once(adapter):
-    principal = Principal("requester",TENANT,"founder",frozenset({WRITE}),
+    principal = Principal("requester",WORKFORCE_TENANT,"founder",frozenset({WRITE}),
                           product_ids=frozenset({PRODUCT}))
     repository = InMemoryWorkforceRepository(principal,{PRODUCT})
     employee = SimpleNamespace(id="pgm-photo-studio-growth-os",permissions=(WRITE,),
