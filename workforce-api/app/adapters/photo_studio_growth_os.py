@@ -40,6 +40,7 @@ class PhotoStudioGrowthOSAdapter:
             product_id=self.product_id, workforce_tenant_id=context.workforce_tenant_id)
         headers = {"X-RunGrow-Signature":signature, "X-RunGrow-Timestamp":timestamp,
                    "X-Correlation-ID":context.correlation_id, "X-RunGrow-Tenant-ID":context.tenant_id,
+                   "X-RunGrow-Org-ID":context.workforce_tenant_id,
                    "X-RunGrow-Product-ID":self.product_id, "Content-Type":"application/json"}
         tenant_token = self.tenant_service_tokens.get(context.tenant_id)
         if tenant_token:
@@ -55,8 +56,7 @@ class PhotoStudioGrowthOSAdapter:
         response.raise_for_status()
         return response.json() if response.content else {}
 
-    @staticmethod
-    def _bind(tenant_id, context, scope):
+    def _bind(self, tenant_id, context, scope):
         if tenant_id != context.tenant_id: raise PermissionError("External customer tenant mismatch")
         if context.product_id != PRODUCT_ID: raise PermissionError("Product scope mismatch")
         if not context.workforce_tenant_id or context.workforce_tenant_id == context.tenant_id:
