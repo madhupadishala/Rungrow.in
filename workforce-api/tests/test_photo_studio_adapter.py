@@ -198,6 +198,9 @@ async def test_governed_followup_consumes_third_party_approval_once(adapter):
         correlation_id="corr-approved")
     assert result["status"] == "sent"
     assert len(sent) == 1
+    assert sent[0].headers["Idempotency-Key"] == "approved-write-001"
+    assert sent[0].headers["X-RunGrow-Signature"].startswith("sha256=")
+    assert sent[0].headers["X-Correlation-ID"] == "corr-approved"
     assert approval["consumed_at"] is not None
     with pytest.raises(ApprovalBoundaryError):
         await adapter.dispatch_governed_lead_followup(TENANT,"lead-hyd-001",
