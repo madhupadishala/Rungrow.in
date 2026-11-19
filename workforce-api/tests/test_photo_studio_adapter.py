@@ -19,7 +19,9 @@ from app.policy import Principal
 from app.repositories import InMemoryWorkforceRepository
 
 
-TENANT = "tenant-test"
+TENANT = "studio-customer-tenant-001"
+STUDIO_TENANT = "studio-hyd-001"
+WORKFORCE_TENANT = "tenant-test"
 PRODUCT = "photo-studio-growth-os"
 SECRET = "test-studio-secret"
 READ = "photo-studio-growth-os:read"
@@ -29,27 +31,28 @@ WRITE = "photo-studio-growth-os:write"
 @pytest.fixture
 def adapter(monkeypatch):
     monkeypatch.setenv("STUDIO_GROWTH_OS_SERVICE_SECRET", SECRET)
+    monkeypatch.setenv("STUDIO_GROWTH_OS_TENANT_MAP", json.dumps({TENANT:WORKFORCE_TENANT,STUDIO_TENANT:WORKFORCE_TENANT}))
     return PhotoStudioGrowthOSAdapter(base_url="http://studio-mock", service_secret=SECRET,
         transport=ASGITransport(app=studio_mock))
 
 
 @pytest.fixture
 def read_context():
-    return AdapterContext(TENANT, scopes=frozenset({READ}), correlation_id="corr-read-001")
+    return AdapterContext(TENANT, scopes=frozenset({READ}), correlation_id="corr-read-001", workforce_tenant_id=WORKFORCE_TENANT)
 
 
 @pytest.mark.asyncio
 async def test_signed_read_contract_for_leads_quotes_bookings_and_conversation(adapter, read_context):
     summary = await adapter.get_tenant_summary("studio-hyd-001", context=AdapterContext(
-        "studio-hyd-001", scopes=frozenset({READ}), correlation_id="corr-summary"))
+        "studio-hyd-001", scopes=frozenset({READ}), correlation_id="corr-summary", workforce_tenant_id=WORKFORCE_TENANT))
     leads = await adapter.list_leads("studio-hyd-001", limit=10, context=AdapterContext(
-        "studio-hyd-001", scopes=frozenset({READ}), correlation_id="corr-leads"))
+        "studio-hyd-001", scopes=frozenset({READ}), correlation_id="corr-leads", workforce_tenant_id=WORKFORCE_TENANT))
     quotes = await adapter.list_quotes("studio-hyd-001", context=AdapterContext(
-        "studio-hyd-001", scopes=frozenset({READ}), correlation_id="corr-quotes"))
+        "studio-hyd-001", scopes=frozenset({READ}), correlation_id="corr-quotes", workforce_tenant_id=WORKFORCE_TENANT))
     bookings = await adapter.list_bookings("studio-hyd-001", context=AdapterContext(
-        "studio-hyd-001", scopes=frozenset({READ}), correlation_id="corr-bookings"))
+        "studio-hyd-001", scopes=frozenset({READ}), correlation_id="corr-bookings", workforce_tenant_id=WORKFORCE_TENANT))
     conversation = await adapter.get_conversation_context("studio-hyd-001", "lead-hyd-001",
-        context=AdapterContext("studio-hyd-001", scopes=frozenset({READ}), correlation_id="corr-conv"))
+        context=AdapterContext("studio-hyd-001", scopes=frozenset({READ}), correlation_id="corr-conv", workforce_tenant_id=WORKFORCE_TENANT))
     assert summary["tenant_id"] == "studio-hyd-001"
     assert summary["is_synthetic"] is True
     assert leads["leads"][0]["stage"] == "qualified"
@@ -62,28 +65,28 @@ async def test_signed_read_contract_for_leads_quotes_bookings_and_conversation(a
 
 def test_context_enforces_tenant_and_least_privilege(adapter):
     with pytest.raises(PermissionError):
-        adapter._bind("another-tenant", AdapterContext(TENANT, scopes=frozenset({READ})), READ)
+        adapter._bind("another-tenant", AdapterContext(TENANT, scopes=frozenset({READ}), workforce_tenant_id=WORKFORCE_TENANT), READ)
     with pytest.raises(PermissionError):
-        adapter._bind(TENANT, AdapterContext(TENANT), READ)
+        adapter._bind(TENANT, AdapterContext(TENANT, workforce_tenant_id=WORKFORCE_TENANT), READ)
 
 
 def test_hmac_replay_window_and_product_binding():
     verifier = SignedWebhookVerifier(SECRET)
-    body = b'{"tenant_id":"tenant-test","product_id":"photo-studio-growth-os"}'
+    body = json.dumps({"tenant_id":TENANT,"workforce_tenant_id":WORKFORCE_TENANT,"product_id":PRODUCT},separators=(",",":")).encode()
     timestamp = int(time.time())
-    signature = verifier.sign(body, timestamp)
-    verifier.verify(body, signature, str(timestamp), tenant_id=TENANT, product_id=PRODUCT)
+    signature = verifier.sign(body, timestamp, tenant_id=TENANT, product_id=PRODUCT, workforce_tenant_id=WORKFORCE_TENANT)
+    verifier.verify(body, signature, str(timestamp), tenant_id=TENANT, product_id=PRODUCT, workforce_tenant_id=WORKFORCE_TENANT)
     with pytest.raises(PermissionError):
         verifier.verify(body, "sha256=" + "0" * 64, str(timestamp),
-                        tenant_id=TENANT, product_id=PRODUCT)
+                        tenant_id=TENANT, product_id=PRODUCT, workforce_tenant_id=WORKFORCE_TENANT)
     with pytest.raises(PermissionError):
         verifier.verify(body, signature, str(timestamp - 301), tenant_id=TENANT, product_id=PRODUCT)
     with pytest.raises(PermissionError):
-        verifier.verify(body, signature, str(timestamp), tenant_id=TENANT, product_id="wrong-product")
+        verifier.verify(body, signature, str(timestamp), tenant_id=TENANT, product_id="wrong-product", workforce_tenant_id=WORKFORCE_TENANT)
 
 
 def _webhook_payload(event_id="invoice-001", revenue=125000, event_type="invoice_recognised"):
-    return {"tenant_id":TENANT,"product_id":PRODUCT,"event_id":event_id,
+    return {"tenant_id":TENANT,"workforce_tenant_id":WORKFORCE_TENANT,"product_id":PRODUCT,"event_id":event_id,
             "event_type":event_type,"recognised_revenue_inr":revenue,
             "occurred_at":"2026-11-18T10:00:00+05:30","source_ref":"studio-invoice-001",
             "metadata":{"currency":"INR","is_synthetic":True}}
@@ -92,10 +95,11 @@ def _webhook_payload(event_id="invoice-001", revenue=125000, event_type="invoice
 def _signed_headers(payload, key="event-key-001", signature_override=None, timestamp_override=None):
     raw = json.dumps(payload, separators=(",",":"), ensure_ascii=False).encode()
     timestamp = str(int(time.time())) if timestamp_override is None else str(timestamp_override)
-    signature = SignedWebhookVerifier(SECRET).sign(raw, timestamp)
+    signature = SignedWebhookVerifier(SECRET).sign(raw, timestamp, tenant_id=TENANT,
+        product_id=PRODUCT, workforce_tenant_id=WORKFORCE_TENANT)
     return raw, {"X-RunGrow-Signature":signature_override or signature,
         "X-RunGrow-Timestamp":timestamp,"X-RunGrow-Tenant-ID":TENANT,
-        "X-RunGrow-Product-ID":PRODUCT,"X-Correlation-ID":"corr-webhook-001",
+        "X-RunGrow-Product-ID":PRODUCT,"X-RunGrow-Org-ID":WORKFORCE_TENANT,"X-Correlation-ID":"corr-webhook-001",
         "Idempotency-Key":key}
 
 
@@ -115,6 +119,8 @@ async def test_webhook_is_signed_idempotent_and_records_recognised_revenue(test_
     assert event_replay.status_code == 200 and event_replay.json()["idempotent"] is True
     assert len(install_test_repository.product_telemetry) == 1
     assert install_test_repository.product_telemetry[0]["recognised_revenue_inr"] == 125000
+    assert install_test_repository.product_telemetry[0]["tenant_id"] == WORKFORCE_TENANT
+    assert install_test_repository.product_telemetry[0]["external_tenant_id"] == TENANT
 
 
 @pytest.mark.asyncio
@@ -155,7 +161,7 @@ def _boundary_context(repository, *, sandbox=False):
 
 @pytest.mark.asyncio
 async def test_governed_followup_blocks_sandbox_and_missing_approval(adapter):
-    principal = Principal("requester",TENANT,"founder",frozenset({WRITE}),
+    principal = Principal("requester",WORKFORCE_TENANT,"founder",frozenset({WRITE}),
                           product_ids=frozenset({PRODUCT}))
     repository = InMemoryWorkforceRepository(principal,{PRODUCT})
     employee = SimpleNamespace(id="pgm-photo-studio-growth-os",permissions=(WRITE,),
@@ -181,7 +187,7 @@ async def test_governed_followup_consumes_third_party_approval_once(adapter):
         department="Sales & Revenue",product_id=PRODUCT)
     run = await repository.create_agent_run(product_id=PRODUCT,employee_id=employee.id,task="follow-up",
         status="planned",summary="",steps=[],correlation_id="corr-run",is_sandbox=False)
-    payload = {"tenant_id":TENANT,"lead_id":"lead-hyd-001","message_payload":{"message":"Approved follow-up"},
+    payload = {"tenant_id":TENANT,"workforce_tenant_id":WORKFORCE_TENANT,"lead_id":"lead-hyd-001","message_payload":{"message":"Approved follow-up"},
                "idempotency_key":"approved-write-001","correlation_id":"corr-approved"}
     approval = await repository.create_approval(product_id=PRODUCT,employee_id=employee.id,
         action_type="whatsapp.send",payload=payload,expires_at=datetime.now(timezone.utc)+timedelta(minutes=5))
