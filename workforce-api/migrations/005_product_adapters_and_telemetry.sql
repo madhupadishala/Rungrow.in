@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS adapter_idempotency_keys (
   )
 );
 CREATE INDEX IF NOT EXISTS adapter_idempotency_tenant_product_time
-  ON adapter_idempotency_keys(tenant_id,product_id,created_at DESC);
+  ON adapter_idempotency_keys(tenant_id,external_tenant_id,product_id,created_at DESC);
 ALTER TABLE adapter_idempotency_keys ENABLE ROW LEVEL SECURITY;
 ALTER TABLE adapter_idempotency_keys FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS adapter_idempotency_tenant_product_scope ON adapter_idempotency_keys;
@@ -54,9 +54,9 @@ CREATE TABLE IF NOT EXISTS product_telemetry_events (
   )
 );
 CREATE INDEX IF NOT EXISTS product_telemetry_tenant_product_time
-  ON product_telemetry_events(tenant_id,product_id,received_at DESC);
+  ON product_telemetry_events(tenant_id,external_tenant_id,product_id,received_at DESC);
 CREATE INDEX IF NOT EXISTS product_telemetry_revenue_time
-  ON product_telemetry_events(tenant_id,product_id,occurred_at DESC)
+  ON product_telemetry_events(tenant_id,external_tenant_id,product_id,occurred_at DESC)
   WHERE event_type='invoice_recognised';
 ALTER TABLE product_telemetry_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE product_telemetry_events FORCE ROW LEVEL SECURITY;
@@ -101,3 +101,20 @@ DROP TRIGGER IF EXISTS adapter_idempotency_identity_immutable ON adapter_idempot
 CREATE TRIGGER adapter_idempotency_identity_immutable
   BEFORE UPDATE ON adapter_idempotency_keys
   FOR EACH ROW EXECUTE FUNCTION wf_guard_adapter_idempotency_identity();
+
+CREATE OR REPLACE FUNCTION wf_guard_adapter_idempotency_transition() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD.status='COMPLETED' THEN
+    RAISE EXCEPTION 'completed adapter idempotency records are immutable';
+  END IF;
+  IF NEW.status <> 'COMPLETED' OR NEW.response_json IS NULL OR NEW.completed_at IS NULL THEN
+    RAISE EXCEPTION 'adapter idempotency may only transition PROCESSING to COMPLETED';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS adapter_idempotency_completion_guard ON adapter_idempotency_keys;
+CREATE TRIGGER adapter_idempotency_completion_guard
+  BEFORE UPDATE ON adapter_idempotency_keys
+  FOR EACH ROW EXECUTE FUNCTION wf_guard_adapter_idempotency_transition();
