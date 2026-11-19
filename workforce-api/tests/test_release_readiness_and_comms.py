@@ -203,3 +203,34 @@ async def test_release_signoff_requires_full_commit_sha(client):
         "candidate_sha":"abc123","environment":"staging"
     })
     assert response.status_code==422
+
+
+@pytest.mark.asyncio
+async def test_health_ready_returns_503_on_checksum_drift_and_missing_identity_secrets(client,monkeypatch):
+    from types import SimpleNamespace
+    from app import health
+    class Result:
+        def __init__(self,rows=()): self.rows=rows
+        def mappings(self): return self
+        def all(self): return self.rows
+    class Session:
+        async def __aenter__(self): return self
+        async def __aexit__(self,*args): return None
+        async def execute(self,query):
+            if "SELECT version,filename,checksum_sha256" in str(query):
+                return Result([{"version":"001","filename":"001_migration.sql","checksum_sha256":"wrong"}])
+            return Result()
+    expected=[(f"{n:03d}",f"{n:03d}_migration.sql",f"checksum-{n}") for n in range(1,9)]
+    monkeypatch.setattr(health.settings,"database_url","postgresql+asyncpg://test")
+    monkeypatch.setattr(health.settings,"app_env","production")
+    monkeypatch.setattr(health,"migration_files",lambda:[
+        (v,SimpleNamespace(name=name),checksum) for v,name,checksum in expected])
+    monkeypatch.setattr(health,"session_factory",lambda:lambda:Session())
+    monkeypatch.delenv("JWT_JWKS_URL",raising=False)
+    monkeypatch.delenv("JWT_PUBLIC_KEY",raising=False)
+    monkeypatch.delenv("STUDIO_GROWTH_OS_SERVICE_SECRET",raising=False)
+    monkeypatch.delenv("RUNGROW_ADAPTER_WEBHOOK_SECRET",raising=False)
+    response=await client.get("/health/ready")
+    assert response.status_code==503
+    failures=response.json()["failed_checks"]
+    assert {"migrations","oidc","hmac"}.issubset(set(failures))
