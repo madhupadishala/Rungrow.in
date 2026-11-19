@@ -31,6 +31,12 @@ def test_app(principal):
     yield instance
     instance.dependency_overrides.clear()
 
+@pytest.fixture(autouse=True)
+def reset_rate_limit_state():
+    reset_rate_limits()
+    yield
+    reset_rate_limits()
+
 @pytest.fixture
 def install_test_repository(test_app):
     return test_app.state.test_repository
