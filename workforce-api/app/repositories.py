@@ -27,7 +27,9 @@ def session_factory():
     return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
-from .reporting_repository import ReportingRepositoryMixin\n\nclass PostgresWorkforceRepository(ReportingRepositoryMixin):
+from .reporting_repository import ReportingRepositoryMixin
+
+class PostgresWorkforceRepository(ReportingRepositoryMixin):
     def __init__(self, session: AsyncSession, principal: Principal):
         self.session = session
         self.principal = principal
@@ -544,7 +546,8 @@ class InMemoryWorkforceRepository(ReportingRepositoryMixin):
     def __init__(self, principal: Principal, products: set[str]):
         self.principal, self.products = principal, products
         self.tasks, self.runs, self.memory, self.approvals, self.audit, self.model_usage = [], [], [], [], [], []
-        self.adapter_idempotency, self.product_telemetry = [], []\n        self.investment_capital_events, self.ceo_briefings = [], []
+        self.adapter_idempotency, self.product_telemetry = [], []
+        self.investment_capital_events, self.ceo_briefings = [], []
 
     def _scope(self, product_id):
         if product_id is not None and product_id not in self.products:
