@@ -320,7 +320,7 @@ class PostgresWorkforceRepository:
         item=await self._one("""INSERT INTO adapter_idempotency_keys
           (id,tenant_id,external_tenant_id,product_id,direction,idempotency_key,payload_hash,status,correlation_id,created_at)
           VALUES(:id,:tenant,:external_tenant,:product,:direction,:key,:hash,'PROCESSING',:correlation,now())
-          ON CONFLICT(tenant_id,product_id,direction,idempotency_key) DO NOTHING RETURNING *""",
+          ON CONFLICT(tenant_id,external_tenant_id,product_id,direction,idempotency_key) DO NOTHING RETURNING *""",
           {"id":str(uuid4()),"tenant":tenant_id,"external_tenant":external_tenant_id,"product":product_id,"direction":direction,
            "key":idempotency_key,"hash":payload_hash,"correlation":correlation_id})
         if item: return {"created":True,"response":None}
@@ -349,7 +349,7 @@ class PostgresWorkforceRepository:
            source_ref,metadata,correlation_id,received_at)
           VALUES(:id,:tenant,:external_tenant,:product,:event_id,:event_type,:revenue,:occurred,:source,
            CAST(:metadata AS jsonb),:correlation,now())
-          ON CONFLICT(tenant_id,product_id,event_id) DO NOTHING RETURNING id""",
+          ON CONFLICT(tenant_id,external_tenant_id,product_id,event_id) DO NOTHING RETURNING id""",
           {"id":str(uuid4()),"tenant":tenant_id,"external_tenant":external_tenant_id,"product":product_id,"event_id":event["event_id"],
            "event_type":event["event_type"],"revenue":event["recognised_revenue_inr"],
            "occurred":event.get("occurred_at"),"source":event.get("source_ref"),
