@@ -432,6 +432,61 @@ async def generic_product_webhook(
         raise HTTPException(422, str(exc)) from exc
 
 
+
+class GenericHandoffRequest(BaseModel):
+    external_tenant_id: str = Field(min_length=2, max_length=200)
+    run_id: str = Field(min_length=2, max_length=100)
+    payload: dict = Field(default_factory=dict)
+    approval_id: str | None = None
+    is_sandbox: bool = False
+
+
+@app.get("/v1/adapters/{product_id}/summary")
+async def generic_adapter_summary(product_id: str,
+    external_tenant_id: str = Header(..., alias="X-RunGrow-External-Tenant-ID"),
+    p: Principal = Depends(require_permission("reports.read")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo)):
+    if product_id not in GENERIC_PRODUCT_IDS:
+        raise HTTPException(404, "Generic adapter product not found")
+    authorize_product_access(p, product_id)
+    context = GenericAdapterContext(tenant_id=external_tenant_id,
+        workforce_tenant_id=p.tenant_id, product_id=product_id,
+        correlation_id=str(uuid4()), scopes=p.permissions)
+    try:
+        return await PRODUCT_ADAPTERS.get(product_id).read(
+            external_tenant_id=external_tenant_id, context=context, repository=repo)
+    except AdapterGovernanceError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+
+
+@app.post("/v1/adapters/{product_id}/handoff")
+async def generic_adapter_handoff(product_id: str, body: GenericHandoffRequest,
+    p: Principal = Depends(require_permission("agent.run")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo)):
+    if product_id not in GENERIC_PRODUCT_IDS:
+        raise HTTPException(404, "Generic adapter product not found")
+    authorize_product_access(p, product_id)
+    run = await repo.get_agent_run(body.run_id)
+    if not run:
+        raise HTTPException(404, "Agent run not found")
+    if run.get("product_id") != product_id:
+        raise HTTPException(403, "Agent run product binding mismatch")
+    employee = BY_ID.get(run.get("employee_id"))
+    if employee is None:
+        raise HTTPException(403, "Agent run employee is unavailable")
+    context = GenericAdapterContext(tenant_id=body.external_tenant_id,
+        workforce_tenant_id=p.tenant_id, product_id=product_id,
+        correlation_id=str(uuid4()), scopes=p.permissions, is_sandbox=body.is_sandbox)
+    try:
+        return await PRODUCT_ADAPTERS.get(product_id).handoff(payload=body.payload,
+            context=context, principal=p, employee=employee, run=run,
+            approval_id=body.approval_id, repository=repo)
+    except AdapterGovernanceError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+    except (ApprovalBoundaryError, SandboxViolation) as exc:
+        raise HTTPException(getattr(exc, "status_code", 403), str(exc)) from exc
+
+
 @app.get("/v1/adapters/readiness")
 async def adapter_readiness(p: Principal = Depends(require_permission("workforce.read"))):
     return {"adapters": PRODUCT_ADAPTERS.readiness(), "count": len(PRODUCT_ADAPTERS.product_ids)}
