@@ -28,7 +28,7 @@ from .adapters.photo_studio_growth_os import PhotoStudioGrowthOSAdapter, registe
 app = FastAPI(title="RunGrow Workforce API", version="0.4.0")
 app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins,
     allow_credentials=True, allow_methods=["GET","POST"],
-    allow_headers=["Authorization","Content-Type","Idempotency-Key","X-RunGrow-Signature","X-RunGrow-Timestamp","X-RunGrow-Tenant-ID","X-RunGrow-Product-ID","X-Correlation-ID"])
+    allow_headers=["Authorization","Content-Type","Idempotency-Key","X-RunGrow-Signature","X-RunGrow-Timestamp","X-RunGrow-Tenant-ID","X-RunGrow-Product-ID","X-RunGrow-Org-ID","X-Correlation-ID"])
 
 _PORTFOLIO_PATH = Path(__file__).resolve().parents[2] / "data" / "workforce" / "product-portfolio.json"
 with _PORTFOLIO_PATH.open("r", encoding="utf-8") as f:
