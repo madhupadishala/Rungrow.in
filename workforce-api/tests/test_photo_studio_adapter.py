@@ -229,3 +229,16 @@ async def test_governed_followup_consumes_third_party_approval_once(adapter):
             repository=repository,principal=principal,employee=employee,run=run,
             correlation_id="corr-approved")
     assert len(sent) == 1
+
+
+def test_outbound_workforce_request_uses_explicit_external_tenant_header_and_shared_signature(adapter):
+    context = AdapterContext(TENANT, scopes=frozenset({READ}),
+        correlation_id="contract-header-001", workforce_tenant_id=WORKFORCE_TENANT)
+    body = b'{"range":"30d"}'
+    headers = adapter._headers(context, body)
+    assert headers["X-RunGrow-External-Tenant-Id"] == TENANT
+    assert headers["X-RunGrow-Product-ID"] == PRODUCT
+    SignedWebhookVerifier(SECRET).verify(
+        body, headers["X-RunGrow-Signature"], headers["X-RunGrow-Timestamp"],
+        tenant_id=TENANT, product_id=PRODUCT, workforce_tenant_id=WORKFORCE_TENANT,
+    )
