@@ -6,8 +6,8 @@ OWNER="${PGUSER:-rungrow_migrator}"
 APP_USER="rungrow_app_user"
 APP_PASSWORD="${RUNGROW_APP_PASSWORD:-rungrow_app_local_only}"
 COMPOSE=(docker compose -f "$ROOT/docker-compose.test.yml")
-if [[ ! -f "$ROOT/migrations/006_capital_and_ceo_reporting.sql" ]]; then
-  echo "Required migration 006_capital_and_ceo_reporting.sql is missing" >&2
+if [[ ! -f "$ROOT/migrations/007_commercial_intelligence_and_portfolio.sql" ]]; then
+  echo "Required migration 007_commercial_intelligence_and_portfolio.sql is missing" >&2
   exit 1
 fi
 ready=false
@@ -34,6 +34,7 @@ MIGRATIONS=(
   004_durable_task_orchestration.sql
   005_product_adapters_and_telemetry.sql
   006_capital_and_ceo_reporting.sql
+  007_commercial_intelligence_and_portfolio.sql
 )
 for name in "${MIGRATIONS[@]}"; do
   migration="$ROOT/migrations/$name"
@@ -57,6 +58,7 @@ END
 GRANT CONNECT ON DATABASE $DB TO $APP_USER;
 GRANT USAGE ON SCHEMA public TO $APP_USER;
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO $APP_USER;
+GRANT SELECT, INSERT, UPDATE ON TABLE prospect_records, campaign_plans TO $APP_USER;
 REVOKE DELETE, TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA public FROM $APP_USER;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO $APP_USER;
 ALTER DEFAULT PRIVILEGES FOR ROLE $OWNER IN SCHEMA public
@@ -64,5 +66,5 @@ ALTER DEFAULT PRIVILEGES FOR ROLE $OWNER IN SCHEMA public
 ALTER DEFAULT PRIVILEGES FOR ROLE $OWNER IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO $APP_USER;
 SQL
-echo "Canonical migrations 001_initial_workforce_schema and 002..006 applied. App role: $APP_USER (NOSUPERUSER NOCREATEDB NOCREATEROLE)."
+echo "Canonical migrations 001_initial_workforce_schema and 002..007 applied. App role: $APP_USER (NOSUPERUSER NOCREATEDB NOCREATEROLE)."
 echo "RUNGROW_TEST_DATABASE_URL=postgresql+asyncpg://$APP_USER:$APP_PASSWORD@localhost:55432/$DB"
