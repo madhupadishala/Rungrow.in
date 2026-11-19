@@ -150,10 +150,15 @@ class PostgresWorkforceRepository(ReportingRepositoryMixin):
 
     async def list_agent_runs(self, product_id: str | None = None):
         self._product(product_id)
-        return await self._rows("""
-          SELECT * FROM wf_agent_runs WHERE tenant_id=:tenant
-          AND (CAST(:product AS text) IS NULL OR product_id=CAST(:product AS text)) ORDER BY created_at DESC
-        """, {"tenant": self.principal.tenant_id, "product": product_id})
+        if product_id is None:
+            return await self._rows(
+                "SELECT * FROM wf_agent_runs WHERE tenant_id=:tenant ORDER BY created_at DESC",
+                {"tenant": self.principal.tenant_id},
+            )
+        return await self._rows(
+            "SELECT * FROM wf_agent_runs WHERE tenant_id=:tenant AND product_id=:product ORDER BY created_at DESC",
+            {"tenant": self.principal.tenant_id, "product": product_id},
+        )
 
     async def write_memory(self, *, product_id: str | None, role_id: str, department: str,
                            content: str, source_ref: str, retention_days: int, embedding: list[float] | None = None):
