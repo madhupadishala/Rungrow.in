@@ -108,8 +108,7 @@ class DigitalCEOService:
                 received_by_investor[investor]=received_by_investor.get(investor,Decimal("0"))+amount
         committed=sum((max(Decimal("0"),amount-received_by_investor.get(investor,Decimal("0")))
                        for investor,amount in approved_by_investor.items()),Decimal("0"))
-        term_sheet_pipeline=sum((max(Decimal("0"),amount-approved_by_investor.get(investor,Decimal("0"))
-                       -received_by_investor.get(investor,Decimal("0")))
+        term_sheet_pipeline=sum((max(Decimal("0"),amount-approved_by_investor.get(investor,Decimal("0")) )
                        for investor,amount in signed_by_investor.items()),Decimal("0"))
         pending=[]
         for a in approvals:
