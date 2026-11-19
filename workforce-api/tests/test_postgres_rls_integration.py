@@ -17,10 +17,10 @@ async def test_postgres_role_is_restricted_and_rls_is_forced():
               SELECT c.relname,c.relforcerowsecurity
               FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
               WHERE n.nspname='public' AND c.relname IN
-                ('wf_tasks','wf_agent_runs','wf_memory','wf_approvals','wf_audit_events','wf_model_usage','adapter_idempotency_keys','product_telemetry_events')
+                ('wf_tasks','wf_agent_runs','wf_memory','wf_approvals','wf_audit_events','wf_model_usage','adapter_idempotency_keys','product_telemetry_events','investment_capital_events','ceo_briefings')
             """))
             rows=list(forced)
-            assert len(rows)==8
+            assert len(rows)==10
             assert all(row.relforcerowsecurity for row in rows)
             owners=await conn.execute(text("""
               SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -334,5 +334,42 @@ async def test_product_telemetry_and_adapter_idempotency_are_forced_and_tenant_p
             keys=await conn.execute(text("SELECT * FROM adapter_idempotency_keys WHERE tenant_id='adapter-tenant-a'"))
             assert list(telemetry)==[]
             assert list(keys)==[]
+    finally:
+        await engine.dispose()
+
+\n@pytest.mark.asyncio
+async def test_capital_and_ceo_ledgers_are_tenant_scoped_and_append_only():
+    engine=create_async_engine(URL)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','tenant-finance-a',true)"))
+            await conn.execute(text("""
+              INSERT INTO investment_capital_events
+                (tenant_id,event_type,investor_ref,amount_inr,is_received,occurred_at,created_by)
+              VALUES ('tenant-finance-a','investor_lead','investor-fixture',0,false,now(),'founder')
+            """))
+            await conn.execute(text("""
+              INSERT INTO ceo_briefings
+                (tenant_id,generated_at,query_started_at,query_completed_at,source_provenance,snapshot,created_by)
+              VALUES ('tenant-finance-a',now(),now(),now(),'["wf_tasks"]'::jsonb,'{"operating_revenue":{"actual_inr":0}}'::jsonb,'founder')
+            """))
+            assert (await conn.execute(text("SELECT count(*) FROM investment_capital_events"))).scalar_one()==1
+            assert (await conn.execute(text("SELECT count(*) FROM ceo_briefings"))).scalar_one()==1
+            with pytest.raises(Exception):
+                async with conn.begin_nested():
+                    await conn.execute(text("UPDATE investment_capital_events SET amount_inr=100 WHERE investor_ref='investor-fixture'"))
+            with pytest.raises(Exception):
+                async with conn.begin_nested():
+                    await conn.execute(text("DELETE FROM investment_capital_events WHERE investor_ref='investor-fixture'"))
+            with pytest.raises(Exception):
+                async with conn.begin_nested():
+                    await conn.execute(text("UPDATE ceo_briefings SET snapshot='{}'::jsonb"))
+            with pytest.raises(Exception):
+                async with conn.begin_nested():
+                    await conn.execute(text("DELETE FROM ceo_briefings"))
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','tenant-finance-b',true)"))
+            assert (await conn.execute(text("SELECT count(*) FROM investment_capital_events"))).scalar_one()==0
+            assert (await conn.execute(text("SELECT count(*) FROM ceo_briefings"))).scalar_one()==0
     finally:
         await engine.dispose()
