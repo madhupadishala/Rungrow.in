@@ -1,6 +1,7 @@
 """Reporting repository extensions shared by durable and test repositories."""
 from __future__ import annotations
 import json
+from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 from uuid import uuid4
 from sqlalchemy import text
@@ -27,8 +28,9 @@ class ReportingRepositoryMixin:
             is_received, approval_id=None, source_ref=None, metadata=None, occurred_at=None):
         if event_type not in {"investor_lead","term_sheet_signed","commitment_approved","capital_received"}:
             raise ValueError("Unsupported investment event type")
-        amount=float(amount_inr)
-        if amount < 0: raise ValueError("Investment amount cannot be negative")
+        try: amount=Decimal(str(amount_inr))
+        except (InvalidOperation, ValueError): raise ValueError("Investment amount must be a valid INR decimal")
+        if not amount.is_finite() or amount < 0: raise ValueError("Investment amount must be finite and non-negative")
         if event_type=="capital_received" and (not is_received or amount<=0):
             raise ValueError("Capital received requires a positive amount and is_received=true")
         if event_type!="capital_received" and is_received:
@@ -57,7 +59,7 @@ class ReportingRepositoryMixin:
                 and a.get("expires_at")>datetime.now(timezone.utc) and a.get("consumed_at") is None
                 and (a.get("payload") or {}).get("event_type")==event_type
                 and (a.get("payload") or {}).get("investor_ref")==investor_ref
-                and float((a.get("payload") or {}).get("amount_inr",-1))==amount),None)
+                and Decimal(str((a.get("payload") or {}).get("amount_inr",-1)))==amount),None)
             if not approval: raise PermissionError("Investment event requires a matching, verified, unused approval")
             approval["consumed_at"]=when
             approval["execution_run_id"]=event_id
