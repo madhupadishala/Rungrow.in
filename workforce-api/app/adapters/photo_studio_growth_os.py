@@ -102,6 +102,9 @@ class PhotoStudioGrowthOSAdapter:
             external_tenant_id=context.tenant_id, product_id=self.product_id,
             direction="outbound", key=key, payload=payload, correlation_id=context.correlation_id)
         if not claim.get("created"): return claim.get("response") or {"status":"duplicate","idempotent":True}
+        # Commit the durable PROCESSING claim before the remote side effect.
+        # A crash after the remote accepts the command can never make a retry send it twice.
+        await repository.commit_boundary()
         result = await self._request("POST", path, context, payload=payload, idempotency_key=key)
         await store.complete(tenant_id=context.workforce_tenant_id,
             external_tenant_id=context.tenant_id, product_id=self.product_id,
