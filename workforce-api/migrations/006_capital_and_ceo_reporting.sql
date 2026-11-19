@@ -37,7 +37,7 @@ BEGIN
  IF NEW.event_type <> 'investor_lead' THEN
    SELECT * INTO a FROM wf_approvals
     WHERE id=NEW.approval_id AND tenant_id=NEW.tenant_id
-      AND status='APPROVED' AND approver_id IS NOT NULL
+      AND lower(status)='approved' AND approver_id IS NOT NULL
       AND approver_id<>requester_id AND expires_at>NEW.recorded_at;
    IF NOT FOUND THEN RAISE EXCEPTION 'investment event requires a verified, unexpired, separately approved decision'; END IF;
  END IF;
