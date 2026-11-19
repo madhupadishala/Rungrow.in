@@ -121,8 +121,8 @@ class RobotsCompliantHttpFetcher:
             raise ValueError("requests_per_second must be positive")
         self.user_agent = user_agent
         self.interval = 1.0 / requests_per_second
-        self.allow_domains = {x.lower().lstrip(".") for x in (allow_domains or set())}
-        self.deny_domains = {x.lower().lstrip(".") for x in (deny_domains or set())}
+        self.allow_domains = {x.strip().lower().lstrip(".") for x in (allow_domains or set())}
+        self.deny_domains = {x.strip().lower().lstrip(".") for x in (deny_domains or set())}
         self.timeout_seconds = timeout_seconds
         self.transport = transport
         self._last_request: dict[str, float] = {}
@@ -152,6 +152,13 @@ class RobotsCompliantHttpFetcher:
             raise PermissionError("Domain is not on the configured allow list")
         if self._host_allowed(host, self.deny_domains):
             raise PermissionError("Domain is on the configured deny list")
+        if self.transport is None:
+            try:
+                resolved = {ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(host, None)}
+            except (OSError, ValueError) as exc:
+                raise PermissionError("Public source host could not be resolved safely") from exc
+            if not resolved or any(not address.is_global for address in resolved):
+                raise PermissionError("Public source host resolves to a private or non-global address")
         normalized = urlunparse((parsed.scheme, parsed.netloc, parsed.path or "/", "", parsed.query, ""))
         return normalized, host
 
@@ -331,7 +338,7 @@ class CommercialIntelligenceService:
                 public_contact_channel=candidate.get("public_contact_channel"),
                 source_url=source_url, evidence_urls=evidence_urls,
                 evidence_snippet=str(candidate.get("evidence_snippet", ""))[:2000],
-                confidence_score=float(candidate.get("confidence_score", fit["score"])),
+                confidence_score=max(0.0, min(1.0, float(candidate.get("confidence_score", fit["score"])))),
                 icp_fit_tier=fit["tier"], is_synthetic=bool(is_sandbox or candidate.get("is_synthetic", False)),
                 metadata={"normalized_domain": _norm(candidate.get("domain") or urlparse(source_url).hostname),
                           "normalized_phone": _normalized_phone(candidate.get("phone")),
