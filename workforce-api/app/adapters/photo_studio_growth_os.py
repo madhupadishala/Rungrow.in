@@ -46,7 +46,7 @@ class PhotoStudioGrowthOSAdapter:
 
     async def get_tenant_summary(self, tenant_id, *, context):
         self._bind(tenant_id, context, self.READ_SCOPE)
-        return await self._request("GET", "/api/v1/analytics/summary", context)
+        return await self._request("GET", "/api/v1/analytics/dashboard", context, params={"range":"30d"})
 
     async def list_leads(self, tenant_id, status=None, limit=50, *, context):
         self._bind(tenant_id, context, self.READ_SCOPE)
