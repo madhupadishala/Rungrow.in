@@ -67,3 +67,34 @@ CREATE POLICY product_telemetry_tenant_product_scope ON product_telemetry_events
     tenant_id=current_setting('app.current_tenant_id',true)
     AND product_id=ANY(string_to_array(COALESCE(current_setting('app.product_ids',true),''),','))
   );
+
+-- Product telemetry is an append-only evidence ledger.
+CREATE OR REPLACE FUNCTION wf_reject_product_telemetry_mutation() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'product telemetry events are immutable';
+END;
+$$;
+DROP TRIGGER IF EXISTS product_telemetry_append_only ON product_telemetry_events;
+CREATE TRIGGER product_telemetry_append_only
+  BEFORE UPDATE OR DELETE ON product_telemetry_events
+  FOR EACH ROW EXECUTE FUNCTION wf_reject_product_telemetry_mutation();
+
+CREATE OR REPLACE FUNCTION wf_guard_adapter_idempotency_identity() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
+     OR NEW.product_id IS DISTINCT FROM OLD.product_id
+     OR NEW.direction IS DISTINCT FROM OLD.direction
+     OR NEW.idempotency_key IS DISTINCT FROM OLD.idempotency_key
+     OR NEW.payload_hash IS DISTINCT FROM OLD.payload_hash
+     OR NEW.correlation_id IS DISTINCT FROM OLD.correlation_id THEN
+    RAISE EXCEPTION 'adapter idempotency identity is immutable';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS adapter_idempotency_identity_immutable ON adapter_idempotency_keys;
+CREATE TRIGGER adapter_idempotency_identity_immutable
+  BEFORE UPDATE ON adapter_idempotency_keys
+  FOR EACH ROW EXECUTE FUNCTION wf_guard_adapter_idempotency_identity();
