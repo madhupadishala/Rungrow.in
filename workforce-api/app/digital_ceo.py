@@ -6,6 +6,7 @@ None/zero with provenance flags; target allocations are explicitly provisional.
 from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
+import json
 from typing import Any
 
 REVENUE_TARGET_INR = 50_000_000
@@ -39,6 +40,13 @@ def _dt(value):
 def _iso(value):
     dt=_dt(value)
     return dt.astimezone(timezone.utc).isoformat() if dt else None
+
+def _is_synthetic_event(event):
+    metadata=event.get("metadata") or {}
+    if isinstance(metadata,str):
+        try: metadata=json.loads(metadata)
+        except ValueError: metadata={}
+    return bool(metadata.get("is_synthetic") or metadata.get("is_provisional"))
 
 class DigitalCEOService:
     def __init__(self, repository, registry, products):
@@ -75,7 +83,7 @@ class DigitalCEOService:
               "dead_lettered":sum(str(t.get("status","")).upper() in {"DEAD_LETTER","FAILED"} for t in scoped)})
         by_product={p:Decimal("0") for p in PRODUCT_ALLOCATIONS}
         for event in telemetry:
-            if event.get("event_type")=="invoice_recognised":
+            if event.get("event_type")=="invoice_recognised" and not _is_synthetic_event(event):
                 pid=event.get("product_id")
                 if pid in by_product: by_product[pid]+=Decimal(str(event.get("recognised_revenue_inr") or 0))
         revenue=sum(by_product.values(),Decimal("0"))
@@ -118,7 +126,7 @@ class DigitalCEOService:
           "operating_revenue":{"actual_inr":float(revenue),"target_inr":REVENUE_TARGET_INR,
             "remaining_inr":max(0,REVENUE_TARGET_INR-float(revenue)),"data_source":"product_telemetry_events",
             "event_filter":"invoice_recognised","is_synthetic":False,"is_provisional":False,
-            "source_event_count":sum(1 for e in telemetry if e.get("event_type")=="invoice_recognised"),
+            "source_event_count":sum(1 for e in telemetry if e.get("event_type")=="invoice_recognised" and not _is_synthetic_event(e)),
             "as_of":completed_at.isoformat(),
             "by_product":revenue_rows},
           "investment_capital":{"received_inr":float(received),"committed_pipeline_inr":float(committed),
