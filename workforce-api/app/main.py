@@ -24,7 +24,7 @@ from .execution_boundary import ToolRegistry, ExecutionBoundaryGuard, ApprovalBo
 from .schemas import OrchestratorDispatchRequest, ToolExecutionRequest
 from .adapters.base import SignedWebhookVerifier
 from .adapters.photo_studio_growth_os import PhotoStudioGrowthOSAdapter, register_photo_studio_growth_os_tools
-from .digital_ceo import DigitalCEOService
+from .digital_ceo import DigitalCEOService, is_synthetic_event
 
 app = FastAPI(title="RunGrow Workforce API", version="0.4.0")
 app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins,
@@ -535,12 +535,14 @@ async def pgm_dashboard(product_id: str,p: Principal=Depends(require_permission(
     tasks=await repo.list_tasks(product_id)
     telemetry=await repo.list_product_telemetry()
     approvals=await repo.list_approvals(product_id)
-    product_events=[e for e in telemetry if e.get("product_id")==product_id]
+    product_events=[e for e in telemetry if e.get("product_id")==product_id and not is_synthetic_event(e)]
     revenue=sum(float(e.get("recognised_revenue_inr") or 0) for e in product_events if e.get("event_type")=="invoice_recognised")
     counts={kind:sum(e.get("event_type")==kind for e in product_events) for kind in
       ("studio_tenant_onboarded","trial_started","lead_converted","booking_confirmed","churn_risk_flagged")}
-    counts.update({"prospects":None,"qualified_opportunities":None,
-      "funnel_data_note":"Not yet instrumented in the product telemetry contract; null is intentional."})
+    counts.update({"prospects":None,"leads":None,"qualified_opportunities":None,
+      "bookings":counts["booking_confirmed"],"conversions":counts["lead_converted"],
+      "churn_risk_signals":counts["churn_risk_flagged"],"campaign_execution":None,
+      "funnel_data_note":"Prospect, lead, qualified-opportunity and campaign counts are not yet instrumented; null is intentional."})
     return {"product_id":product_id,"funnel":counts,"recognised_revenue_inr":revenue,
       "data_source":"product_telemetry_events","is_synthetic":False,"tasks":tasks,
       "pending_approvals":[a for a in approvals if str(a.get("status","")).upper()=="PENDING"]}
