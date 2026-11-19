@@ -193,7 +193,7 @@ async def test_whatsapp_api_returns_503_and_audits_missing_live_provider(client,
         "approval_id":"not-consumed"
     })
     assert response.status_code==503
-    assert any(event[0]=="communication.integration_not_configured" for event in repo.audit)
+    assert any(event.get("action")=="communication.integration_not_configured" for event in repo.audit)
 
 @pytest.mark.asyncio
 async def test_release_signoff_requires_full_commit_sha(client):
