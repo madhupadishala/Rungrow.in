@@ -238,7 +238,10 @@ def test_outbound_workforce_request_uses_explicit_external_tenant_header_and_sha
     headers = adapter._headers(context, body)
     assert headers["X-RunGrow-External-Tenant-Id"] == TENANT
     assert headers["X-RunGrow-Product-ID"] == PRODUCT
+    assert headers["X-RunGrow-Scopes"] == READ
+    assert headers["X-RunGrow-Tenant-ID"] == WORKFORCE_TENANT
+    assert headers["X-RunGrow-External-Tenant-Id"] == TENANT
     SignedWebhookVerifier(SECRET).verify(
         body, headers["X-RunGrow-Signature"], headers["X-RunGrow-Timestamp"],
-        tenant_id=TENANT, product_id=PRODUCT, workforce_tenant_id=WORKFORCE_TENANT,
+        tenant_id=TENANT, product_id=PRODUCT, workforce_tenant_id=WORKFORCE_TENANT, scopes=context.scopes,
     )
