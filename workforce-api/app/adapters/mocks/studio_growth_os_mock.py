@@ -31,7 +31,7 @@ async def _tenant(request,tenant_id):
 
 @app.get("/api/v1/leads")
 async def leads(request:Request,page:int=1,page_size:int=50,stage:str|None=None):
- tenant=request.headers.get("X-RunGrow-Tenant-ID",""); await await _tenant(request,tenant)
+ tenant=request.headers.get("X-RunGrow-Tenant-ID",""); await _tenant(request,tenant)
  rows=[x for x in LEADS if x["tenant_id"]==tenant and (not stage or x["stage"]==stage)]
  return {"leads":rows[:page_size],"total":len(rows),"page":page,"page_size":page_size,"is_synthetic":True}
 
