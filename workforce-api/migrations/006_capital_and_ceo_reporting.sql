@@ -31,7 +31,7 @@ CREATE POLICY investment_capital_tenant_scope ON investment_capital_events
  WITH CHECK (tenant_id=current_setting('app.current_tenant_id',true));
 
 CREATE OR REPLACE FUNCTION wf_validate_investment_approval() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql AS $fn$
 DECLARE a wf_approvals%ROWTYPE;
 BEGIN
  IF NEW.event_type <> 'investor_lead' THEN
@@ -54,16 +54,16 @@ BEGIN
  END IF;
  RETURN NEW;
 END;
-$$;
+$fn$;
 DROP TRIGGER IF EXISTS investment_capital_approval_guard ON investment_capital_events;
 CREATE TRIGGER investment_capital_approval_guard
  BEFORE INSERT ON investment_capital_events
  FOR EACH ROW EXECUTE FUNCTION wf_validate_investment_approval();
 
 CREATE OR REPLACE FUNCTION wf_reject_investment_mutation() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql AS $fn$
 BEGIN RAISE EXCEPTION 'investment capital events are append-only'; END;
-$$;
+$fn$;
 DROP TRIGGER IF EXISTS investment_capital_append_only ON investment_capital_events;
 CREATE TRIGGER investment_capital_append_only
  BEFORE UPDATE OR DELETE ON investment_capital_events
@@ -92,9 +92,9 @@ CREATE POLICY ceo_briefings_tenant_scope ON ceo_briefings
  FOR ALL USING (tenant_id=current_setting('app.current_tenant_id',true))
  WITH CHECK (tenant_id=current_setting('app.current_tenant_id',true));
 CREATE OR REPLACE FUNCTION wf_reject_ceo_briefing_mutation() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql AS $fn$
 BEGIN RAISE EXCEPTION 'CEO briefing snapshots are immutable'; END;
-$$;
+$fn$;
 DROP TRIGGER IF EXISTS ceo_briefings_immutable ON ceo_briefings;
 CREATE TRIGGER ceo_briefings_immutable
  BEFORE UPDATE OR DELETE ON ceo_briefings
