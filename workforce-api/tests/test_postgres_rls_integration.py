@@ -411,3 +411,53 @@ async def test_capital_event_requires_matching_approval_and_consumes_it_once():
                     """),{"approval":approval_id})
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_commercial_intelligence_tables_enforce_tenant_product_rls_and_campaign_approval():
+    engine=create_async_engine(URL)
+    prospect_id=str(__import__("uuid").uuid4())
+    campaign_id=str(__import__("uuid").uuid4())
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','commercial-tenant-a',true)"))
+            await conn.execute(text("SELECT set_config('app.product_ids','photo-studio-growth-os',true)"))
+            await conn.execute(text("""
+              INSERT INTO prospect_records
+                (id,tenant_id,product_id,dedupe_key,business_name,city,segment,source_url,
+                 evidence_urls,evidence_snippet,confidence_score,icp_fit_tier)
+              VALUES (:id,'commercial-tenant-a','photo-studio-growth-os','studio-hyd-001',
+                'Commercial Studio','Hyderabad','wedding photography','https://directory.example/studio',
+                '[\"https://directory.example/studio\"]'::jsonb,'Public directory evidence',0.850,'HIGH')
+            """),{"id":prospect_id})
+            await conn.execute(text("""
+              INSERT INTO campaign_plans
+                (id,tenant_id,product_id,name,target_icp_segment,channel,messaging_brief,
+                 ai_identity_disclosure,status,is_sandbox,created_by)
+              VALUES (:id,'commercial-tenant-a','photo-studio-growth-os','RLS campaign',
+                'Wedding photography studios','RESEARCH_ONLY',
+                'Research-only brief to validate workflow requirements and buying criteria.',
+                'I am an AI assistant acting on behalf of RunGrow.', 'DRAFT',true,'founder')
+            """),{"id":campaign_id})
+            with pytest.raises(Exception,match="campaign approval_id is required"):
+                async with conn.begin_nested():
+                    await conn.execute(text("""
+                      UPDATE campaign_plans SET status='APPROVED'
+                      WHERE id=:id
+                    """),{"id":campaign_id})
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','commercial-tenant-b',true)"))
+            await conn.execute(text("SELECT set_config('app.product_ids','photo-studio-growth-os',true)"))
+            assert (await conn.execute(text("SELECT count(*) FROM prospect_records WHERE id=:id"),
+                {"id":prospect_id})).scalar_one()==0
+            assert (await conn.execute(text("SELECT count(*) FROM campaign_plans WHERE id=:id"),
+                {"id":campaign_id})).scalar_one()==0
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','commercial-tenant-a',true)"))
+            await conn.execute(text("SELECT set_config('app.product_ids','clinics-counter',true)"))
+            assert (await conn.execute(text("SELECT count(*) FROM prospect_records WHERE id=:id"),
+                {"id":prospect_id})).scalar_one()==0
+            assert (await conn.execute(text("SELECT count(*) FROM campaign_plans WHERE id=:id"),
+                {"id":campaign_id})).scalar_one()==0
+    finally:
+        await engine.dispose()
