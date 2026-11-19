@@ -519,14 +519,18 @@ async def executive_dashboard(p: Principal=Depends(require_permission("executive
     workload=[]
     for employee in EMPLOYEES:
         assigned=[t for t in tasks if t.get("assignee_role_id")==employee.id]
+        assigned_runs=[r for r in runs if r.get("employee_id")==employee.id]
+        active_tasks=sum(str(t.get("status","")).upper() in {"QUEUED","RUNNING","RETRY_SCHEDULED","AWAITING_APPROVAL"} for t in assigned)
+        active_runs=sum(str(r.get("execution_state",r.get("status",""))).upper() in {"QUEUED","RUNNING","RETRY_SCHEDULED","AWAITING_APPROVAL"} for r in assigned_runs)
+        occupied=any(str(t.get("status","")).upper() in {"RUNNING","AWAITING_APPROVAL"} for t in assigned) or any(str(r.get("execution_state",r.get("status",""))).upper() in {"RUNNING","AWAITING_APPROVAL"} for r in assigned_runs)
         workload.append({"employee_id":employee.id,"title":employee.title,"department":employee.department,
-          "product_id":employee.product_id,"active_tasks":sum(str(t.get("status","")).upper() in {"QUEUED","RUNNING","RETRY_SCHEDULED","AWAITING_APPROVAL"} for t in assigned),
-          "availability":"occupied" if any(str(t.get("status","")).upper() in {"RUNNING","AWAITING_APPROVAL"} for t in assigned) else "available",
-          "completed_tasks":sum(str(t.get("status","")).upper()=="COMPLETED" for t in assigned)})
+          "product_id":employee.product_id,"active_tasks":active_tasks+active_runs,
+          "availability":"occupied" if occupied else "available",
+          "completed_tasks":sum(str(t.get("status","")).upper()=="COMPLETED" for t in assigned)+sum(str(r.get("execution_state",r.get("status",""))).upper()=="COMPLETED" for r in assigned_runs)})
     return {"tasks":tasks,"agent_runs":runs,"employee_workload":workload,
       "sandbox_runs":sum(bool(x.get("is_sandbox")) for x in tasks+runs),
       "production_runs":sum(not bool(x.get("is_sandbox")) for x in tasks+runs),
-      "escalations":[x for x in tasks if str(x.get("status","")).upper() in {"DEAD_LETTER","FAILED","AWAITING_APPROVAL"}]}
+      "escalations":[x for x in tasks+runs if str(x.get("status",x.get("execution_state",""))).upper() in {"DEAD_LETTER","FAILED","AWAITING_APPROVAL"} or str(x.get("execution_state","")).upper()=="DEAD_LETTER"]}
 
 @app.get("/v1/dashboards/pgm/{product_id}")
 async def pgm_dashboard(product_id: str,p: Principal=Depends(require_permission("reports.read")),
