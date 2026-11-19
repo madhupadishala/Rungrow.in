@@ -272,7 +272,9 @@ def register_photo_studio_growth_os_tools(registry, adapter, repository_factory)
                          ("studio_growth_os.conversation.read",read_conversation)):
         registry.register(ToolDefinition(name,frozenset({adapter.READ_SCOPE}),False,True,"product.read",handler))
     registry.register(ToolDefinition("studio_growth_os.lead_followup",frozenset({adapter.WRITE_SCOPE}),
-        True,False,"outreach.send",governed_followup))
+        True,False,"outreach.send",governed_followup,
+        frozenset({"Sales & Revenue","Customer Success"})))
     registry.register(ToolDefinition("studio_growth_os.prospect_handoff",frozenset({adapter.WRITE_SCOPE}),
-        True,False,"lead.bulk_contact",governed_handoff))
+        True,False,"lead.bulk_contact",governed_handoff,
+        frozenset({"Sales & Revenue"})))
     return registry
