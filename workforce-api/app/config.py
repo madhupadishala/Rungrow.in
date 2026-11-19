@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,7 +30,7 @@ def validate_production_environment(env: dict[str, str] | None = None) -> None:
     values = os.environ if env is None else env
     if values.get("APP_ENV", "development").lower() != "production":
         return
-    required = ("DATABASE_URL",)
+    required = ("DATABASE_URL", "RUNGROW_INTERNAL_TENANT_ID")
     missing = [key for key in required if not values.get(key, "").strip()]
     if not values.get("JWT_JWKS_URL", "").strip() and not values.get("JWT_PUBLIC_KEY", "").strip():
         missing.append("JWT_JWKS_URL or JWT_PUBLIC_KEY")
@@ -43,7 +43,7 @@ def validate_production_environment(env: dict[str, str] | None = None) -> None:
     database = urlsplit(values["DATABASE_URL"])
     if database.scheme not in {"postgres", "postgresql", "postgresql+asyncpg"} or not database.hostname:
         raise RuntimeError("Production DATABASE_URL must be a valid PostgreSQL connection URL")
-    db_query = dict(__import__("urllib.parse", fromlist=["parse_qsl"]).parse_qsl(database.query))
+    db_query = dict(parse_qsl(database.query))
     if db_query.get("sslmode") not in {"require", "verify-ca", "verify-full"}:
         raise RuntimeError("Production PostgreSQL connections must require TLS (sslmode=require)")
     jwks_url = values.get("JWT_JWKS_URL", "").strip()
