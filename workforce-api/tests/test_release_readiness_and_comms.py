@@ -234,3 +234,30 @@ async def test_health_ready_returns_503_on_checksum_drift_and_missing_identity_s
     assert response.status_code==503
     failures=response.json()["failed_checks"]
     assert {"migrations","oidc","hmac"}.issubset(set(failures))
+
+
+@pytest.mark.asyncio
+async def test_postgres_sliding_window_is_shared_and_returns_retry(monkeypatch):
+    import os
+    from uuid import uuid4
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    from app import rate_limit
+    database_url=os.getenv("RUNGROW_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("PostgreSQL CI database URL is unavailable")
+    engine=create_async_engine(database_url)
+    factory=async_sessionmaker(engine,expire_on_commit=False)
+    monkeypatch.setattr(rate_limit,"session_factory",lambda:factory)
+    key="test-"+str(uuid4())
+    try:
+        first=await rate_limit._allow_postgres([key],1,60)
+        second=await rate_limit._allow_postgres([key],1,60)
+        assert first==(True,0)
+        assert second[0] is False
+        assert second[1]>=1
+    finally:
+        async with factory() as session:
+            async with session.begin():
+                await session.execute(text("DELETE FROM rate_limit_events WHERE scope_key=:key"),{"key":key})
+        await engine.dispose()
