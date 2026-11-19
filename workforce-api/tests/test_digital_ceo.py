@@ -50,3 +50,15 @@ async def test_capital_received_requires_separate_live_approval(principal, insta
       approval_id="approval-verified",occurred_at=now)
     assert event["amount_inr"] == 100000
     assert event["is_received"] is True
+
+\n@pytest.mark.asyncio
+async def test_synthetic_invoice_telemetry_is_excluded_from_recognised_revenue(principal, install_test_repository):
+    repo=install_test_repository
+    await repo.record_product_telemetry(tenant_id=principal.tenant_id,
+        external_tenant_id="synthetic-fixture",product_id="photo-studio-growth-os",
+        event={"event_id":"synthetic-invoice","event_type":"invoice_recognised",
+               "recognised_revenue_inr":999999,"metadata":{"is_synthetic":True}},
+        correlation_id="synthetic-test")
+    snapshot=await DigitalCEOService(repo,BY_ID,PRODUCTS).briefing("test-founder")
+    assert snapshot["operating_revenue"]["actual_inr"] == 0
+    assert snapshot["operating_revenue"]["source_event_count"] == 0
