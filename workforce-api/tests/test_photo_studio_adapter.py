@@ -204,6 +204,9 @@ async def test_governed_followup_consumes_third_party_approval_once(adapter):
                     decided_at=datetime.now(timezone.utc))
     sent=[]
     async def fake_send(request):
+        if request.method == "GET":
+            return httpx.Response(200,json={"id":"quote-hyd-001","tenant_id":TENANT,
+                "lead_id":"lead-hyd-001","status":"approved","is_synthetic":True})
         sent.append(request)
         return httpx.Response(200,json={"status":"sent","is_synthetic":True})
     adapter.transport = httpx.MockTransport(fake_send)
