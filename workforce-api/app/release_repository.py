@@ -69,6 +69,11 @@ class ReleaseRepositoryMixin:
             raise ValueError("Verifier identity is required")
         if not isinstance(evidence,dict) or not evidence:
             raise ValueError("Evidence object is required")
+        import re
+        if not candidate_sha or not re.fullmatch(r"[0-9a-fA-F]{40,64}",candidate_sha):
+            raise ValueError("A full immutable Git commit SHA is required for release signoff")
+        if not environment or not environment.strip():
+            raise ValueError("Release environment is required")
         if not hasattr(self, "session"):
             if not hasattr(self,"release_signoffs"): self.release_signoffs=[]
             item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,"release_layer":release_layer,
