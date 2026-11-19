@@ -302,23 +302,23 @@ async def test_product_telemetry_and_adapter_idempotency_are_forced_and_tenant_p
             await conn.execute(text("SELECT set_config('app.current_tenant_id','adapter-tenant-a',true)"))
             await conn.execute(text("SELECT set_config('app.product_ids','photo-studio-growth-os',true)"))
             await conn.execute(text("""
-              INSERT INTO product_telemetry_events(id,tenant_id,product_id,event_id,event_type,
+              INSERT INTO product_telemetry_events(id,tenant_id,external_tenant_id,product_id,event_id,event_type,
                 recognised_revenue_inr,metadata,correlation_id)
-              VALUES(gen_random_uuid(),'adapter-tenant-a','photo-studio-growth-os','invoice-event-1',
+              VALUES(gen_random_uuid(),'adapter-tenant-a','studio-customer-a','photo-studio-growth-os','invoice-event-1',
                 'invoice_recognised',125000,'{}'::jsonb,'corr-a')
             """))
             await conn.execute(text("""
-              INSERT INTO adapter_idempotency_keys(id,tenant_id,product_id,direction,idempotency_key,
+              INSERT INTO adapter_idempotency_keys(id,tenant_id,external_tenant_id,product_id,direction,idempotency_key,
                 payload_hash,status,correlation_id)
-              VALUES(gen_random_uuid(),'adapter-tenant-a','photo-studio-growth-os','inbound',
+              VALUES(gen_random_uuid(),'adapter-tenant-a','studio-customer-a','photo-studio-growth-os','inbound',
                 'webhook-event-1',repeat('a',64),'PROCESSING','corr-a')
             """))
             with pytest.raises(Exception):
                 async with conn.begin_nested():
                     await conn.execute(text("""
-                      INSERT INTO product_telemetry_events(id,tenant_id,product_id,event_id,event_type,
+                      INSERT INTO product_telemetry_events(id,tenant_id,external_tenant_id,product_id,event_id,event_type,
                         recognised_revenue_inr,metadata,correlation_id)
-                      VALUES(gen_random_uuid(),'adapter-tenant-a','photo-studio-growth-os','bad-revenue',
+                      VALUES(gen_random_uuid(),'adapter-tenant-a','studio-customer-a','photo-studio-growth-os','bad-revenue',
                         'trial_started',100,'{}'::jsonb,'corr-a')
                     """))
             with pytest.raises(Exception):
