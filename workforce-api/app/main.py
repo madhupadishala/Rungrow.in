@@ -455,6 +455,16 @@ class CEODirectiveRequest(BaseModel):
     product_ids: list[str] = Field(default_factory=list)
     is_sandbox: bool = True
 
+class InvestmentCapitalEventRequest(BaseModel):
+    event_type: str
+    investor_ref: str = Field(min_length=1, max_length=240)
+    amount_inr: float = Field(default=0, ge=0)
+    is_received: bool = False
+    approval_id: str | None = None
+    source_ref: str | None = Field(default=None, max_length=1000)
+    metadata: dict = Field(default_factory=dict)
+    occurred_at: datetime | None = None
+
 def _ceo_service(repo):
     return DigitalCEOService(repo, BY_ID, PRODUCTS)
 
@@ -479,8 +489,15 @@ async def ceo_directive(body: CEODirectiveRequest,
         employee=BY_ID[role_id]
         created.append(await repo.enqueue_task(product_id=product_id,department=employee.department,
             assignee_role_id=role_id,title=f"Founder directive: {body.directive[:120]}",
-            description=body.directive,priority="HIGH",is_sandbox=body.is_sandbox,
+            description=body.directive,priority="high",is_sandbox=body.is_sandbox,
             idempotency_key=f"ceo-directive:{uuid4()}"))
+    department, shared_role_id, _ = route(body.directive)
+    shared_employee=BY_ID.get(shared_role_id)
+    if shared_employee and shared_employee.product_id is None:
+        created.append(await repo.enqueue_task(product_id=None,department=department,
+            assignee_role_id=shared_role_id,title=f"Shared execution: {body.directive[:120]}",
+            description=body.directive,priority="high",is_sandbox=body.is_sandbox,
+            idempotency_key=f"ceo-directive-shared:{uuid4()}"))
     return {"status":"queued","task_count":len(created),"tasks":created,
             "is_sandbox":body.is_sandbox,"execution":"queued_not_executed"}
 
@@ -494,7 +511,13 @@ async def executive_dashboard(p: Principal=Depends(require_permission("reports.r
                               repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
     tasks=await repo.list_tasks()
     runs=await repo.list_agent_runs()
-    return {"tasks":tasks,"agent_runs":runs,
+    workload=[]
+    for employee in EMPLOYEES:
+        assigned=[t for t in tasks if t.get("assignee_role_id")==employee.id]
+        workload.append({"employee_id":employee.id,"title":employee.title,"department":employee.department,
+          "product_id":employee.product_id,"active_tasks":sum(str(t.get("status","")).upper() in {"QUEUED","RUNNING","RETRY_SCHEDULED","AWAITING_APPROVAL"} for t in assigned),
+          "completed_tasks":sum(str(t.get("status","")).upper()=="COMPLETED" for t in assigned)})
+    return {"tasks":tasks,"agent_runs":runs,"employee_workload":workload,
       "sandbox_runs":sum(bool(x.get("is_sandbox")) for x in tasks+runs),
       "production_runs":sum(not bool(x.get("is_sandbox")) for x in tasks+runs),
       "escalations":[x for x in tasks if str(x.get("status","")).upper() in {"DEAD_LETTER","FAILED","AWAITING_APPROVAL"}]}
@@ -510,6 +533,20 @@ async def pgm_dashboard(product_id: str,p: Principal=Depends(require_permission(
     revenue=sum(float(e.get("recognised_revenue_inr") or 0) for e in product_events if e.get("event_type")=="invoice_recognised")
     counts={kind:sum(e.get("event_type")==kind for e in product_events) for kind in
       ("studio_tenant_onboarded","trial_started","lead_converted","booking_confirmed","churn_risk_flagged")}
+    counts.update({"prospects":None,"qualified_opportunities":None,
+      "funnel_data_note":"Not yet instrumented in the product telemetry contract; null is intentional."})
     return {"product_id":product_id,"funnel":counts,"recognised_revenue_inr":revenue,
       "data_source":"product_telemetry_events","is_synthetic":False,"tasks":tasks,
       "pending_approvals":[a for a in approvals if str(a.get("status","")).upper()=="PENDING"]}
+
+@app.post("/v1/finance/investment-events")
+async def record_investment_event(body: InvestmentCapitalEventRequest,
+    p: Principal=Depends(require_permission("investment.record")),
+    repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    try:
+        return await repo.record_investment_capital_event(event_type=body.event_type,
+            investor_ref=body.investor_ref,amount_inr=body.amount_inr,
+            is_received=body.is_received,approval_id=body.approval_id,
+            source_ref=body.source_ref,metadata=body.metadata,occurred_at=body.occurred_at)
+    except Exception as exc:
+        translate_repo_error(exc)
