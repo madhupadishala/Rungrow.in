@@ -152,7 +152,7 @@ class PostgresWorkforceRepository(ReportingRepositoryMixin):
         self._product(product_id)
         return await self._rows("""
           SELECT * FROM wf_agent_runs WHERE tenant_id=:tenant
-          AND (:product IS NULL OR product_id=:product) ORDER BY created_at DESC
+          AND (CAST(:product AS text) IS NULL OR product_id=CAST(:product AS text)) ORDER BY created_at DESC
         """, {"tenant": self.principal.tenant_id, "product": product_id})
 
     async def write_memory(self, *, product_id: str | None, role_id: str, department: str,
@@ -244,14 +244,14 @@ class PostgresWorkforceRepository(ReportingRepositoryMixin):
         self._product(product_id)
         return await self._rows("""
           SELECT * FROM wf_approvals WHERE tenant_id=:tenant
-          AND (:product IS NULL OR product_id=:product) ORDER BY created_at DESC
+          AND (CAST(:product AS text) IS NULL OR product_id=CAST(:product AS text)) ORDER BY created_at DESC
         """, {"tenant": self.principal.tenant_id, "product": product_id})
 
     async def list_audit(self, product_id: str | None = None):
         self._product(product_id)
         return await self._rows("""
           SELECT * FROM wf_audit_events WHERE tenant_id=:tenant
-          AND (:product IS NULL OR product_id=:product) ORDER BY occurred_at DESC
+          AND (CAST(:product AS text) IS NULL OR product_id=CAST(:product AS text)) ORDER BY occurred_at DESC
         """, {"tenant": self.principal.tenant_id, "product": product_id})
 
     async def append_audit(self, action: str, resource_type: str, resource_id: str,
