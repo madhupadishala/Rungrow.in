@@ -1,7 +1,7 @@
 name: Workforce CI
 on:
   push:
-    branches: [main, feat/month-1-day-1-operating-foundation]
+    branches: [main, feat/month-1-day-1-operating-foundation, feat/ai-workforce-platform]
   pull_request:
     branches: [main, feat/month-1-day-1-operating-foundation]
   workflow_dispatch:
