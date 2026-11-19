@@ -1,0 +1,10 @@
+{
+  "is_synthetic": true,
+  "tenant_id": "studio-hyd-001",
+  "business_name": "Deccan Moments Photography",
+  "city": "Hyderabad",
+  "leads": ["lead-hyd-001", "lead-hyd-002"],
+  "quotes": ["quote-hyd-001"],
+  "bookings": ["booking-hyd-001"],
+  "note": "Synthetic test data; not a customer, booking, or revenue record."
+}
