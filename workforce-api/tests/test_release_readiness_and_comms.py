@@ -10,9 +10,12 @@ class GatewayRepo:
         self.audit=[]
         self.failed=[]
         self.completed=[]
+        self.approval_consumptions=0
     async def append_audit(self,*args): self.audit.append(args)
     async def commit_boundary(self): return None
-    async def consume_approval(self,*args,**kwargs): return {"id":"approval-once"}
+    async def consume_approval(self,*args,**kwargs):
+        self.approval_consumptions+=1
+        return {"id":"approval-once"}
     async def start_agent_run(self,run_id): return None
     async def fail_agent_run(self,run_id,error): self.failed.append((run_id,error))
     async def complete_agent_run(self,run_id,result): self.completed.append((run_id,result))
@@ -47,7 +50,8 @@ async def test_whatsapp_live_mode_fails_closed_without_credentials(monkeypatch,e
     with pytest.raises(IntegrationNotConfiguredError):
         await gateway.send(principal=principal,employee=employee,run=run,
             payload={"to":"919999999999","message":"Appointment details"},approval_id="approved-once")
-    assert repo.failed and any(event[0]=="tool.execution.failed" for event in repo.audit)
+    assert repo.approval_consumptions==0
+    assert any(event[0]=="communication.integration_not_configured" for event in repo.audit)
 
 @pytest.mark.asyncio
 async def test_email_live_mode_fails_closed_without_credentials(monkeypatch,execution_context):
@@ -59,7 +63,8 @@ async def test_email_live_mode_fails_closed_without_credentials(monkeypatch,exec
         await TransactionalEmailGateway(repo).send(principal=principal,employee=employee,run=run,
             payload={"to":"customer@example.com","subject":"Booking","message":"Your booking is confirmed"},
             approval_id="approved-once")
-    assert repo.failed
+    assert repo.approval_consumptions==0
+    assert any(event[0]=="communication.integration_not_configured" for event in repo.audit)
 
 @pytest.mark.asyncio
 async def test_sandbox_communication_is_hard_blocked(execution_context):
