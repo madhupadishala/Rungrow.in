@@ -384,15 +384,15 @@ async def photo_studio_growth_os_webhook(
 
 async def get_generic_adapter_repo(
     product_id: str,
-    tenant_id: str = Header(..., alias="X-RunGrow-Tenant-ID"),
-    org_id: str = Header(..., alias="X-RunGrow-Org-ID"),
+    external_tenant_id: str = Header(..., alias="X-RunGrow-External-Tenant-Id"),
+    workforce_tenant_id: str = Header(..., alias="X-RunGrow-Tenant-ID"),
 ):
     if product_id not in GENERIC_PRODUCT_IDS:
         raise HTTPException(404, "Unknown generic adapter product")
     internal_tenant_id = os.getenv("RUNGROW_INTERNAL_TENANT_ID", "")
     if not internal_tenant_id:
         raise HTTPException(503, "RUNGROW_INTERNAL_TENANT_ID is required for adapter isolation")
-    if org_id != internal_tenant_id or tenant_id == internal_tenant_id:
+    if workforce_tenant_id != internal_tenant_id or external_tenant_id == internal_tenant_id:
         raise HTTPException(403, "External product tenant and internal Workforce tenant must be distinct")
     if not settings.database_url:
         raise HTTPException(503, "DATABASE_URL is required for durable adapter telemetry")
@@ -412,25 +412,31 @@ async def generic_product_webhook(
     repo: WorkforceRepositoryProtocol = Depends(get_generic_adapter_repo),
     signature: str | None = Header(default=None, alias="X-RunGrow-Signature"),
     timestamp: str | None = Header(default=None, alias="X-RunGrow-Timestamp"),
-    tenant_header: str | None = Header(default=None, alias="X-RunGrow-Tenant-ID"),
+    external_tenant_header: str | None = Header(default=None, alias="X-RunGrow-External-Tenant-Id"),
+    workforce_tenant_header: str | None = Header(default=None, alias="X-RunGrow-Tenant-ID"),
     product_header: str | None = Header(default=None, alias="X-RunGrow-Product-ID"),
-    org_header: str | None = Header(default=None, alias="X-RunGrow-Org-ID"),
+    scopes_header: str | None = Header(default=None, alias="X-RunGrow-Scopes"),
     correlation_id: str | None = Header(default=None, alias="X-Correlation-ID"),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     if product_header != product_id:
         raise HTTPException(403, "Webhook product binding mismatch")
-    if not tenant_header or not correlation_id or len(correlation_id) > 128 or not idempotency_key:
-        raise HTTPException(400, "Tenant, correlation and idempotency headers are required")
+    if not external_tenant_header or not correlation_id or len(correlation_id) > 128 or not idempotency_key:
+        raise HTTPException(400, "External tenant, correlation and idempotency headers are required")
     internal_tenant_id = os.getenv("RUNGROW_INTERNAL_TENANT_ID", "")
-    if not internal_tenant_id or org_header != internal_tenant_id or tenant_header == internal_tenant_id:
-        raise HTTPException(403, "Webhook tenant/org binding mismatch")
+    if not internal_tenant_id or workforce_tenant_header != internal_tenant_id or external_tenant_header == internal_tenant_id:
+        raise HTTPException(403, "Webhook external/internal tenant binding mismatch")
+    scopes = (scopes_header or "").split(",")
+    scopes = [scope.strip() for scope in scopes if scope.strip()]
+    if not scopes or scopes != sorted(set(scopes)) or f"{product_id}:write" not in scopes:
+        raise HTTPException(403, "Sorted product write scope is required")
     raw = await request.body()
     adapter = PRODUCT_ADAPTERS.get(product_id)
     try:
         return await adapter.handle_webhook(raw_body=raw, signature=signature, timestamp=timestamp,
-            external_tenant_id=tenant_header, workforce_tenant_id=internal_tenant_id,
-            idempotency_key=idempotency_key, correlation_id=correlation_id, repository=repo)
+            external_tenant_id=external_tenant_header, workforce_tenant_id=internal_tenant_id,
+            scopes=frozenset(scopes), idempotency_key=idempotency_key,
+            correlation_id=correlation_id, repository=repo)
     except AdapterGovernanceError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
     except PermissionError as exc:
