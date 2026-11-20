@@ -104,13 +104,14 @@ def _webhook_payload(event_id="invoice-001", revenue=125000, event_type="invoice
 def _signed_headers(payload, key="event-key-001", signature_override=None, timestamp_override=None):
     raw = json.dumps(payload, separators=(",",":"), ensure_ascii=False).encode()
     timestamp = str(int(time.time())) if timestamp_override is None else str(timestamp_override)
+    scopes = frozenset({WRITE})
     signature = SignedWebhookVerifier(SECRET).sign(raw, timestamp, tenant_id=TENANT,
-        product_id=PRODUCT, workforce_tenant_id=WORKFORCE_TENANT)
+        product_id=PRODUCT, workforce_tenant_id=WORKFORCE_TENANT, scopes=scopes)
     return raw, {"X-RunGrow-Signature":signature_override or signature,
         "X-RunGrow-Timestamp":timestamp,"X-RunGrow-External-Tenant-Id":TENANT,
         "X-RunGrow-Tenant-ID":WORKFORCE_TENANT,
-        "X-RunGrow-Product-ID":PRODUCT,"X-Correlation-ID":"corr-webhook-001",
-        "Idempotency-Key":key}
+        "X-RunGrow-Product-ID":PRODUCT,"X-RunGrow-Scopes":WRITE,
+        "X-Correlation-ID":"corr-webhook-001","Idempotency-Key":key}
 
 
 @pytest.mark.asyncio
