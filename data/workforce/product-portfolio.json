@@ -71,9 +71,11 @@
       "commercial_validation": "pending",
       "pricing_validation": "pending",
       "owner_role_id": "pgm-clinics-counter",
-      "source_repositories": [],
+      "source_repositories": [
+        "madhupadishala/conversion-agent-platform"
+      ],
       "design_reference_repositories": [],
-      "repository_discovery_status": "no RunGrow source repository verified yet"
+      "integration_status": "LIVE_BACKEND_WIRED"
     },
     {
       "product_id": "entrepreneur-instagram-tools",
