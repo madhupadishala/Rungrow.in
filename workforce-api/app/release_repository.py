@@ -74,6 +74,24 @@ class ReleaseRepositoryMixin:
             raise ValueError("A full immutable Git commit SHA is required for release signoff")
         if not environment or not environment.strip():
             raise ValueError("Release environment is required")
+        if cohort_id not in {"portfolio","flagship-production","portfolio-expansion"}:
+            raise ValueError("Invalid release cohort")
+        if not scope_key or len(scope_key)>200:
+            raise ValueError("Release signoff scope key is required")
+        if status=="DEFERRED_WITH_ACCEPTANCE":
+            if release_layer!="RELEASE_2_PRODUCTS" or gate_name not in {"INTEGRATION","BUSINESS"}:
+                raise ValueError("Only product integration/business risks may be deferred; shared security and reliability gates are non-waivable")
+            required=("product_id","accepted_risk","owner","due_date","compensating_control","cohort_id")
+            if any(not isinstance(evidence.get(key),str) or not evidence[key].strip() for key in required):
+                raise ValueError("Product deferral requires product_id, accepted_risk, owner, due_date, compensating_control and cohort_id")
+            if evidence.get("cohort_id")!="portfolio-expansion" or cohort_id!="portfolio-expansion":
+                raise ValueError("Product deferrals must be recorded in portfolio-expansion cohort")
+            if evidence["product_id"] not in {"photo-studio-billing","entrepreneur-instagram-tools","pharma-software-utilities","artists-business-tools","growtoys"}:
+                raise ValueError("The flagship production products cannot be deferred")
+            if evidence["product_id"]=="growtoys" and evidence.get("governance_mode")!="DISCOVERY_ONLY":
+                raise ValueError("Growtoys deferral must preserve DISCOVERY_ONLY governance")
+            if evidence["product_id"]!="growtoys" and evidence.get("repository_status")!="NO_REPO_YET":
+                raise ValueError("Only NO_REPO_YET products may use product integration deferral")
         if not cohort_id or len(cohort_id) > 80 or not scope_key or len(scope_key) > 160:
             raise ValueError("Release cohort and scope key are required")
         if status == "DEFERRED_WITH_ACCEPTANCE":
