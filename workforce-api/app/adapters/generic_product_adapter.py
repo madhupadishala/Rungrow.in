@@ -58,14 +58,18 @@ class GenericProductAdapter:
         self.commercial_stage = commercial_stage
 
     def sign(self, body: bytes, timestamp: int | str, *, external_tenant_id: str,
-             workforce_tenant_id: str) -> str:
+             workforce_tenant_id: str, scopes: frozenset[str] | set[str] | tuple[str, ...] = ()) -> str:
         if not self.service_secret:
             raise AdapterGovernanceError("Product webhook secret is not configured", 503)
-        binding = ".".join((str(timestamp), external_tenant_id, workforce_tenant_id, self.product_id)).encode()
-        return "sha256=" + hmac.new(self.service_secret, binding + b"." + body, hashlib.sha256).hexdigest()
+        canonical_scopes = ",".join(sorted(set(scopes)))
+        body_digest = hashlib.sha256(body).hexdigest()
+        binding = ".".join((str(timestamp), self.product_id, workforce_tenant_id,
+                            external_tenant_id, canonical_scopes, body_digest)).encode("utf-8")
+        return "sha256=" + hmac.new(self.service_secret, binding, hashlib.sha256).hexdigest()
 
     def verify(self, body: bytes, signature: str | None, timestamp: str | None, *,
-               external_tenant_id: str, workforce_tenant_id: str, now: float | None = None):
+               external_tenant_id: str, workforce_tenant_id: str,
+               scopes: frozenset[str] | set[str] | tuple[str, ...] = (), now: float | None = None):
         if not signature or not timestamp:
             raise AdapterGovernanceError("Webhook signature and timestamp are required", 401)
         try:
@@ -75,7 +79,7 @@ class GenericProductAdapter:
         if abs((time.time() if now is None else now) - issued) > 300:
             raise AdapterGovernanceError("Webhook timestamp outside replay window", 401)
         expected = self.sign(body, issued, external_tenant_id=external_tenant_id,
-                             workforce_tenant_id=workforce_tenant_id)
+                             workforce_tenant_id=workforce_tenant_id, scopes=scopes)
         supplied = signature if signature.startswith("sha256=") else "sha256=" + signature
         if not hmac.compare_digest(expected, supplied):
             raise AdapterGovernanceError("Invalid webhook signature", 401)
@@ -141,9 +145,10 @@ class GenericProductAdapter:
 
     async def handle_webhook(self, *, raw_body: bytes, signature: str | None, timestamp: str | None,
                              external_tenant_id: str, workforce_tenant_id: str,
+                             scopes: frozenset[str] | set[str] | tuple[str, ...],
                              idempotency_key: str, correlation_id: str, repository) -> dict[str, Any]:
         self.verify(raw_body, signature, timestamp, external_tenant_id=external_tenant_id,
-                    workforce_tenant_id=workforce_tenant_id)
+                    workforce_tenant_id=workforce_tenant_id, scopes=scopes)
         try:
             payload = json.loads(raw_body)
         except (ValueError, TypeError) as exc:
@@ -155,6 +160,16 @@ class GenericProductAdapter:
         event = payload.get("event")
         if not isinstance(event, dict) or not event.get("event_id") or not event.get("event_type"):
             raise ValueError("Webhook event_id and event_type are required")
+        event_type = str(event["event_type"])
+        revenue = event.get("recognised_revenue_inr", 0)
+        if event_type not in {"invoice_recognised", "invoice.recognised", "invoice.recognized"}:
+            revenue = 0
+        try:
+            revenue = float(revenue)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("recognised_revenue_inr must be numeric") from exc
+        if revenue < 0:
+            raise ValueError("recognised_revenue_inr cannot be negative")
         store = IdempotencyStore(repository)
         claim = await store.begin(tenant_id=workforce_tenant_id, external_tenant_id=external_tenant_id,
             product_id=self.product_id, direction="inbound", key=idempotency_key,
@@ -166,7 +181,7 @@ class GenericProductAdapter:
         await repository.record_product_telemetry(tenant_id=workforce_tenant_id,
             external_tenant_id=external_tenant_id, product_id=self.product_id,
             event={"event_id": str(event["event_id"]), "event_type": str(event["event_type"]),
-                   "recognised_revenue_inr": event.get("recognised_revenue_inr", 0),
+                   "recognised_revenue_inr": revenue,
                    "metadata": event.get("metadata") or {}, "source_ref": event.get("source_ref")},
             correlation_id=correlation_id)
         response = {"status": "ACCEPTED", "product_id": self.product_id,
