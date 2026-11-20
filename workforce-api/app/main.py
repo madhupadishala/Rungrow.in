@@ -341,6 +341,7 @@ async def photo_studio_growth_os_webhook(
     tenant_header: str | None = Header(default=None, alias="X-RunGrow-External-Tenant-Id"),
     product_header: str | None = Header(default=None, alias="X-RunGrow-Product-ID"),
     org_header: str | None = Header(default=None, alias="X-RunGrow-Tenant-ID"),
+    scopes_header: str | None = Header(default=None, alias="X-RunGrow-Scopes"),
     correlation_id: str | None = Header(default=None, alias="X-Correlation-ID"),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
@@ -364,17 +365,21 @@ async def photo_studio_growth_os_webhook(
         raise HTTPException(400, "A valid X-Correlation-ID is required")
     if not idempotency_key:
         raise HTTPException(400, "Idempotency-Key is required")
+    scopes = (scopes_header or "").split(",")
+    scopes = [scope.strip() for scope in scopes if scope.strip()]
+    if not scopes or scopes != sorted(set(scopes)) or "photo-studio-growth-os:write" not in scopes:
+        raise HTTPException(403, "Sorted photo-studio-growth-os:write scope is required")
     secret = os.getenv("STUDIO_GROWTH_OS_SERVICE_SECRET", "")
     if not secret:
         raise HTTPException(503, "STUDIO_GROWTH_OS_SERVICE_SECRET is not configured")
     try:
         SignedWebhookVerifier(secret).verify(raw, signature, timestamp,
             tenant_id=tenant_id, product_id=product_id,
-            workforce_tenant_id=internal_tenant_id)
+            workforce_tenant_id=internal_tenant_id, scopes=frozenset(scopes))
         adapter = PhotoStudioGrowthOSAdapter(service_secret=secret)
         return await adapter.handle_webhook(body=raw, signature=signature, timestamp=timestamp,
             tenant_id=tenant_id, product_id=product_id, idempotency_key=idempotency_key,
-            correlation_id=correlation_id, repository=repo)
+            correlation_id=correlation_id, repository=repo, scopes=frozenset(scopes))
     except PermissionError as exc:
         raise HTTPException(401, str(exc)) from exc
     except ValueError as exc:
