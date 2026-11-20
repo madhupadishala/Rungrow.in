@@ -87,7 +87,7 @@ services:
       - key: WORKFORCE_WORKER_ID
         value: rungrow-workforce-worker
       - key: WORKFORCE_WORKER_PRODUCT_IDS
-        value: photo-studio-growth-os,photo-studio-billing,clinics-counter,entrepreneur-instagram-tools,pharma-software-utilities,artists-business-tools,growtoys
+        value: photo-studio-growth-os,clinics-counter
       - key: WORKFORCE_WORKER_SCOPES
         value: work.assign,agent.run
       - key: STUDIO_GROWTH_OS_API_URL
