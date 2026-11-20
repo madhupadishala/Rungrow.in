@@ -868,7 +868,7 @@ class ReleaseSignoffRequest(BaseModel):
     candidate_sha: str | None = None
     environment: str = "production"
     cohort_id: str = "portfolio"
-    scope_key: str = "cohort"
+    scope_key: str = "gate"
 
 
 @app.get("/v1/release/readiness")
