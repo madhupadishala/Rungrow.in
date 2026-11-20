@@ -1,0 +1,48 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS citext;
+CREATE TABLE tenants(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),name text NOT NULL,status text NOT NULL DEFAULT 'active',created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE users(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),email citext UNIQUE NOT NULL,display_name text NOT NULL,password_hash text,identity_provider text NOT NULL DEFAULT 'oidc',status text NOT NULL DEFAULT 'invited',created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE tenant_memberships(tenant_id uuid NOT NULL REFERENCES tenants(id),user_id uuid NOT NULL REFERENCES users(id),role_key text NOT NULL,status text NOT NULL DEFAULT 'active',PRIMARY KEY(tenant_id,user_id));
+CREATE TABLE role_permissions(role_key text NOT NULL,permission_key text NOT NULL,PRIMARY KEY(role_key,permission_key));
+CREATE TABLE workforce_employees(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),tenant_id uuid NOT NULL REFERENCES tenants(id),role_id text NOT NULL,display_name text NOT NULL,employee_type text NOT NULL CHECK(employee_type IN('ai','human')),manager_role_id text,status text NOT NULL DEFAULT 'active',skill_profile jsonb NOT NULL DEFAULT '{}',permission_profile jsonb NOT NULL DEFAULT '[]',created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(tenant_id,role_id,display_name));
+CREATE TABLE workforce_tasks(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),tenant_id uuid NOT NULL REFERENCES tenants(id),title text NOT NULL,description text NOT NULL DEFAULT '',assignee_employee_id uuid REFERENCES workforce_employees(id),status text NOT NULL DEFAULT 'queued',priority text NOT NULL DEFAULT 'normal',idempotency_key text,due_at timestamptz,created_by uuid REFERENCES users(id),created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(tenant_id,idempotency_key));
+CREATE TABLE agent_runs(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),tenant_id uuid NOT NULL REFERENCES tenants(id),employee_id uuid REFERENCES workforce_employees(id),task_id uuid REFERENCES workforce_tasks(id),status text NOT NULL DEFAULT 'queued',input_refs jsonb NOT NULL DEFAULT '[]',output_summary jsonb,policy_version text NOT NULL DEFAULT 'controlled-v1',created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE workforce_memory(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),tenant_id uuid NOT NULL REFERENCES tenants(id),department text NOT NULL,role_id text,memory_type text NOT NULL,content_encrypted bytea,source_ref text NOT NULL,confidence numeric(4,3),retention_until timestamptz,created_by uuid REFERENCES users(id),created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE approvals(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),tenant_id uuid NOT NULL REFERENCES tenants(id),requested_by uuid NOT NULL REFERENCES users(id),action_key text NOT NULL,resource_type text NOT NULL,resource_id uuid,payload jsonb NOT NULL,status text NOT NULL DEFAULT 'pending',decided_by uuid REFERENCES users(id),decision_reason text,decided_at timestamptz,created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE audit_events(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),tenant_id uuid NOT NULL REFERENCES tenants(id),actor_id uuid,actor_type text NOT NULL CHECK(actor_type IN('human','agent','system')),action_key text NOT NULL,resource_type text NOT NULL,resource_id text NOT NULL,outcome text NOT NULL,detail jsonb NOT NULL DEFAULT '{}',occurred_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX tasks_tenant_status ON workforce_tasks(tenant_id,status);
+CREATE INDEX runs_tenant_status ON agent_runs(tenant_id,status);
+CREATE INDEX memory_scope ON workforce_memory(tenant_id,department,role_id);
+CREATE INDEX approvals_scope ON approvals(tenant_id,status,created_at);
+CREATE INDEX audit_scope ON audit_events(tenant_id,occurred_at DESC);
+ALTER TABLE workforce_tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workforce_memory ENABLE ROW LEVEL SECURITY;
+ALTER TABLE approvals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_tasks ON workforce_tasks USING(tenant_id=NULLIF(current_setting('app.tenant_id',true),'')::uuid) WITH CHECK(tenant_id=NULLIF(current_setting('app.tenant_id',true),'')::uuid);
+CREATE POLICY tenant_runs ON agent_runs USING(tenant_id=NULLIF(current_setting('app.tenant_id',true),'')::uuid) WITH CHECK(tenant_id=NULLIF(current_setting('app.tenant_id',true),'')::uuid);
+CREATE POLICY tenant_memory ON workforce_memory USING(tenant_id=NULLIF(current_setting('app.tenant_id',true),'')::uuid) WITH CHECK(tenant_id=NULLIF(current_setting('app.tenant_id',true),'')::uuid);
+CREATE POLICY tenant_approvals ON approvals USING(tenant_id=NULLIF(current_setting('app.tenant_id',true),'')::uuid) WITH CHECK(tenant_id=NULLIF(current_setting('app.tenant_id',true),'')::uuid);
+CREATE POLICY tenant_audit ON audit_events USING(tenant_id=NULLIF(current_setting('app.tenant_id',true),'')::uuid) WITH CHECK(tenant_id=NULLIF(current_setting('app.tenant_id',true),'')::uuid);
+
+CREATE TABLE outbox_events(
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL REFERENCES tenants(id),
+  event_key text NOT NULL,
+  aggregate_type text NOT NULL,
+  aggregate_id text NOT NULL,
+  payload jsonb NOT NULL,
+  status text NOT NULL DEFAULT 'pending',
+  attempts integer NOT NULL DEFAULT 0,
+  available_at timestamptz NOT NULL DEFAULT now(),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(tenant_id,event_key)
+);
+ALTER TABLE workforce_employees ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE outbox_events ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_employees ON workforce_employees USING(tenant_id=NULLIF(current_setting('app.tenant_id',true),'')::uuid) WITH CHECK(tenant_id=NULLIF(current_setting('app.tenant_id',true),'')::uuid);
+CREATE POLICY tenant_memberships_scope ON tenant_memberships USING(tenant_id=NULLIF(current_setting('app.tenant_id',true),'')::uuid) WITH CHECK(tenant_id=NULLIF(current_setting('app.tenant_id',true),'')::uuid);
+CREATE POLICY tenant_outbox ON outbox_events USING(tenant_id=NULLIF(current_setting('app.tenant_id',true),'')::uuid) WITH CHECK(tenant_id=NULLIF(current_setting('app.tenant_id',true),'')::uuid);
+CREATE INDEX outbox_pending_idx ON outbox_events(status,available_at) WHERE status='pending';
