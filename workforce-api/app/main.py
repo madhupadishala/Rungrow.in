@@ -29,8 +29,13 @@ from .digital_ceo import DigitalCEOService, is_synthetic_event
 from .commercial_intelligence import (CommercialIntelligenceService, RobotsCompliantHttpFetcher, MockDirectoryFetcher, PRODUCT_PLAYBOOKS)
 from .adapters.generic_product_adapter import GENERIC_PRODUCT_IDS, GenericAdapterContext, AdapterGovernanceError
 from .adapters.registry import build_product_adapter_registry
+from .health import router as health_router
+from .rate_limit import RateLimitMiddleware
+from .release_readiness import ReleaseReadinessService
 
-app = FastAPI(title="RunGrow Workforce API", version="0.4.0")
+app = FastAPI(title="RunGrow Workforce API", version="0.5.0")
+app.add_middleware(RateLimitMiddleware)
+app.include_router(health_router)
 app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins,
     allow_credentials=True, allow_methods=["GET","POST"],
     allow_headers=["Authorization","Content-Type","Idempotency-Key","X-RunGrow-Signature","X-RunGrow-Timestamp","X-RunGrow-Tenant-ID","X-RunGrow-External-Tenant-Id","X-RunGrow-Product-ID","X-RunGrow-Org-ID","X-RunGrow-Scopes","X-Correlation-ID"])
@@ -336,6 +341,7 @@ async def photo_studio_growth_os_webhook(
     tenant_header: str | None = Header(default=None, alias="X-RunGrow-External-Tenant-Id"),
     product_header: str | None = Header(default=None, alias="X-RunGrow-Product-ID"),
     org_header: str | None = Header(default=None, alias="X-RunGrow-Tenant-ID"),
+    scopes_header: str | None = Header(default=None, alias="X-RunGrow-Scopes"),
     correlation_id: str | None = Header(default=None, alias="X-Correlation-ID"),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
@@ -359,17 +365,21 @@ async def photo_studio_growth_os_webhook(
         raise HTTPException(400, "A valid X-Correlation-ID is required")
     if not idempotency_key:
         raise HTTPException(400, "Idempotency-Key is required")
+    scopes = (scopes_header or "").split(",")
+    scopes = [scope.strip() for scope in scopes if scope.strip()]
+    if not scopes or scopes != sorted(set(scopes)) or "photo-studio-growth-os:write" not in scopes:
+        raise HTTPException(403, "Sorted photo-studio-growth-os:write scope is required")
     secret = os.getenv("STUDIO_GROWTH_OS_SERVICE_SECRET", "")
     if not secret:
         raise HTTPException(503, "STUDIO_GROWTH_OS_SERVICE_SECRET is not configured")
     try:
         SignedWebhookVerifier(secret).verify(raw, signature, timestamp,
             tenant_id=tenant_id, product_id=product_id,
-            workforce_tenant_id=internal_tenant_id)
+            workforce_tenant_id=internal_tenant_id, scopes=frozenset(scopes))
         adapter = PhotoStudioGrowthOSAdapter(service_secret=secret)
         return await adapter.handle_webhook(body=raw, signature=signature, timestamp=timestamp,
             tenant_id=tenant_id, product_id=product_id, idempotency_key=idempotency_key,
-            correlation_id=correlation_id, repository=repo)
+            correlation_id=correlation_id, repository=repo, scopes=frozenset(scopes))
     except PermissionError as exc:
         raise HTTPException(401, str(exc)) from exc
     except ValueError as exc:
@@ -379,15 +389,15 @@ async def photo_studio_growth_os_webhook(
 
 async def get_generic_adapter_repo(
     product_id: str,
-    tenant_id: str = Header(..., alias="X-RunGrow-Tenant-ID"),
-    org_id: str = Header(..., alias="X-RunGrow-Org-ID"),
+    external_tenant_id: str = Header(..., alias="X-RunGrow-External-Tenant-Id"),
+    workforce_tenant_id: str = Header(..., alias="X-RunGrow-Tenant-ID"),
 ):
     if product_id not in GENERIC_PRODUCT_IDS:
         raise HTTPException(404, "Unknown generic adapter product")
     internal_tenant_id = os.getenv("RUNGROW_INTERNAL_TENANT_ID", "")
     if not internal_tenant_id:
         raise HTTPException(503, "RUNGROW_INTERNAL_TENANT_ID is required for adapter isolation")
-    if org_id != internal_tenant_id or tenant_id == internal_tenant_id:
+    if workforce_tenant_id != internal_tenant_id or external_tenant_id == internal_tenant_id:
         raise HTTPException(403, "External product tenant and internal Workforce tenant must be distinct")
     if not settings.database_url:
         raise HTTPException(503, "DATABASE_URL is required for durable adapter telemetry")
@@ -407,25 +417,31 @@ async def generic_product_webhook(
     repo: WorkforceRepositoryProtocol = Depends(get_generic_adapter_repo),
     signature: str | None = Header(default=None, alias="X-RunGrow-Signature"),
     timestamp: str | None = Header(default=None, alias="X-RunGrow-Timestamp"),
-    tenant_header: str | None = Header(default=None, alias="X-RunGrow-Tenant-ID"),
+    external_tenant_header: str | None = Header(default=None, alias="X-RunGrow-External-Tenant-Id"),
+    workforce_tenant_header: str | None = Header(default=None, alias="X-RunGrow-Tenant-ID"),
     product_header: str | None = Header(default=None, alias="X-RunGrow-Product-ID"),
-    org_header: str | None = Header(default=None, alias="X-RunGrow-Org-ID"),
+    scopes_header: str | None = Header(default=None, alias="X-RunGrow-Scopes"),
     correlation_id: str | None = Header(default=None, alias="X-Correlation-ID"),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     if product_header != product_id:
         raise HTTPException(403, "Webhook product binding mismatch")
-    if not tenant_header or not correlation_id or len(correlation_id) > 128 or not idempotency_key:
-        raise HTTPException(400, "Tenant, correlation and idempotency headers are required")
+    if not external_tenant_header or not correlation_id or len(correlation_id) > 128 or not idempotency_key:
+        raise HTTPException(400, "External tenant, correlation and idempotency headers are required")
     internal_tenant_id = os.getenv("RUNGROW_INTERNAL_TENANT_ID", "")
-    if not internal_tenant_id or org_header != internal_tenant_id or tenant_header == internal_tenant_id:
-        raise HTTPException(403, "Webhook tenant/org binding mismatch")
+    if not internal_tenant_id or workforce_tenant_header != internal_tenant_id or external_tenant_header == internal_tenant_id:
+        raise HTTPException(403, "Webhook external/internal tenant binding mismatch")
+    scopes = (scopes_header or "").split(",")
+    scopes = [scope.strip() for scope in scopes if scope.strip()]
+    if not scopes or scopes != sorted(set(scopes)) or f"{product_id}:write" not in scopes:
+        raise HTTPException(403, "Sorted product write scope is required")
     raw = await request.body()
     adapter = PRODUCT_ADAPTERS.get(product_id)
     try:
         return await adapter.handle_webhook(raw_body=raw, signature=signature, timestamp=timestamp,
-            external_tenant_id=tenant_header, workforce_tenant_id=internal_tenant_id,
-            idempotency_key=idempotency_key, correlation_id=correlation_id, repository=repo)
+            external_tenant_id=external_tenant_header, workforce_tenant_id=internal_tenant_id,
+            scopes=frozenset(scopes), idempotency_key=idempotency_key,
+            correlation_id=correlation_id, repository=repo)
     except AdapterGovernanceError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
     except PermissionError as exc:
@@ -842,3 +858,96 @@ async def request_investment_approval(body: InvestmentApprovalRequest,
                 "event_type":body.event_type,"execution":"not_started"}
     except Exception as exc:
         translate_repo_error(exc)
+
+
+class ReleaseSignoffRequest(BaseModel):
+    release_layer: str
+    gate_name: str
+    status: str
+    evidence: dict
+    candidate_sha: str | None = None
+    environment: str = "production"
+    cohort_id: str = "portfolio"
+    scope_key: str = "cohort"
+
+
+@app.get("/v1/release/readiness")
+async def release_readiness(
+    cohort: str = "portfolio",
+    p: Principal = Depends(require_permission("workforce.read")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo),
+):
+    try:
+        return await ReleaseReadinessService(repo, adapter_registry=PRODUCT_ADAPTERS).evaluate(cohort=cohort)
+    except Exception as exc:
+        translate_repo_error(exc)
+
+
+@app.post("/v1/release/signoffs")
+async def record_release_signoff(
+    body: ReleaseSignoffRequest,
+    p: Principal = Depends(require_permission("release.approve")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo),
+):
+    verifier_type = "AUTOMATED" if getattr(p, "actor_type", "human") == "service" else "HUMAN"
+    try:
+        return await repo.record_release_gate_signoff(
+            release_layer=body.release_layer, gate_name=body.gate_name,
+            status=body.status, evidence=body.evidence, verifier_type=verifier_type,
+            verifier_id=p.user_id, candidate_sha=body.candidate_sha,
+            environment=body.environment, cohort_id=body.cohort_id, scope_key=body.scope_key,
+        )
+    except Exception as exc:
+        translate_repo_error(exc)
+
+
+class CommunicationSendRequest(BaseModel):
+    run_id: str = Field(min_length=2, max_length=100)
+    to: str = Field(min_length=3, max_length=320)
+    message: str = Field(min_length=1, max_length=10000)
+    approval_id: str | None = None
+
+class EmailSendRequest(CommunicationSendRequest):
+    subject: str = Field(min_length=1, max_length=240)
+
+
+async def _execute_governed_communication(channel: str, body, principal: Principal, repo):
+    from .communications import IntegrationNotConfiguredError, TransactionalEmailGateway, WhatsAppCloudGateway
+    run=await repo.get_agent_run(body.run_id)
+    if not run:
+        raise HTTPException(404,"Agent run not found in this tenant")
+    authorize_product_access(principal,run.get("product_id"))
+    employee=BY_ID.get(run.get("employee_id"))
+    if employee is None:
+        raise HTTPException(403,"Agent role is unavailable")
+    payload={"to":body.to,"message":body.message}
+    if channel=="email":
+        payload["subject"]=body.subject
+        gateway=TransactionalEmailGateway(repo)
+    else:
+        gateway=WhatsAppCloudGateway(repo)
+    try:
+        return await gateway.send(principal=principal,employee=employee,run=run,
+            payload=payload,approval_id=body.approval_id)
+    except IntegrationNotConfiguredError as exc:
+        raise HTTPException(503,str(exc)) from exc
+    except ApprovalBoundaryError as exc:
+        raise HTTPException(exc.status_code,{"detail":str(exc),"approval_id":exc.approval_id}) from exc
+    except SandboxViolation as exc:
+        raise HTTPException(403,str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403,str(exc)) from exc
+
+
+@app.post("/v1/communications/whatsapp/send")
+async def send_governed_whatsapp(body: CommunicationSendRequest,
+    p: Principal=Depends(require_permission("communication.send")),
+    repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    return await _execute_governed_communication("whatsapp",body,p,repo)
+
+
+@app.post("/v1/communications/email/send")
+async def send_governed_email(body: EmailSendRequest,
+    p: Principal=Depends(require_permission("communication.send")),
+    repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    return await _execute_governed_communication("email",body,p,repo)

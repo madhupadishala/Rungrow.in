@@ -6,8 +6,8 @@ OWNER="${PGUSER:-rungrow_migrator}"
 APP_USER="rungrow_app_user"
 APP_PASSWORD="${RUNGROW_APP_PASSWORD:-rungrow_app_local_only}"
 COMPOSE=(docker compose -f "$ROOT/docker-compose.test.yml")
-if [[ ! -f "$ROOT/migrations/007_commercial_intelligence_and_portfolio.sql" ]]; then
-  echo "Required migration 007_commercial_intelligence_and_portfolio.sql is missing" >&2
+if [[ ! -f "$ROOT/migrations/009_production_bootstrap_and_cohort_readiness.sql" ]]; then
+  echo "Required migration 009_production_bootstrap_and_cohort_readiness.sql is missing" >&2
   exit 1
 fi
 ready=false
@@ -49,10 +49,13 @@ GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO $APP_USER;
 GRANT SELECT, INSERT, UPDATE ON TABLE prospect_records, campaign_plans TO $APP_USER;
 REVOKE DELETE, TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA public FROM $APP_USER;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO $APP_USER;
+GRANT SELECT, INSERT, DELETE ON rate_limit_events TO $APP_USER;
+GRANT SELECT, INSERT ON release_gate_signoffs TO $APP_USER;
+REVOKE UPDATE, DELETE, TRUNCATE ON release_gate_signoffs FROM $APP_USER;
 ALTER DEFAULT PRIVILEGES FOR ROLE $OWNER IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE ON TABLES TO $APP_USER;
 ALTER DEFAULT PRIVILEGES FOR ROLE $OWNER IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO $APP_USER;
 SQL
-echo "Checksum-verified migrations 001_initial_workforce_schema and 002..007 applied. App role: $APP_USER (NOSUPERUSER NOCREATEDB NOCREATEROLE)."
+echo "Checksum-verified migrations 001_initial_workforce_schema and 002..009 applied. App role: $APP_USER (NOSUPERUSER NOCREATEDB NOCREATEROLE)."
 echo "RUNGROW_TEST_DATABASE_URL=postgresql+asyncpg://$APP_USER:$APP_PASSWORD@localhost:55432/$DB"

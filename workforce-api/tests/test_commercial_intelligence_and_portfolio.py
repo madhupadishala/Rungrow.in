@@ -197,14 +197,15 @@ async def test_generic_v1_webhook_is_hmac_signed_and_idempotent():
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     timestamp = str(int(time.time()))
+    scopes = frozenset({"clinics-counter:write"})
     signature = adapter.sign(raw, timestamp, external_tenant_id="external-clinic-tenant",
-                              workforce_tenant_id="workforce-tenant")
+                              workforce_tenant_id="workforce-tenant", scopes=scopes)
     first = await adapter.handle_webhook(raw_body=raw, signature=signature, timestamp=timestamp,
         external_tenant_id="external-clinic-tenant", workforce_tenant_id="workforce-tenant",
-        idempotency_key="webhook-once", correlation_id="corr-1", repository=repo)
+        scopes=scopes, idempotency_key="webhook-once", correlation_id="corr-1", repository=repo)
     replay = await adapter.handle_webhook(raw_body=raw, signature=signature, timestamp=timestamp,
         external_tenant_id="external-clinic-tenant", workforce_tenant_id="workforce-tenant",
-        idempotency_key="webhook-once", correlation_id="corr-1", repository=repo)
+        scopes=scopes, idempotency_key="webhook-once", correlation_id="corr-1", repository=repo)
     events = await repo.list_product_telemetry()
     assert first["status"] == "ACCEPTED"
     assert replay["replayed"] is True

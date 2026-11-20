@@ -90,7 +90,7 @@ async def apply_migrations(connection, directory: Path = MIGRATIONS_DIR) -> list
 
 
 async def run(database_url: str | None = None) -> list[str]:
-    dsn, ssl = asyncpg_dsn(database_url or os.getenv("DATABASE_URL", ""))
+    dsn, ssl = asyncpg_dsn(database_url or os.getenv("MIGRATION_DATABASE_URL") or os.getenv("DATABASE_URL", ""))
     connection = await asyncpg.connect(dsn=dsn, ssl=ssl)
     locked = False
     try:

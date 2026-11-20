@@ -184,12 +184,12 @@ class PhotoStudioGrowthOSAdapter:
             principal=principal,employee=employee,run=run,payload=payload,approval_id=approval_id)
 
     async def handle_webhook(self, *, body, signature, timestamp, tenant_id, product_id,
-                             idempotency_key, correlation_id, repository):
+                             idempotency_key, correlation_id, repository, scopes=()):
         if not self.verifier: raise RuntimeError("STUDIO_GROWTH_OS_SERVICE_SECRET is required")
         payload = json.loads(body)
         workforce_tenant_id = payload.get("workforce_tenant_id")
         self.verifier.verify(body, signature, timestamp, tenant_id=tenant_id,
-            product_id=product_id, workforce_tenant_id=workforce_tenant_id)
+            product_id=product_id, workforce_tenant_id=workforce_tenant_id, scopes=scopes)
         if payload.get("tenant_id") != tenant_id or payload.get("product_id") != self.product_id:
             raise PermissionError("Webhook tenant/product binding mismatch")
         workforce_tenant_id = payload.get("workforce_tenant_id")
@@ -199,15 +199,15 @@ class PhotoStudioGrowthOSAdapter:
             raise PermissionError("Webhook external tenant is not mapped to Workforce organization")
         event_id = str(payload.get("event_id") or idempotency_key)
         event_type = payload.get("event_type")
-        allowed = {"studio_tenant_onboarded","trial_started","lead_converted","booking_confirmed",
-                   "invoice_recognised","churn_risk_flagged"}
-        if event_type not in allowed: raise ValueError("Unsupported product telemetry event type")
+        if not isinstance(event_type, str) or not event_type or len(event_type) > 100:
+            raise ValueError("A valid product lifecycle event_type is required")
         try:
             revenue = Decimal(str(payload.get("recognised_revenue_inr",0) or 0))
         except (InvalidOperation, ValueError) as exc:
             raise ValueError("Recognised revenue must be a valid INR amount") from exc
-        if not revenue.is_finite() or revenue < 0 or (event_type != "invoice_recognised" and revenue != 0):
-            raise ValueError("Recognised revenue is allowed only on invoice_recognised events")
+        recognised_invoice = event_type in {"invoice_recognised", "invoice.recognised", "invoice.recognized"}
+        if not revenue.is_finite() or revenue < 0 or (not recognised_invoice and revenue != 0):
+            raise ValueError("Recognised revenue is allowed only on recognised invoice events")
         occurred_at = payload.get("occurred_at")
         if isinstance(occurred_at, str):
             try:
