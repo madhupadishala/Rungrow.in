@@ -42,8 +42,8 @@ async def bootstrap(database_url: str | None = None) -> dict:
     tenant_id = os.getenv("RUNGROW_INTERNAL_TENANT_ID", TENANT_ID).strip()
     candidate = os.getenv(CANDIDATE_SHA_ENV, "").strip().lower()
     environment = os.getenv("APP_ENV", "production").strip().lower()
-    if tenant_id != TENANT_ID:
-        raise RuntimeError("Primary tenant binding must be 'rungrow'; update RUNGROW_INTERNAL_TENANT_ID")
+    if not tenant_id:
+        raise RuntimeError("RUNGROW_INTERNAL_TENANT_ID is required; the tenant slug is fixed as rungrow")
     if not re.fullmatch(r"[0-9a-f]{40,64}", candidate):
         raise RuntimeError(f"{CANDIDATE_SHA_ENV} must contain the immutable 40–64 character release commit SHA")
     if environment != "production":
@@ -77,25 +77,27 @@ async def bootstrap(database_url: str | None = None) -> dict:
                 integration_status = "LIVE_BACKEND_WIRED" if live else ("DISCOVERY_ONLY" if discovery else "NO_REPO_YET")
                 governance_mode = "LIVE" if live else ("DISCOVERY_ONLY" if discovery else "DEFERRED")
                 repositories = REPOSITORIES.get(product_id, [])
-                await connection.execute(
-                    """INSERT INTO wf_product_bindings
-                       (tenant_id,product_id,adapter_repository,adapter_branch,integration_status,
-                        governance_mode,is_active,metadata)
-                       VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
-                       ON CONFLICT(tenant_id,product_id) DO UPDATE SET
-                         adapter_repository=EXCLUDED.adapter_repository,
-                         adapter_branch=EXCLUDED.adapter_branch,
-                         integration_status=EXCLUDED.integration_status,
-                         governance_mode=EXCLUDED.governance_mode,
-                         is_active=EXCLUDED.is_active,metadata=EXCLUDED.metadata,updated_at=now()""",
-                    tenant_id, product_id, repositories[0] if repositories else None,
-                    "feat/rungrow-workforce-adapter-v1" if live else None,
-                    integration_status, governance_mode, live,
-                    json.dumps({"source_repositories": repositories, "adapter_version": "v1",
-                                "live_handoff_allowed": not discovery and live,
-                                "live_outreach_allowed": not discovery and live,
-                                "http_block_status": 403 if discovery else None}),
-                )
+                if live or discovery:
+                    await connection.execute(
+                        """INSERT INTO wf_product_bindings
+                           (tenant_id,product_id,adapter_repository,adapter_branch,integration_status,
+                            governance_mode,is_active,metadata)
+                           VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+                           ON CONFLICT(tenant_id,product_id) DO UPDATE SET
+                             adapter_repository=EXCLUDED.adapter_repository,
+                             adapter_branch=EXCLUDED.adapter_branch,
+                             integration_status=EXCLUDED.integration_status,
+                             governance_mode=EXCLUDED.governance_mode,
+                             is_active=EXCLUDED.is_active,metadata=EXCLUDED.metadata,updated_at=now()""",
+                        tenant_id, product_id, repositories[0] if repositories else None,
+                        "feat/rungrow-workforce-adapter-v1" if live else None,
+                        integration_status, governance_mode, live,
+                        json.dumps({"source_repositories": repositories, "adapter_version": "v1",
+                                    "governance_mode": governance_mode,
+                                    "live_handoff_allowed": live,
+                                    "live_outreach_allowed": live,
+                                    "http_block_status": 403 if discovery else None}),
+                    )
                 revenue_allocation = int(product["annual_revenue_allocation"])
                 capital_allocation = (capital_target * revenue_allocation) // revenue_target
                 await connection.execute(
@@ -159,7 +161,8 @@ async def bootstrap(database_url: str | None = None) -> dict:
             return {
                 "tenant_id": tenant_id, "tenant_slug": "rungrow", "name": "RunGrow",
                 "live_products": sorted(REPOSITORIES), "deferred_products": sorted(DEFERRED_RISK),
-                "product_bindings": counts["bindings"], "financial_baselines": counts["baselines"],
+                "discovery_only": ["growtoys"], "product_bindings": counts["bindings"],
+                "financial_baselines": counts["baselines"], "product_allocations": counts["baselines"],
                 "deferred_signoffs": counts["deferred"], "is_provisional": True,
                 "recognised_revenue_inr": 0, "raised_capital_inr": 0,
                 "revenue_target_inr": revenue_target, "capital_target_inr": capital_target,
