@@ -3,7 +3,7 @@
 ## Approved decisions
 - Controlled autonomy: AI employees operate within least-privilege role permissions. High-impact actions require explicit human approval.
 - Voice and text: both resolve to the same authenticated command and task APIs.
-- All departments: 11 departments, 42 role profiles, with AI and human employees sharing reporting lines and task ownership.
+- All departments: 11 departments, 50 role profiles after adding the Digital CEO and seven product growth managers, with AI and human employees sharing reporting lines and task ownership.
 - AI identity is disclosed where relevant. Agents never impersonate human employees.
 
 ## Boundaries
@@ -11,7 +11,7 @@
 - /workforce/ is the operator command centre with isolated styles and scripts.
 - workforce-api/ is an independent service boundary for JWT authentication, role registry, authorization, approvals, memory contracts and audit events.
 - PostgreSQL is the durable source of truth. migrations/001_workforce.sql defines tenant-scoped tables and row-level policies.
-- LiveKit Agents is the voice runtime; Crawlee is the public-source research adapter. AgentSDR, OpenCloser and OpenOutreach are reference patterns, not copied applications.
+- LiveKit Agents is the voice runtime; Crawlee is the public-source research adapter. AgentSDR is an MIT-licensed reference candidate. OpenOutreach is GPL-3.0 and reference-only pending legal review; do not copy its code into the proprietary product by default. OpenCloser v2 remains unverified until its canonical repository and license are confirmed.
 
 ## Employee contract
 Each employee has a stable role ID, department, manager, mission, skills, tool scopes, approval boundary and memory scope. Agent runs receive a task and explicit context references. Natural-language prompts cannot grant permissions or borrow another employee's identity.
@@ -36,3 +36,10 @@ The UI, role catalogue, API contract, local command router, JWT validation, poli
 
 ## Voice and research adapters
 The operator interface supports browser speech recognition (en-IN) and speech synthesis for spoken responses, using the same command endpoint as text. The API host and token supplier are injected at runtime through RUN_GROW_WORKFORCE_API and RUN_GROW_WORKFORCE_GET_TOKEN; tokens are never persisted in local storage. LiveKit Agents (Apache-2.0) is the selected production realtime voice/telephony runtime. The Crawlee (Apache-2.0) adapter accepts tenant-approved host allowlists, respects robots.txt, limits concurrency and marks all discovered contact details as not-consented.
+
+
+## Company operating hierarchy
+The Digital CEO reports to the Founder and coordinates shared corporate functions. Seven product-specific Product Growth Managers report to the Digital CEO, one per registered product. Product managers own commercial outcomes for their assigned product but do not receive authority to change pricing, bind the company, initiate payments or activate unapproved outbound campaigns. The Founder retains reserved decisions.
+
+## Reuse standard
+All new engineering follows `docs/REPOSITORY-REUSE-AND-INTEGRATION-STANDARD.md`: inspect existing RunGrow repositories and approved upstream sources first, reuse bounded capabilities, pin exact commits, verify licenses and isolate adapters. Do not rebuild an existing product without evidence.

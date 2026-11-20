@@ -1,0 +1,68 @@
+services:
+  - type: web
+    name: rungrow-workforce-api
+    runtime: docker
+    dockerfilePath: ./workforce-api/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    preDeployCommand: python -m app.migrate
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_ISSUER
+        value: https://rungrow.in
+      - key: JWT_AUDIENCE
+        value: rungrow-workforce-api
+      - key: JWT_JWKS_URL
+        sync: false
+      - key: STUDIO_GROWTH_OS_SERVICE_SECRET
+        sync: false
+      - key: RUNGROW_ADAPTER_WEBHOOK_SECRET
+        sync: false
+      - key: RUNGROW_INTERNAL_TENANT_ID
+        sync: false
+      - key: WORKFORCE_MODEL_PROVIDER
+        value: openai-compatible
+      - key: WORKFORCE_PRIMARY_MODEL
+        value: gpt-4o-mini
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: STUDIO_GROWTH_OS_TENANT_MAP
+        sync: false
+      - key: STUDIO_GROWTH_OS_TENANT_SERVICE_TOKENS
+        sync: false
+  - type: worker
+    name: rungrow-workforce-worker
+    runtime: docker
+    dockerfilePath: ./workforce-api/Dockerfile
+    dockerContext: .
+    dockerCommand: python -m app.worker
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_ISSUER
+        value: https://rungrow.in
+      - key: JWT_AUDIENCE
+        value: rungrow-workforce-api
+      - key: JWT_JWKS_URL
+        sync: false
+      - key: STUDIO_GROWTH_OS_SERVICE_SECRET
+        sync: false
+      - key: RUNGROW_ADAPTER_WEBHOOK_SECRET
+        sync: false
+      - key: RUNGROW_INTERNAL_TENANT_ID
+        sync: false
+      - key: WORKFORCE_MODEL_PROVIDER
+        value: openai-compatible
+      - key: WORKFORCE_PRIMARY_MODEL
+        value: gpt-4o-mini
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: WORKFORCE_WORKER_TENANT_ID
+        sync: false
+      - key: WORKFORCE_WORKER_PRODUCT_IDS
+        value: photo-studio-growth-os,photo-studio-billing,clinics-counter,entrepreneur-instagram-tools,pharma-software-utilities,artists-business-tools,growtoys
