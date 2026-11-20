@@ -478,6 +478,7 @@ async def test_release_readiness_deferrals_do_not_waive_flagship_security_or_rel
                 risk = "Accepted deferred integration risk for " + product_id
                 self.signoffs.append({"release_layer": "RELEASE_2_PRODUCTS", "gate_name": "BUSINESS",
                     "status": "DEFERRED_WITH_ACCEPTANCE", "evidence": {"product_id": product_id,
+                    "integration_status": "DISCOVERY_ONLY" if product_id == "growtoys" else "NO_REPO_YET",
                     "accepted_risk": risk, "risk_rationale": risk, "owner": "product-owner",
                     "due_date": "2027-02-28", "compensating_control": "Exclude from live cohort."},
                     "candidate_sha": sha, "environment": "production", "cohort_id": "portfolio",
@@ -505,6 +506,16 @@ async def test_release_readiness_deferrals_do_not_waive_flagship_security_or_rel
     security = next(g for g in blocked["release_layers"]["RELEASE_2_PRODUCTS"]["gates"] if g["signoff_gate"] == "SECURITY")
     assert security["status"] == "BLOCKED"
     assert "non-deferrable" in " ".join(security["missing_evidence"])
+    risk = "Attempted to defer an already-live flagship product"
+    repo.signoffs.append({"release_layer": "RELEASE_2_PRODUCTS", "gate_name": "BUSINESS",
+        "status": "DEFERRED_WITH_ACCEPTANCE", "evidence": {"product_id": "photo-studio-growth-os",
+        "integration_status": "LIVE_BACKEND_WIRED", "accepted_risk": risk, "risk_rationale": risk,
+        "owner": "owner", "due_date": "2027-02-28", "compensating_control": "none"},
+        "candidate_sha": sha, "environment": "production", "cohort_id": "portfolio",
+        "scope_key": "photo-studio-growth-os"})
+    portfolio = await service.evaluate(cohort="portfolio")
+    assert "photo-studio-growth-os" in portfolio["product_scope"]["required_live_products"]
+    assert "photo-studio-growth-os" in portfolio["product_scope"]["invalid_deferred_products"]
 
 
 @pytest.mark.asyncio
