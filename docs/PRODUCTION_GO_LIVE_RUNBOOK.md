@@ -68,7 +68,8 @@ python -m app.bootstrap_prod
 
 Run it after `python -m app.migrate` and after the runtime-role grants above. It is safe to run more than once for the same candidate SHA. Run it twice and verify the returned counts are unchanged. It provisions:
 - `wf_tenants`: primary tenant `rungrow / RunGrow`.
-- `wf_product_bindings`: seven product registrations. The two flagship products are `LIVE_BACKEND_WIRED`; the four `NO_REPO_YET` products are inactive/deferred; Growtoys is inactive and `DISCOVERY_ONLY` with live handoff/outreach blocked.
+- `wf_product_registry`: the seven portfolio product registrations seeded by the migration chain.
+- `wf_product_bindings`: three tenant-scoped bindings only — two `LIVE_BACKEND_WIRED` flagship adapters and one inactive `DISCOVERY_ONLY` Growtoys governance binding. The four `NO_REPO_YET` products receive no active adapter binding.
 - `wf_financial_baselines`: seven provisional product baselines with ₹0 recognised revenue and ₹0 raised capital per product, explicit revenue/capital allocations summing to ₹5,00,00,000 each. Allocations are management planning allocations, not forecasts.
 - Product-scoped `DEFERRED_WITH_ACCEPTANCE` signoffs for the four `NO_REPO_YET` verticals and the Growtoys discovery-only boundary. The signoffs do not defer security or reliability.
 
@@ -110,7 +111,7 @@ Use the second blueprint service:
 - Runtime: Docker, same Dockerfile and root context.
 - Command: `python -m app.worker`
 - Use the same restricted runtime `DATABASE_URL`, OIDC, HMAC and model-provider settings as the API.
-- Set `WORKFORCE_WORKER_TENANT_ID=rungrow`, `WORKFORCE_WORKER_ID=rungrow-workforce-worker`, `WORKFORCE_WORKER_SCOPES=work.assign,agent.run`, and the product IDs in `WORKFORCE_WORKER_PRODUCT_IDS`.
+- Set `WORKFORCE_WORKER_TENANT_ID=rungrow`, `WORKFORCE_WORKER_ID=rungrow-workforce-worker`, `WORKFORCE_WORKER_SCOPES=work.assign,agent.run`, and restrict `WORKFORCE_WORKER_PRODUCT_IDS` to `photo-studio-growth-os,clinics-counter`. Do not grant worker product scope to deferred verticals or Growtoys.
 - The API's pre-deploy migration must complete before the worker is started. Deploy/verify the API first, then start the worker.
 
 The worker writes tenant-scoped heartbeats. `/health/ready` checks database connectivity, the exact migration chain, OIDC and HMAC configuration; the release readiness Reliability gate additionally requires a fresh heartbeat and restore evidence.
