@@ -51,14 +51,14 @@ export DATABASE_URL='postgresql://rungrow_app:<PASSWORD>@<NEON_POOLER_HOST>/<DB>
 python -m app.migrate
 ```
 
-The runner applies migrations `001_initial_workforce_schema.sql` through `009_production_bootstrap_and_cohorts.sql`, verifies recorded SHA-256 checksums, and is safe to rerun. Do not edit an already-applied migration; add a new numbered migration.
+The runner applies migrations `001_initial_workforce_schema.sql` through `009_production_bootstrap_and_cohort_readiness.sql`, verifies recorded SHA-256 checksums, and is safe to rerun. Do not edit an already-applied migration; add a new numbered migration.
 
 ## 2. Idempotent primary-tenant bootstrap
 
 The primary tenant slug is `rungrow`; set `RUNGROW_INTERNAL_TENANT_ID=rungrow` so verified JWT tenant claims, product mappings and the bootstrap agree. Set the exact immutable deployed RunGrow commit SHA before running the bootstrap. The command refuses to run without a full SHA and refuses to run against a non-production environment.
 
 ```bash
-cd workforce-api
+cd /workspace/workforce-api
 export APP_ENV=production
 export RUNGROW_INTERNAL_TENANT_ID=rungrow
 export RUNGROW_RELEASE_CANDIDATE_SHA='<40-character-deployed-Rungrow.in-commit-SHA>'
@@ -68,9 +68,8 @@ python -m app.bootstrap_prod
 
 Run it after `python -m app.migrate` and after the runtime-role grants above. It is safe to run more than once for the same candidate SHA. Run it twice and verify the returned counts are unchanged. It provisions:
 - `wf_tenants`: primary tenant `rungrow / RunGrow`.
-- `wf_product_adapter_bindings`: live v1 bindings for `photo-studio-growth-os` and `clinics-counter`; a separate `DISCOVERY_ONLY` binding for Growtoys. The four no-repository products have no adapter binding and are recorded as accepted deferrals.
-- `wf_mission_baselines`: provisional tenant baseline with ₹0 recognised revenue, ₹0 raised capital, ₹5,00,00,000 total revenue target and ₹5,00,00,000 total capital target.
-- `wf_mission_product_allocations`: seven provisional product allocations for both targets. Allocations are management planning allocations, not forecasts.
+- `wf_product_bindings`: seven product registrations. The two flagship products are `LIVE_BACKEND_WIRED`; the four `NO_REPO_YET` products are inactive/deferred; Growtoys is inactive and `DISCOVERY_ONLY` with live handoff/outreach blocked.
+- `wf_financial_baselines`: seven provisional product baselines with ₹0 recognised revenue and ₹0 raised capital per product, explicit revenue/capital allocations summing to ₹5,00,00,000 each. Allocations are management planning allocations, not forecasts.
 - Product-scoped `DEFERRED_WITH_ACCEPTANCE` signoffs for the four `NO_REPO_YET` verticals and the Growtoys discovery-only boundary. The signoffs do not defer security or reliability.
 
 The bootstrap uses `ON CONFLICT`/immutable identity keys so repeated execution does not duplicate bindings, baselines or deferred signoffs. Existing actual revenue/capital values are not overwritten by the baseline insert.
@@ -132,7 +131,9 @@ Deploy the approved production branch from the linked Vercel project (or its dep
 
 ```bash
 vercel deploy --prod
-``` Do not expose database or provider credentials as Vercel browser environment variables.
+```
+
+Do not expose database or provider credentials as Vercel browser environment variables.
 
 ## 5. Neon point-in-time recovery (PITR) and Gate 5 evidence
 
@@ -155,7 +156,7 @@ After the rehearsal succeeds, record a commit-bound human signoff using `POST /v
 - `release_layer=RELEASE_1_WORKFORCE`
 - `gate_name=RELIABILITY`
 - `status=PASS`
-- `cohort_id=flagship-production`, `scope_key=gate`
+- `cohort_id=flagship`, `scope_key=cohort`
 - Evidence object `backup_restore_test` containing `status=PASS`, `evidence_ref`, recovery point, RTO, RPO, verification result and operator.
 - The exact deployed candidate SHA and `environment=production`.
 
@@ -169,7 +170,7 @@ Run after the API deploy and before enabling the worker or product traffic:
 curl --fail https://rungrow-workforce-api.onrender.com/health/live
 curl --fail https://rungrow-workforce-api.onrender.com/health/ready
 curl --fail -H "Authorization: Bearer <WORKFORCE_READ_TOKEN>" \
-  "https://rungrow-workforce-api.onrender.com/v1/release/readiness?cohort=flagship-production"
+  "https://rungrow-workforce-api.onrender.com/v1/release/readiness?cohort=flagship"
 ```
 
 Expected:
