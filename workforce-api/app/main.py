@@ -878,7 +878,7 @@ async def release_readiness(
     repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo),
 ):
     try:
-        return await ReleaseReadinessService(repo, adapter_registry=PRODUCT_ADAPTERS).evaluate(cohort_id=cohort)
+        return await ReleaseReadinessService(repo, adapter_registry=PRODUCT_ADAPTERS).evaluate(cohort=cohort)
     except Exception as exc:
         translate_repo_error(exc)
 
