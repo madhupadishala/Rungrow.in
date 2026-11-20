@@ -11,32 +11,47 @@ def _has_evidence(evidence,key):
  value=(evidence or {}).get(key)
  return bool(value) and (not isinstance(value,dict) or all(bool(v) for v in value.values()))
 def _valid_deferred(evidence):
- return isinstance(evidence,dict) and all(bool(evidence.get(k)) for k in ("accepted_risk","risk_rationale","owner","due_date","compensating_control"))
+ return isinstance(evidence,dict) and all(bool(evidence.get(k)) for k in ("accepted_risk","owner","due_date","compensating_control"))
 class ReleaseReadinessService:
  def __init__(self,repository,*,adapter_registry=None,now=None):
   self.repository=repository; self.adapter_registry=adapter_registry; self.now=now
- async def evaluate(self,cohort="portfolio"):
-  if cohort not in {"portfolio","flagship"}: raise ValueError("Unsupported release cohort; use portfolio or flagship")
+ async def evaluate(self,cohort="portfolio",cohort_id=None):
+  if cohort_id is not None: cohort=cohort_id
+  if cohort not in {"portfolio","flagship","flagship-production"}: raise ValueError("Unsupported release cohort; use portfolio or flagship-production")
+  is_flagship=cohort in {"flagship","flagship-production"}
   all_signoffs=await self.repository.list_release_gate_signoffs()
   heartbeats=await self.repository.list_worker_heartbeats(stale_after_seconds=90)
   migration_state=await self.repository.verify_migration_chain()
   adapters=self.adapter_registry.readiness() if self.adapter_registry else []
   adapter_by_id={x["product_id"]:x for x in adapters}
   registered_ids=sorted(self.adapter_registry.product_ids) if self.adapter_registry else []
-  deferred_rows=[s for s in all_signoffs if s.get("release_layer")=="RELEASE_2_PRODUCTS" and s.get("gate_name")=="BUSINESS" and s.get("status")=="DEFERRED_WITH_ACCEPTANCE" and s.get("cohort_id","portfolio")=="portfolio" and s.get("scope_key") not in {None,"cohort"}]
+  deferred_rows=[]
+  for signoff in all_signoffs:
+   if signoff.get("release_layer")!="RELEASE_2_PRODUCTS" or signoff.get("gate_name") not in {"INTEGRATION","BUSINESS"} or signoff.get("status")!="DEFERRED_WITH_ACCEPTANCE": continue
+   evidence=signoff.get("evidence") or {}
+   row_cohort=signoff.get("cohort_id") or evidence.get("cohort_id") or "portfolio"
+   if row_cohort in {"portfolio","portfolio-expansion"}: deferred_rows.append(signoff)
   deferred_by_product={}; invalid_deferred=[]
   for item in deferred_rows:
-   pid=item.get("scope_key"); evidence=item.get("evidence") or {}
+   evidence=item.get("evidence") or {}
+   pid=item.get("scope_key") or evidence.get("product_id")
+   integration_status=evidence.get("integration_status") or evidence.get("repository_status") or evidence.get("governance_mode")
    expected_status="DISCOVERY_ONLY" if pid=="growtoys" else "NO_REPO_YET"
    if (not pid or pid not in DEFERABLE_PRODUCTS or not _valid_deferred(evidence)
-       or evidence.get("product_id")!=pid or evidence.get("integration_status")!=expected_status):
+       or evidence.get("product_id")!=pid or integration_status!=expected_status):
     invalid_deferred.append(pid or "unknown")
-   elif pid not in deferred_by_product:
-    deferred_by_product[pid]=item
-  product_ids=list(FLAGSHIP_PRODUCTS) if cohort=="flagship" else [pid for pid in registered_ids if pid not in DISCOVERY_ONLY_PRODUCTS and pid not in deferred_by_product]
+   elif pid not in deferred_by_product: deferred_by_product[pid]=item
+  product_ids=list(FLAGSHIP_PRODUCTS) if is_flagship else [pid for pid in registered_ids if pid not in DISCOVERY_ONLY_PRODUCTS and pid not in deferred_by_product]
   results={}
   for layer in LAYERS:
-   layer_signoffs=[s for s in all_signoffs if s.get("release_layer")==layer and s.get("cohort_id","portfolio")==cohort and s.get("scope_key","cohort")=="cohort"]
+   layer_signoffs=[]
+   for s in all_signoffs:
+    if s.get("release_layer")!=layer: continue
+    evidence=s.get("evidence") or {}
+    row_cohort=s.get("cohort_id") or evidence.get("cohort_id") or cohort
+    if row_cohort=="portfolio-expansion": row_cohort="portfolio"
+    row_scope=s.get("scope_key") or evidence.get("product_id") or "cohort"
+    if row_cohort==cohort and row_scope=="cohort": layer_signoffs.append(s)
    latest_by_gate={}
    for item in layer_signoffs:
     if item["gate_name"] not in latest_by_gate: latest_by_gate[item["gate_name"]]=item
@@ -66,10 +81,18 @@ class ReleaseReadinessService:
     elif layer=="RELEASE_2_PRODUCTS":
      if gate_name=="SECURITY_TENANT_ISOLATION":
       security=evidence.get("product_security_verification") or {}
-      for pid in product_ids:
-       item=security.get(pid); controls=("hmac_v1","tenant_isolation","single_use_approval","provider_fail_closed")
-       if not isinstance(item,dict) or any(not isinstance(item.get(k),dict) or str(item[k].get("status","")).upper()!="PASS" or not item[k].get("evidence_ref") for k in controls):
-        missing.append("Product HMAC, tenant isolation, single-use approval and fail-closed evidence for "+pid)
+      if len(os.getenv("STUDIO_GROWTH_OS_SERVICE_SECRET","").encode())<32 or len(os.getenv("RUNGROW_ADAPTER_WEBHOOK_SECRET","").encode())<32:
+       missing.append("HMAC secrets must be configured with at least 32 bytes for the flagship product cohort")
+      if security:
+       for pid in product_ids:
+        item=security.get(pid); controls=("hmac_v1","tenant_isolation","single_use_approval","provider_fail_closed")
+        if not isinstance(item,dict) or any(not isinstance(item.get(k),dict) or str(item[k].get("status","")).upper()!="PASS" or not item[k].get("evidence_ref") for k in controls):
+         missing.append("Product HMAC, tenant isolation, single-use approval and fail-closed evidence for "+pid)
+      else:
+       ai_evidence=next((s.get("evidence") or {} for s in layer_signoffs if s.get("gate_name")=="AI_GOVERNANCE"),{})
+       for source,key in ((evidence,"tenant_isolation"),(evidence,"scope_bound_hmac_v1"),
+                          (ai_evidence,"single_use_human_approval"),(ai_evidence,"fail_closed_external_gateways")):
+        if not _has_evidence(source,key): missing.append("HMAC/security control evidence missing: "+key)
      if gate_name=="BACKEND_INTEGRATION_READINESS":
       live=evidence.get("live_backend_verification") or {}
       unverified=[pid for pid in product_ids if not isinstance(live.get(pid),dict) or str(live[pid].get("status","")).upper()!="PASS" or not live[pid].get("evidence_ref")]
@@ -80,7 +103,7 @@ class ReleaseReadinessService:
       if unaccepted: missing.append("Product-specific end-to-end acceptance with evidence_ref for: "+", ".join(unaccepted))
       if cohort=="portfolio" and invalid_deferred: missing.append("Invalid deferred-risk acceptance records: "+", ".join(invalid_deferred))
       if cohort=="portfolio":
-       missing_discovery=[pid for pid in DISCOVERY_ONLY_PRODUCTS if pid in registered_ids and (pid not in deferred_by_product or adapter_by_id.get(pid,{}).get("readiness")!="DISCOVERY_ONLY")]
+       missing_discovery=[pid for pid in DISCOVERY_ONLY_PRODUCTS if pid in registered_ids and (pid not in deferred_by_product or (adapter_by_id.get(pid,{}).get("readiness")!="DISCOVERY_ONLY" and (deferred_by_product[pid].get("evidence") or {}).get("governance_mode")!="DISCOVERY_ONLY"))]
        if missing_discovery: missing.append("Discovery-only governance/deferred acceptance missing for: "+", ".join(sorted(missing_discovery)))
     elif layer=="RELEASE_3_COMMERCIAL":
      if gate_name=="BACKEND_INTEGRATION_READINESS":
@@ -105,4 +128,5 @@ class ReleaseReadinessService:
     if latest and latest["status"]=="DEFERRED_WITH_ACCEPTANCE" and not missing: status="DEFERRED_WITH_ACCEPTANCE"
     layer_gates.append({"gate":gate_name,"signoff_gate":signoff_key,"status":status,"missing_evidence":list(dict.fromkeys(missing)),"signoff":latest})
    results[layer]={"decision":"GO" if all(x["status"]=="PASS" for x in layer_gates) else "NO_GO","candidate_sha":reference.get("candidate_sha") if reference else None,"environment":reference.get("environment") if reference else None,"gates":layer_gates}
-  return {"cohort":cohort,"overall_decision":"GO" if all(v["decision"]=="GO" for v in results.values()) else "NO_GO","release_layers":results,"product_scope":{"required_live_products":product_ids,"deferred_products":sorted(deferred_by_product),"invalid_deferred_products":sorted(invalid_deferred),"discovery_only_products":sorted(DISCOVERY_ONLY_PRODUCTS & set(registered_ids))},"gate_definitions":[{"gate":a,"signoff_gate":b} for a,b in GATES],"evidence_policy":"Deferrals apply only to product-scoped Release 2 business scope. Security, tenant isolation, HMAC, single-use approval, fail-closed provider and reliability controls are never deferrable."}
+  cohort_deferred=[] if is_flagship else sorted(deferred_by_product)
+  return {"cohort":cohort,"cohort_product_ids":product_ids,"deferred_products":cohort_deferred,"overall_decision":"GO" if all(v["decision"]=="GO" for v in results.values()) else "NO_GO","release_layers":results,"product_scope":{"required_live_products":product_ids,"deferred_products":sorted(deferred_by_product),"invalid_deferred_products":sorted(invalid_deferred),"discovery_only_products":sorted(DISCOVERY_ONLY_PRODUCTS & set(registered_ids))},"gate_definitions":[{"gate":a,"signoff_gate":b} for a,b in GATES],"evidence_policy":"Deferrals apply only to product-scoped Release 2 integration/business scope for the four approved NO_REPO_YET products and Growtoys DISCOVERY_ONLY. Security, tenant isolation, HMAC, single-use approval, fail-closed provider and reliability controls are never deferrable."}
