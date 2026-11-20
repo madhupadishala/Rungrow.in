@@ -434,3 +434,106 @@ async def test_production_bootstrap_is_idempotent_on_postgres(monkeypatch):
                 assert float(allocations["capital"])==50000000
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_release_readiness_deferrals_do_not_waive_flagship_security_or_reliability(monkeypatch):
+    from app.release_readiness import GATES, LAYERS, ReleaseReadinessService
+    sha = "a" * 40
+    live = ("photo-studio-growth-os", "clinics-counter")
+    all_products = set(live) | {"photo-studio-billing", "entrepreneur-instagram-tools",
+        "pharma-software-utilities", "artists-business-tools", "growtoys"}
+    class Registry:
+        product_ids = frozenset(all_products)
+        def readiness(self):
+            return [{"product_id": p, "readiness": "DISCOVERY_ONLY" if p == "growtoys" else "REGISTERED_SECRET_REQUIRED"}
+                for p in all_products]
+    class Repo:
+        def __init__(self):
+            self.signoffs = []
+            for layer in LAYERS:
+                for _, gate in GATES:
+                    evidence = {}
+                    if layer == "RELEASE_1_WORKFORCE" and gate == "RELIABILITY":
+                        evidence = {"backup_restore_test": {"status": "PASS", "evidence_ref": "restore-fixture"}}
+                    if layer == "RELEASE_1_WORKFORCE" and gate == "BUSINESS":
+                        evidence = {"product_owner_acceptance": {"status": "PASS", "evidence_ref": "owner-fixture"}}
+                    if layer == "RELEASE_2_PRODUCTS" and gate == "SECURITY":
+                        evidence = {"product_security_verification": {p: {
+                            k: {"status": "PASS", "evidence_ref": p + "-" + k}
+                            for k in ("hmac_v1", "tenant_isolation", "single_use_approval", "provider_fail_closed")}
+                            for p in live}}
+                    if layer == "RELEASE_2_PRODUCTS" and gate == "INTEGRATION":
+                        evidence = {"live_backend_verification": {p: {"status": "PASS", "evidence_ref": p + "-live"} for p in live}}
+                    if layer == "RELEASE_2_PRODUCTS" and gate == "BUSINESS":
+                        evidence = {"product_acceptance": {p: {"status": "PASS", "evidence_ref": p + "-acceptance"} for p in live}}
+                    if layer == "RELEASE_3_COMMERCIAL" and gate == "INTEGRATION":
+                        evidence = {"live_communication_verification": {p: {"status": "PASS", "evidence_ref": p + "-receipt"} for p in ("whatsapp", "email")}}
+                    if layer == "RELEASE_3_COMMERCIAL" and gate == "BUSINESS":
+                        evidence = {"commercial_reconciliation": {p: {"status": "PASS", "evidence_ref": p + "-reconciled"} for p in ("revenue", "customers", "billing", "consent", "support")}}
+                    self.signoffs.append({"release_layer": layer, "gate_name": gate, "status": "PASS",
+                        "evidence": evidence, "candidate_sha": sha, "environment": "production",
+                        "cohort_id": "flagship", "scope_key": "cohort"})
+            for product_id in all_products - set(live):
+                risk = "Accepted deferred integration risk for " + product_id
+                self.signoffs.append({"release_layer": "RELEASE_2_PRODUCTS", "gate_name": "BUSINESS",
+                    "status": "DEFERRED_WITH_ACCEPTANCE", "evidence": {"product_id": product_id,
+                    "accepted_risk": risk, "risk_rationale": risk, "owner": "product-owner",
+                    "due_date": "2027-02-28", "compensating_control": "Exclude from live cohort."},
+                    "candidate_sha": sha, "environment": "production", "cohort_id": "portfolio",
+                    "scope_key": product_id})
+        async def list_release_gate_signoffs(self): return self.signoffs
+        async def list_worker_heartbeats(self, stale_after_seconds=90): return [{"is_fresh": True}]
+        async def verify_migration_chain(self): return {"ok": True, "missing": [], "drift": []}
+    monkeypatch.setenv("JWT_JWKS_URL", "https://identity.example.test/jwks")
+    monkeypatch.setenv("STUDIO_GROWTH_OS_SERVICE_SECRET", "s" * 40)
+    monkeypatch.setenv("RUNGROW_ADAPTER_WEBHOOK_SECRET", "h" * 40)
+    monkeypatch.setenv("WORKFORCE_MODEL_PROVIDER", "openai-compatible")
+    from app.config import settings
+    monkeypatch.setattr(settings, "database_url", "postgresql+asyncpg://fixture")
+    repo = Repo()
+    service = ReleaseReadinessService(repo, adapter_registry=Registry())
+    result = await service.evaluate(cohort="flagship")
+    assert result["overall_decision"] == "GO"
+    assert result["product_scope"]["required_live_products"] == list(live)
+    assert set(result["product_scope"]["deferred_products"]) == all_products - set(live)
+    repo.signoffs.insert(0, {"release_layer": "RELEASE_2_PRODUCTS", "gate_name": "SECURITY",
+        "status": "DEFERRED_WITH_ACCEPTANCE", "evidence": {"accepted_risk": "x", "risk_rationale": "x",
+        "owner": "owner", "due_date": "2027-02-28", "compensating_control": "none"},
+        "candidate_sha": sha, "environment": "production", "cohort_id": "flagship", "scope_key": "cohort"})
+    blocked = await service.evaluate(cohort="flagship")
+    security = next(g for g in blocked["release_layers"]["RELEASE_2_PRODUCTS"]["gates"] if g["signoff_gate"] == "SECURITY")
+    assert security["status"] == "BLOCKED"
+    assert "non-deferrable" in " ".join(security["missing_evidence"])
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_prod_is_idempotent_on_postgres(monkeypatch):
+    import os
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from app.bootstrap_prod import bootstrap
+    database_url = os.getenv("RUNGROW_TEST_DATABASE_URL")
+    assert database_url, "PostgreSQL CI must provide RUNGROW_TEST_DATABASE_URL"
+    monkeypatch.setenv("RUNGROW_INTERNAL_TENANT_ID", "rungrow")
+    monkeypatch.setenv("RUNGROW_RELEASE_CANDIDATE_SHA", "b" * 40)
+    monkeypatch.setenv("APP_ENV", "production")
+    first = await bootstrap(database_url)
+    second = await bootstrap(database_url)
+    assert first == second
+    assert first["product_bindings"] == 7
+    assert first["financial_baselines"] == 7
+    assert first["deferred_signoffs"] == 5
+    engine = create_async_engine(database_url)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant_id','rungrow',true)"))
+            tenant = (await conn.execute(text("SELECT slug,name FROM wf_tenants WHERE id='rungrow'"))).one()
+            assert tenant == ("rungrow", "RunGrow")
+            totals = (await conn.execute(text("SELECT count(*),sum(recognised_revenue_inr),sum(raised_capital_inr),sum(revenue_target_allocation_inr),sum(capital_target_allocation_inr) FROM wf_financial_baselines WHERE tenant_id='rungrow'"))).one()
+            assert totals[0] == 7 and float(totals[1]) == 0 and float(totals[2]) == 0
+            assert float(totals[3]) == 50_000_000 and float(totals[4]) == 50_000_000
+            deferred = (await conn.execute(text("SELECT count(*) FROM release_gate_signoffs WHERE tenant_id='rungrow' AND cohort_id='portfolio' AND status='DEFERRED_WITH_ACCEPTANCE' AND scope_key <> 'cohort'"))).scalar_one()
+            assert deferred == 5
+    finally:
+        await engine.dispose()
