@@ -867,15 +867,18 @@ class ReleaseSignoffRequest(BaseModel):
     evidence: dict
     candidate_sha: str | None = None
     environment: str = "production"
+    cohort_id: str = "portfolio"
+    scope_key: str = "cohort"
 
 
 @app.get("/v1/release/readiness")
 async def release_readiness(
+    cohort: str = "portfolio",
     p: Principal = Depends(require_permission("workforce.read")),
     repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo),
 ):
     try:
-        return await ReleaseReadinessService(repo, adapter_registry=PRODUCT_ADAPTERS).evaluate()
+        return await ReleaseReadinessService(repo, adapter_registry=PRODUCT_ADAPTERS).evaluate(cohort=cohort)
     except Exception as exc:
         translate_repo_error(exc)
 
@@ -892,7 +895,7 @@ async def record_release_signoff(
             release_layer=body.release_layer, gate_name=body.gate_name,
             status=body.status, evidence=body.evidence, verifier_type=verifier_type,
             verifier_id=p.user_id, candidate_sha=body.candidate_sha,
-            environment=body.environment,
+            environment=body.environment, cohort_id=body.cohort_id, scope_key=body.scope_key,
         )
     except Exception as exc:
         translate_repo_error(exc)
