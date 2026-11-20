@@ -53,4 +53,5 @@ ALTER TABLE release_gate_signoffs
  ADD COLUMN IF NOT EXISTS cohort_id text NOT NULL DEFAULT 'portfolio',
  ADD COLUMN IF NOT EXISTS scope_key text NOT NULL DEFAULT 'gate';
 CREATE UNIQUE INDEX IF NOT EXISTS release_gate_signoffs_cohort_scope_candidate_uq
- ON release_gate_signoffs(tenant_id,release_layer,gate_name,cohort_id,scope_key,candidate_sha);
+ ON release_gate_signoffs(tenant_id,release_layer,gate_name,cohort_id,scope_key,candidate_sha)
+ WHERE scope_key <> 'gate';
