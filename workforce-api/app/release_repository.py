@@ -58,7 +58,7 @@ class ReleaseRepositoryMixin:
 
     async def record_release_gate_signoff(self, *, release_layer: str, gate_name: str,
             status: str, evidence: dict, verifier_type: str, verifier_id: str,
-            candidate_sha: str | None, environment: str):
+            candidate_sha: str | None, environment: str, cohort_id: str = "portfolio", scope_key: str = "cohort"):
         allowed_layers={"RELEASE_1_WORKFORCE","RELEASE_2_PRODUCTS","RELEASE_3_COMMERCIAL"}
         allowed_gates={"ENGINEERING","SECURITY","INTEGRATION","RELIABILITY","AI_GOVERNANCE","OPERATIONS","BUSINESS"}
         if release_layer not in allowed_layers or gate_name not in allowed_gates:
@@ -74,6 +74,17 @@ class ReleaseRepositoryMixin:
             raise ValueError("A full immutable Git commit SHA is required for release signoff")
         if not environment or not environment.strip():
             raise ValueError("Release environment is required")
+        if not cohort_id or len(cohort_id) > 80 or not scope_key or len(scope_key) > 160:
+            raise ValueError("Release cohort and scope key are required")
+        if status == "DEFERRED_WITH_ACCEPTANCE":
+            required = ("accepted_risk", "risk_rationale", "owner", "due_date", "compensating_control")
+            absent = [key for key in required if not evidence.get(key)]
+            if absent:
+                raise ValueError("Deferred acceptance requires: " + ", ".join(absent))
+            if gate_name in {"SECURITY", "RELIABILITY", "ENGINEERING", "INTEGRATION", "AI_GOVERNANCE", "OPERATIONS"}:
+                raise ValueError("Security, reliability and control gates cannot be deferred")
+            if not (release_layer == "RELEASE_2_PRODUCTS" and gate_name == "BUSINESS" and scope_key != "cohort"):
+                raise ValueError("Only product-scoped Release 2 business acceptance may be deferred")
         if not hasattr(self, "session"):
             if not hasattr(self,"release_signoffs"): self.release_signoffs=[]
             item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,"release_layer":release_layer,
@@ -91,7 +102,7 @@ class ReleaseRepositoryMixin:
         """, {"id":str(uuid4()),"tenant":self.principal.tenant_id,"layer":release_layer,
               "gate":gate_name,"status":status,"evidence":json.dumps(evidence),
               "type":verifier_type,"verifier":verifier_id,"sha":candidate_sha,
-              "environment":environment})
+              "environment":environment,"cohort":cohort_id,"scope":scope_key})
 
     async def list_release_gate_signoffs(self):
         if not hasattr(self, "session"):
