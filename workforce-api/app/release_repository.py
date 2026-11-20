@@ -58,7 +58,8 @@ class ReleaseRepositoryMixin:
 
     async def record_release_gate_signoff(self, *, release_layer: str, gate_name: str,
             status: str, evidence: dict, verifier_type: str, verifier_id: str,
-            candidate_sha: str | None, environment: str, cohort_id: str = "portfolio", scope_key: str = "gate"):
+            candidate_sha: str | None, environment: str, cohort_id: str = "portfolio",
+            scope_key: str = "cohort"):
         allowed_layers={"RELEASE_1_WORKFORCE","RELEASE_2_PRODUCTS","RELEASE_3_COMMERCIAL"}
         allowed_gates={"ENGINEERING","SECURITY","INTEGRATION","RELIABILITY","AI_GOVERNANCE","OPERATIONS","BUSINESS"}
         if release_layer not in allowed_layers or gate_name not in allowed_gates:
@@ -74,37 +75,37 @@ class ReleaseRepositoryMixin:
             raise ValueError("A full immutable Git commit SHA is required for release signoff")
         if not environment or not environment.strip():
             raise ValueError("Release environment is required")
-        if cohort_id not in {"portfolio","flagship-production","portfolio-expansion"}:
-            raise ValueError("Invalid release cohort")
-        if not scope_key or len(scope_key)>200:
+        if cohort_id not in {"portfolio","flagship"}:
+            raise ValueError("Unsupported release cohort")
+        if not scope_key or len(scope_key)>160:
             raise ValueError("Release signoff scope key is required")
         if status=="DEFERRED_WITH_ACCEPTANCE":
-            if release_layer!="RELEASE_2_PRODUCTS" or gate_name not in {"INTEGRATION","BUSINESS"}:
-                raise ValueError("Only product integration/business risks may be deferred; shared security and reliability gates are non-waivable")
-            required=("product_id","accepted_risk","owner","due_date","compensating_control","cohort_id")
+            if release_layer!="RELEASE_2_PRODUCTS" or gate_name!="BUSINESS":
+                raise ValueError("Only product-scoped Release 2 business risk may be deferred")
+            required=("product_id","integration_status","accepted_risk","risk_rationale","owner","due_date","compensating_control")
             if any(not isinstance(evidence.get(key),str) or not evidence[key].strip() for key in required):
-                raise ValueError("Product deferral requires product_id, accepted_risk, owner, due_date, compensating_control and cohort_id")
-            if evidence.get("cohort_id")!="portfolio-expansion" or cohort_id!="portfolio-expansion":
-                raise ValueError("Product deferrals must be recorded in portfolio-expansion cohort")
-            if scope_key!=evidence["product_id"]:
-                raise ValueError("Product deferral scope_key must equal its product_id")
+                raise ValueError("Deferred acceptance requires product, risk rationale, owner, due date and compensating control")
+            product_id=evidence["product_id"]
+            if product_id not in {"photo-studio-billing","entrepreneur-instagram-tools","pharma-software-utilities","artists-business-tools","growtoys"}:
+                raise ValueError("Flagship products and unknown products cannot be deferred")
+            expected="DISCOVERY_ONLY" if product_id=="growtoys" else "NO_REPO_YET"
+            if evidence["integration_status"]!=expected:
+                raise ValueError("Deferred product integration status is not eligible")
+            if cohort_id!="portfolio" or scope_key!=product_id:
+                raise ValueError("Product deferrals must be scoped to the portfolio cohort and exact product_id")
             from datetime import date
             try:
                 date.fromisoformat(evidence["due_date"])
             except ValueError as exc:
-                raise ValueError("Product deferral due_date must be an ISO calendar date") from exc
-            if evidence["product_id"] not in {"photo-studio-billing","entrepreneur-instagram-tools","pharma-software-utilities","artists-business-tools","growtoys"}:
-                raise ValueError("The flagship production products cannot be deferred")
-            if evidence["product_id"]=="growtoys" and evidence.get("governance_mode")!="DISCOVERY_ONLY":
-                raise ValueError("Growtoys deferral must preserve DISCOVERY_ONLY governance")
-            if evidence["product_id"]!="growtoys" and evidence.get("repository_status")!="NO_REPO_YET":
-                raise ValueError("Only NO_REPO_YET products may use product integration deferral")
-        if not hasattr(self, "session"):
+                raise ValueError("Deferred acceptance due_date must be an ISO calendar date") from exc
+        if not hasattr(self,"session"):
             if not hasattr(self,"release_signoffs"): self.release_signoffs=[]
-            item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,"release_layer":release_layer,
-                "gate_name":gate_name,"status":status,"evidence":evidence,"verifier_type":verifier_type,
-                "verifier_id":verifier_id,"candidate_sha":candidate_sha,"environment":environment,
-                "cohort_id":cohort_id,"scope_key":scope_key,"occurred_at":datetime.now(timezone.utc).isoformat()}
+            item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,
+                "release_layer":release_layer,"gate_name":gate_name,"status":status,
+                "evidence":evidence,"verifier_type":verifier_type,"verifier_id":verifier_id,
+                "candidate_sha":candidate_sha,"environment":environment,
+                "cohort_id":cohort_id,"scope_key":scope_key,
+                "occurred_at":datetime.now(timezone.utc).isoformat()}
             self.release_signoffs.insert(0,item)
             return item
         return await self._one("""
@@ -113,10 +114,10 @@ class ReleaseRepositoryMixin:
              candidate_sha,environment,cohort_id,scope_key,occurred_at)
           VALUES (:id,:tenant,:layer,:gate,:status,CAST(:evidence AS jsonb),:type,:verifier,
                   :sha,:environment,:cohort,:scope,now()) RETURNING *
-        """, {"id":str(uuid4()),"tenant":self.principal.tenant_id,"layer":release_layer,
-              "gate":gate_name,"status":status,"evidence":json.dumps(evidence),
-              "type":verifier_type,"verifier":verifier_id,"sha":candidate_sha,
-              "environment":environment,"cohort":cohort_id,"scope":scope_key})
+        """,{"id":str(uuid4()),"tenant":self.principal.tenant_id,"layer":release_layer,
+             "gate":gate_name,"status":status,"evidence":json.dumps(evidence),
+             "type":verifier_type,"verifier":verifier_id,"sha":candidate_sha,
+             "environment":environment,"cohort":cohort_id,"scope":scope_key})
 
     async def list_release_gate_signoffs(self):
         if not hasattr(self, "session"):
