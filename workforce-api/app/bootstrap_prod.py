@@ -134,8 +134,7 @@ async def bootstrap(database_url: str | None = None) -> dict:
                             candidate_sha,environment,cohort_id,scope_key)
                            VALUES($1,'RELEASE_2_PRODUCTS','BUSINESS','DEFERRED_WITH_ACCEPTANCE',
                             $2::jsonb,'AUTOMATED','bootstrap_prod',$3,'production','portfolio',$4)
-                           ON CONFLICT(tenant_id,release_layer,gate_name,cohort_id,scope_key,candidate_sha)
-                           DO NOTHING""",
+                           ON CONFLICT DO NOTHING""",
                         tenant_id, json.dumps(evidence), candidate, product_id,
                     )
 
