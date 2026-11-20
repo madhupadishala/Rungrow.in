@@ -75,13 +75,13 @@ class ReleaseRepositoryMixin:
             raise ValueError("A full immutable Git commit SHA is required for release signoff")
         if not environment or not environment.strip():
             raise ValueError("Release environment is required")
-        if cohort_id not in {"portfolio","flagship"}:
+        if cohort_id not in {"portfolio","flagship","flagship-production"}:
             raise ValueError("Unsupported release cohort")
         if not scope_key or len(scope_key)>160:
             raise ValueError("Release signoff scope key is required")
         if status=="DEFERRED_WITH_ACCEPTANCE":
-            if release_layer!="RELEASE_2_PRODUCTS" or gate_name!="BUSINESS":
-                raise ValueError("Only product-scoped Release 2 business risk may be deferred")
+            if release_layer!="RELEASE_2_PRODUCTS" or gate_name not in {"INTEGRATION","BUSINESS"}:
+                raise ValueError("Only product-scoped Release 2 integration/business risk may be deferred")
             required=("product_id","integration_status","accepted_risk","risk_rationale","owner","due_date","compensating_control")
             if any(not isinstance(evidence.get(key),str) or not evidence[key].strip() for key in required):
                 raise ValueError("Deferred acceptance requires product, risk rationale, owner, due date and compensating control")
