@@ -6,6 +6,7 @@ LAYERS=("RELEASE_1_WORKFORCE","RELEASE_2_PRODUCTS","RELEASE_3_COMMERCIAL")
 GATES=(("ARCHITECTURE_RELEASE_INTEGRITY","ENGINEERING"),("SECURITY_TENANT_ISOLATION","SECURITY"),("BACKEND_INTEGRATION_READINESS","INTEGRATION"),("AI_WORKFORCE_ACCEPTANCE","AI_GOVERNANCE"),("RELIABILITY_DISASTER_RECOVERY","RELIABILITY"),("PRODUCT_COMMERCIAL_READINESS","BUSINESS"),("FINAL_RELEASE_AUTHORIZATION","OPERATIONS"))
 FLAGSHIP_PRODUCTS=("photo-studio-growth-os","clinics-counter")
 DISCOVERY_ONLY_PRODUCTS={"growtoys"}
+DEFERABLE_PRODUCTS={"photo-studio-billing","entrepreneur-instagram-tools","pharma-software-utilities","artists-business-tools","growtoys"}
 def _has_evidence(evidence,key):
  value=(evidence or {}).get(key)
  return bool(value) and (not isinstance(value,dict) or all(bool(v) for v in value.values()))
@@ -26,8 +27,12 @@ class ReleaseReadinessService:
   deferred_by_product={}; invalid_deferred=[]
   for item in deferred_rows:
    pid=item.get("scope_key"); evidence=item.get("evidence") or {}
-   if not pid or not _valid_deferred(evidence) or evidence.get("product_id")!=pid: invalid_deferred.append(pid or "unknown")
-   else: deferred_by_product[pid]=item
+   expected_status="DISCOVERY_ONLY" if pid=="growtoys" else "NO_REPO_YET"
+   if (not pid or pid not in DEFERABLE_PRODUCTS or not _valid_deferred(evidence)
+       or evidence.get("product_id")!=pid or evidence.get("integration_status")!=expected_status):
+    invalid_deferred.append(pid or "unknown")
+   elif pid not in deferred_by_product:
+    deferred_by_product[pid]=item
   product_ids=list(FLAGSHIP_PRODUCTS) if cohort=="flagship" else [pid for pid in registered_ids if pid not in DISCOVERY_ONLY_PRODUCTS and pid not in deferred_by_product]
   results={}
   for layer in LAYERS:
