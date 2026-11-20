@@ -55,7 +55,10 @@ class ReleaseReadinessService:
       if len(os.getenv("STUDIO_GROWTH_OS_SERVICE_SECRET","").encode())<32: missing.append("32-byte minimum Studio Growth OS service HMAC secret")
       if len(os.getenv("RUNGROW_ADAPTER_WEBHOOK_SECRET","").encode())<32: missing.append("32-byte minimum adapter webhook HMAC secret")
      if gate_name=="BACKEND_INTEGRATION_READINESS" and not settings.database_url: missing.append("Durable PostgreSQL repository configuration")
-     if gate_name=="AI_WORKFORCE_ACCEPTANCE" and not os.getenv("WORKFORCE_MODEL_PROVIDER"): missing.append("Explicit production AI model provider configuration")
+     if gate_name=="AI_WORKFORCE_ACCEPTANCE":
+      if not _has_evidence(evidence,"single_use_human_approval"): missing.append("Single-use, payload-bound human approval and separation-of-duties evidence")
+      if not _has_evidence(evidence,"fail_closed_external_gateways"): missing.append("Unconfigured external gateways fail-closed with audited HTTP 503")
+      if not os.getenv("WORKFORCE_MODEL_PROVIDER"): missing.append("Explicit production AI model provider configuration")
      if gate_name=="RELIABILITY_DISASTER_RECOVERY":
       if not any(h.get("is_fresh") for h in heartbeats): missing.append("At least one worker heartbeat newer than 90 seconds")
       if not _has_evidence(evidence,"backup_restore_test"): missing.append("Verified database backup and restore test evidence")
@@ -94,8 +97,7 @@ class ReleaseReadinessService:
     if not latest: missing.append(f"Explicit {signoff_key} signoff for {layer} cohort={cohort}")
     elif latest["status"]=="BLOCKED": missing.append(f"Latest {signoff_key} signoff is BLOCKED")
     elif latest["status"]=="DEFERRED_WITH_ACCEPTANCE":
-     if layer!="RELEASE_2_PRODUCTS" or gate_name!="PRODUCT_COMMERCIAL_READINESS": missing.append("This gate is non-deferrable; accepted risk cannot bypass security, reliability or control evidence")
-     elif not _valid_deferred(evidence): missing.append("Deferred acceptance requires accepted_risk, risk_rationale, owner, due_date and compensating_control")
+     missing.append("Gate-wide deferral is prohibited; accepted risk must be recorded under an exact product scope key and cannot waive shared controls")
     if gate_name=="FINAL_RELEASE_AUTHORIZATION":
      prior=[x for x in layer_gates if x["status"]!="PASS"]
      if prior: missing.append("All six preceding gates must PASS; a deferred product scope cannot waive a control gate")
