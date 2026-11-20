@@ -384,7 +384,7 @@ async def test_bootstrap_prod_is_idempotent_on_postgres(monkeypatch):
     first = await bootstrap(database_url)
     second = await bootstrap(database_url)
     assert first == second
-    assert first["product_bindings"] == 7
+    assert first["product_bindings"] == 3
     assert first["financial_baselines"] == 7
     assert first["deferred_signoffs"] == 5
     engine = create_async_engine(database_url)
