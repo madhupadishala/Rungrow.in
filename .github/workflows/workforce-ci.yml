@@ -24,7 +24,7 @@ jobs:
           POSTGRES_USER: rungrow_migrator
           POSTGRES_PASSWORD: rungrow_migrator_ci
         ports:
-          - 55432:5432
+          - 55439:5432
         options: >-
           --health-cmd "pg_isready -U rungrow_migrator -d rungrow_workforce_test"
           --health-interval 5s
@@ -35,12 +35,12 @@ jobs:
         working-directory: workforce-api
     env:
       PGHOST: localhost
-      PGPORT: 55432
+      PGPORT: 55439
       PGDATABASE: rungrow_workforce_test
       PGUSER: rungrow_migrator
       PGPASSWORD: rungrow_migrator_ci
       RUNGROW_APP_PASSWORD: rungrow_app_ci_only
-      RUNGROW_TEST_DATABASE_URL: postgresql+asyncpg://rungrow_app_user:rungrow_app_ci_only@localhost:55432/rungrow_workforce_test
+      RUNGROW_TEST_DATABASE_URL: postgresql+asyncpg://rungrow_app_user:rungrow_app_ci_only@localhost:55439/rungrow_workforce_test
       APP_ENV: test
     steps:
       - uses: actions/checkout@v4
