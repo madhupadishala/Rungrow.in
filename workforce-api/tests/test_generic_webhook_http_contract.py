@@ -16,7 +16,7 @@ async def test_generic_webhook_http_contract_uses_external_and_workforce_tenant_
     secret = "generic-http-contract-secret-with-more-than-32-characters"
     monkeypatch.setenv("RUNGROW_INTERNAL_TENANT_ID", workforce_tenant)
     adapter = PRODUCT_ADAPTERS.get(product_id)
-    adapter.service_secret = secret
+    adapter.service_secret = secret.encode('utf-8')
     scopes = frozenset({product_id + ":write"})
     timestamp = str(int(time.time()))
     payload = {
