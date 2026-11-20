@@ -157,11 +157,11 @@ After the rehearsal succeeds, record a commit-bound human signoff using `POST /v
 - `release_layer=RELEASE_1_WORKFORCE`
 - `gate_name=RELIABILITY`
 - `status=PASS`
-- `cohort_id=flagship`, `scope_key=cohort`
+- `cohort_id=portfolio`, `scope_key=cohort` (Release 1 is shared by all product cohorts; Release 2 and Release 3 product evidence is cohort-specific).
 - Evidence object `backup_restore_test` containing `status=PASS`, `evidence_ref`, recovery point, RTO, RPO, verification result and operator.
 - The exact deployed candidate SHA and `environment=production`.
 
-A deferred product acceptance cannot satisfy this gate.
+A deferred product acceptance cannot satisfy this gate. Record the remaining shared Release 1 gates against `cohort_id=portfolio`; record flagship product and commercial gates against `cohort_id=flagship`, all with the same candidate SHA and production environment.
 
 ## 6. Post-deploy smoke checks
 
