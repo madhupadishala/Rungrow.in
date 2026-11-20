@@ -1,6 +1,7 @@
 """Idempotent RunGrow production tenant, adapter and provisional mission bootstrap."""
 from __future__ import annotations
 import asyncio
+from datetime import date
 import json
 import os
 import re
@@ -48,6 +49,10 @@ async def bootstrap(database_url: str | None = None) -> dict:
         raise RuntimeError(f"{CANDIDATE_SHA_ENV} must contain the immutable 40–64 character release commit SHA")
     if environment != "production":
         raise RuntimeError("Production bootstrap requires APP_ENV=production")
+    try:
+        date.fromisoformat(DEFERRED_DUE_DATE)
+    except ValueError as exc:
+        raise RuntimeError("RELEASE_DEFERRED_REVIEW_DUE_DATE must be an ISO calendar date") from exc
     dsn, ssl = asyncpg_dsn(database_url or os.getenv("DATABASE_URL", ""))
     _, products, revenue_target, capital_target = _portfolio()
     connection = await asyncpg.connect(dsn=dsn, ssl=ssl)
