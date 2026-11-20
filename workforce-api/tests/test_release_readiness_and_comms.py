@@ -281,6 +281,11 @@ async def test_release_readiness_deferrals_do_not_waive_flagship_security_or_rel
             for layer in LAYERS:
                 for _, gate in GATES:
                     evidence = {}
+                    if layer == "RELEASE_1_WORKFORCE" and gate == "AI_GOVERNANCE":
+                        evidence = {
+                            "single_use_human_approval": {"payload_binding": "verified", "separation_of_duties": "verified"},
+                            "fail_closed_external_gateways": {"whatsapp_503": "verified", "email_503": "verified"},
+                        }
                     if layer == "RELEASE_1_WORKFORCE" and gate == "RELIABILITY":
                         evidence = {"backup_restore_test": {"status": "PASS", "evidence_ref": "restore-fixture"}}
                     if layer == "RELEASE_1_WORKFORCE" and gate == "BUSINESS":
@@ -325,6 +330,26 @@ async def test_release_readiness_deferrals_do_not_waive_flagship_security_or_rel
     assert result["overall_decision"] == "GO"
     assert result["product_scope"]["required_live_products"] == list(live)
     assert set(result["product_scope"]["deferred_products"]) == all_products - set(live)
+
+    # Product deferrals cannot waive the shared reliability gate.
+    repo.signoffs.insert(0, {"release_layer": "RELEASE_1_WORKFORCE", "gate_name": "RELIABILITY",
+        "status": "DEFERRED_WITH_ACCEPTANCE", "evidence": {"accepted_risk": "skip restore"},
+        "candidate_sha": sha, "environment": "production", "cohort_id": "flagship", "scope_key": "cohort"})
+    reliability_blocked = await service.evaluate(cohort="flagship")
+    reliability = next(g for g in reliability_blocked["release_layers"]["RELEASE_1_WORKFORCE"]["gates"]
+                       if g["signoff_gate"] == "RELIABILITY")
+    assert reliability["status"] == "BLOCKED"
+    repo.signoffs.pop(0)
+
+    # Product deferrals cannot waive fail-closed external gateway evidence.
+    ai_row = next(x for x in repo.signoffs if x["release_layer"] == "RELEASE_1_WORKFORCE" and x["gate_name"] == "AI_GOVERNANCE")
+    ai_evidence = ai_row["evidence"]
+    ai_row["evidence"] = {"single_use_human_approval": ai_evidence["single_use_human_approval"]}
+    ai_blocked = await service.evaluate(cohort="flagship")
+    ai_gate = next(g for g in ai_blocked["release_layers"]["RELEASE_1_WORKFORCE"]["gates"] if g["signoff_gate"] == "AI_GOVERNANCE")
+    assert ai_gate["status"] == "BLOCKED"
+    ai_row["evidence"] = ai_evidence
+
     repo.signoffs.insert(0, {"release_layer": "RELEASE_2_PRODUCTS", "gate_name": "SECURITY",
         "status": "DEFERRED_WITH_ACCEPTANCE", "evidence": {"accepted_risk": "x", "risk_rationale": "x",
         "owner": "owner", "due_date": "2027-02-28", "compensating_control": "none"},
