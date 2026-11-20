@@ -11,7 +11,8 @@ ALTER TABLE release_gate_signoffs
 ALTER TABLE release_gate_signoffs VALIDATE CONSTRAINT release_gate_signoffs_cohort_nonempty;
 ALTER TABLE release_gate_signoffs VALIDATE CONSTRAINT release_gate_signoffs_scope_nonempty;
 CREATE UNIQUE INDEX IF NOT EXISTS release_gate_signoffs_bootstrap_identity
-  ON release_gate_signoffs(tenant_id,release_layer,gate_name,cohort_id,scope_key,candidate_sha);
+  ON release_gate_signoffs(tenant_id,release_layer,gate_name,cohort_id,scope_key,candidate_sha)
+  WHERE scope_key <> 'cohort';
 
 CREATE TABLE IF NOT EXISTS wf_tenants (
   id text PRIMARY KEY,
