@@ -2,7 +2,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI, Depends
 from httpx import ASGITransport, AsyncClient
-from app.main import app as route_source_app, get_workforce_repo, get_adapter_repo, PRODUCTS
+from app.main import app as route_source_app, get_workforce_repo, get_adapter_repo, get_generic_adapter_repo, PRODUCTS
 from app.policy import Principal
 from app.repositories import InMemoryWorkforceRepository
 from app.security import current_principal
@@ -27,6 +27,7 @@ def test_app(principal):
     async def override_adapter_repo():
         yield repository
     instance.dependency_overrides[get_adapter_repo]=override_adapter_repo
+    instance.dependency_overrides[get_generic_adapter_repo]=override_adapter_repo
     instance.state.test_repository=repository
     yield instance
     instance.dependency_overrides.clear()
