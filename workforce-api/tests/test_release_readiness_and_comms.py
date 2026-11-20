@@ -357,7 +357,7 @@ async def test_release_readiness_deferrals_do_not_waive_flagship_security_or_rel
     blocked = await service.evaluate(cohort="flagship")
     security = next(g for g in blocked["release_layers"]["RELEASE_2_PRODUCTS"]["gates"] if g["signoff_gate"] == "SECURITY")
     assert security["status"] == "BLOCKED"
-    assert "non-deferrable" in " ".join(security["missing_evidence"])
+    assert "Gate-wide deferral is prohibited" in " ".join(security["missing_evidence"])
     risk = "Attempted to defer an already-live flagship product"
     repo.signoffs.append({"release_layer": "RELEASE_2_PRODUCTS", "gate_name": "BUSINESS",
         "status": "DEFERRED_WITH_ACCEPTANCE", "evidence": {"product_id": "photo-studio-growth-os",
