@@ -51,7 +51,9 @@ class ReleaseReadinessService:
     row_cohort=s.get("cohort_id") or evidence.get("cohort_id") or cohort
     if row_cohort=="portfolio-expansion": row_cohort="portfolio"
     row_scope=s.get("scope_key") or evidence.get("product_id") or "cohort"
-    if row_cohort==cohort and row_scope=="cohort": layer_signoffs.append(s)
+    if row_scope=="cohort" and (
+        row_cohort==cohort or (layer=="RELEASE_1_WORKFORCE" and row_cohort=="portfolio")
+    ): layer_signoffs.append(s)
    latest_by_gate={}
    for item in layer_signoffs:
     if item["gate_name"] not in latest_by_gate: latest_by_gate[item["gate_name"]]=item
