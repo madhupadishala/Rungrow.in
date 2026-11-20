@@ -90,15 +90,15 @@ class ReleaseRepositoryMixin:
             item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,"release_layer":release_layer,
                 "gate_name":gate_name,"status":status,"evidence":evidence,"verifier_type":verifier_type,
                 "verifier_id":verifier_id,"candidate_sha":candidate_sha,"environment":environment,
-                "occurred_at":datetime.now(timezone.utc).isoformat()}
+                "cohort_id":cohort_id,"scope_key":scope_key,"occurred_at":datetime.now(timezone.utc).isoformat()}
             self.release_signoffs.insert(0,item)
             return item
         return await self._one("""
           INSERT INTO release_gate_signoffs
             (id,tenant_id,release_layer,gate_name,status,evidence,verifier_type,verifier_id,
-             candidate_sha,environment,occurred_at)
+             candidate_sha,environment,cohort_id,scope_key,occurred_at)
           VALUES (:id,:tenant,:layer,:gate,:status,CAST(:evidence AS jsonb),:type,:verifier,
-                  :sha,:environment,now()) RETURNING *
+                  :sha,:environment,:cohort,:scope,now()) RETURNING *
         """, {"id":str(uuid4()),"tenant":self.principal.tenant_id,"layer":release_layer,
               "gate":gate_name,"status":status,"evidence":json.dumps(evidence),
               "type":verifier_type,"verifier":verifier_id,"sha":candidate_sha,
@@ -109,6 +109,6 @@ class ReleaseRepositoryMixin:
             return [x for x in getattr(self,"release_signoffs",[]) if x["tenant_id"]==self.principal.tenant_id]
         return await self._rows("""
           SELECT id,release_layer,gate_name,status,evidence,verifier_type,verifier_id,
-                 candidate_sha,environment,occurred_at
+                 candidate_sha,environment,cohort_id,scope_key,occurred_at
           FROM release_gate_signoffs WHERE tenant_id=:tenant ORDER BY occurred_at DESC
         """, {"tenant":self.principal.tenant_id})
