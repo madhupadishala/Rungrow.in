@@ -17,10 +17,10 @@ async def test_postgres_role_is_restricted_and_rls_is_forced():
               SELECT c.relname,c.relforcerowsecurity
               FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
               WHERE n.nspname='public' AND c.relname IN
-                ('wf_tasks','wf_agent_runs','wf_memory','wf_approvals','wf_audit_events','wf_model_usage','adapter_idempotency_keys','product_telemetry_events','investment_capital_events','ceo_briefings','worker_heartbeats','release_gate_signoffs')
+                ('wf_tasks','wf_agent_runs','wf_memory','wf_approvals','wf_audit_events','wf_model_usage','adapter_idempotency_keys','product_telemetry_events','investment_capital_events','ceo_briefings','worker_heartbeats','release_gate_signoffs','wf_tenants','wf_product_bindings','wf_financial_baselines')
             """))
             rows=list(forced)
-            assert len(rows)==12
+            assert len(rows)==15
             assert all(row.relforcerowsecurity for row in rows)
             owners=await conn.execute(text("""
               SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
