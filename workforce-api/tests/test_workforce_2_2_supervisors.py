@@ -5,6 +5,7 @@ import pytest
 import httpx
 from pydantic import BaseModel
 from app.model_gateway import ModelGateway, OpenAICompatibleProvider, MockModelProvider
+from app.adapters.base import SignedWebhookVerifier
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
@@ -49,6 +50,12 @@ def test_commercial_tool_catalogue_and_ai_disclosure(monkeypatch):
     assert handoff["signature_headers"]["X-RunGrow-Signature"].startswith("sha256=")
     assert handoff["signature_headers"]["X-RunGrow-Timestamp"]
     assert handoff["signature_headers"]["Idempotency-Key"]
+    signed_body = __import__("json").dumps(handoff["adapter_payload"],sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()
+    SignedWebhookVerifier("test-adapter-secret").verify(signed_body,
+        handoff["signature_headers"]["X-RunGrow-Signature"],
+        handoff["signature_headers"]["X-RunGrow-Timestamp"],
+        tenant_id="customer-tenant",product_id="photo-studio-growth-os",
+        workforce_tenant_id="workforce-tenant",scopes=frozenset({"tenant.provision"}))
 
 
 @pytest.mark.parametrize("tool,employee,payload",[
