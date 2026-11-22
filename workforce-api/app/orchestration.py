@@ -82,6 +82,48 @@ class WorkforceOrchestrator:
         item=row.mappings().first()
         return _dict(item)
 
+    async def _reserve_work_order_budget(self, order: dict, reserve_cents: int) -> bool:
+        worker=order.get('locked_by_employee_id') or order.get('claimed_by')
+        row=await self.session.execute(text("""UPDATE department_work_orders
+          SET spent_cents=spent_cents+:reserve,updated_at=now()
+          WHERE id=:id AND tenant_id=:tenant AND status='IN_PROGRESS'
+            AND locked_by_employee_id=:worker AND spent_cents+:reserve<=max_budget_cents
+          RETURNING spent_cents,max_budget_cents"""),
+          {'reserve':reserve_cents,'id':order['id'],'tenant':self.principal.tenant_id,'worker':worker})
+        if row.first():
+            return True
+        await self.session.execute(text("""UPDATE department_work_orders SET status='AWAITING_APPROVAL',
+          last_error='Work-order budget ceiling reached; approval required',
+          locked_by_employee_id=NULL,lock_expires_at=NULL,claimed_by=NULL,claimed_at=NULL,updated_at=now()
+          WHERE id=:id AND tenant_id=:tenant"""),
+          {'id':order['id'],'tenant':self.principal.tenant_id})
+        await self.session.execute(text("""UPDATE executive_directives SET status='AWAITING_APPROVAL',updated_at=now()
+          WHERE id=:directive AND tenant_id=:tenant"""),
+          {'directive':order['directive_id'],'tenant':self.principal.tenant_id})
+        original=self.repo.principal
+        self.repo.principal=replace(original,user_id='digital-ceo',actor_type='agent')
+        try:
+            approval=await self.repo.create_approval(product_id=order['product_id'],employee_id='digital-ceo',
+              action_type='work_order.budget_increase',payload={'directive_id':str(order['directive_id']),
+              'work_order_id':str(order['id']),'current_budget_cents':int(order.get('max_budget_cents',100)),
+              'spent_cents':int(order.get('spent_cents',0)),'requested_additional_cents':reserve_cents},
+              expires_at=datetime.now(timezone.utc)+timedelta(minutes=30))
+        finally:
+            self.repo.principal=original
+        await self.session.execute(text("UPDATE executive_directives SET approval_id=:approval WHERE id=:id AND tenant_id=:tenant"),
+          {'approval':approval['id'],'id':order['directive_id'],'tenant':self.principal.tenant_id})
+        await self.repo.append_audit('work_order.budget_approval_required','department_work_order',str(order['id']),
+          order['product_id'],{'approval_id':str(approval['id']),'reserve_cents':reserve_cents})
+        return False
+
+    async def _settle_work_order_budget(self, order: dict, reserved_cents: int, actual_cents: int) -> None:
+        actual=max(0,min(int(actual_cents),reserved_cents))
+        refund=reserved_cents-actual
+        if refund:
+            await self.session.execute(text("""UPDATE department_work_orders
+              SET spent_cents=GREATEST(0,spent_cents-:refund),updated_at=now()
+              WHERE id=:id AND tenant_id=:tenant"""),
+              {'refund':refund,'id':order['id'],'tenant':self.principal.tenant_id})
     async def execute_work_order(self, order: dict) -> dict:
         employee=BY_ID[order["specialist_role_id"]]
         payload=order["tool_input"]
