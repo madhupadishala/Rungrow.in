@@ -34,9 +34,9 @@ def test_commercial_tool_catalogue_and_ai_disclosure():
         principal_permissions=principal,tenant_id="tenant-a",payload={"product_id":"photo-studio-growth-os","channel":"whatsapp","prospect":{"city":"Hyderabad"}})
     assert outreach["approval_required"] is True and outreach["sent"] is False
     assert "AI" in outreach["draft"] or "artificial intelligence" in outreach["draft"].lower()
-    quote,_,_=tools.execute(name="commercial_proposal_builder",employee=BY_ID["ae"],
-        principal_permissions=principal,tenant_id="tenant-a",payload={"product_id":"photo-studio-growth-os","tier":"Starter","months":2})
-    assert quote["currency"]=="INR" and quote["subtotal_inr"]==1998
+    with pytest.raises(ValueError,match="published price book"):
+        tools.execute(name="commercial_proposal_builder",employee=BY_ID["ae"],
+            principal_permissions=principal,tenant_id="tenant-a",payload={"product_id":"photo-studio-growth-os","tier":"Starter","months":2})
     handoff,_,_=tools.execute(name="product_onboarding_trigger",employee=BY_ID["onboarding"],
         principal_permissions=principal,tenant_id="tenant-a",payload={"product_id":"photo-studio-growth-os",
         "external_tenant_id":"customer-tenant","workforce_tenant_id":"workforce-tenant"})
