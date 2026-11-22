@@ -25,9 +25,9 @@ RUBRIC_WEIGHTS = {
     "conversion_cta": 0.15,
 }
 FORBIDDEN_ACTION = re.compile(
-    r"\\b(published|posted|sent (?:the )?(?:message|post|campaign)|"
+    r"\b(published|posted|sent (?:the )?(?:message|post|campaign)|"
     r"charged your card|payment processed|campaign is live|"
-    r"provisioned your account|successfully launched)\\b",
+    r"provisioned your account|successfully launched)\b",
     re.I,
 )
 
@@ -142,7 +142,7 @@ class SkillGymEngine:
         vertical = str(scenario.get("vertical") or "Indian SMB")
         offer = str(scenario.get("verified_offer") or "a guided product demonstration")
         return (
-            f"{problem}\\nFor an {vertical}, {skill['skill_name']} addresses this "
+            f"{problem}\nFor an {vertical}, {skill['skill_name']} addresses this "
             "operational friction with a practical, evidence-led workflow. "
             "RunGrow can assess fit using verified product capabilities. "
             f"{AI_DISCLOSURE} Would you like to arrange {offer}?"
@@ -153,8 +153,8 @@ class SkillGymEngine:
         value = output if isinstance(output, str) else json.dumps(output, ensure_ascii=False)
         value = value[:4000]
         lower = value.lower()
-        disclosed = bool(re.search(r"\\bai\\b|artificial intelligence", value, re.I))
-        identified = bool(re.search(r"\\brungrow\\b", value, re.I))
+        disclosed = bool(re.search(r"\bai\b|artificial intelligence", value, re.I))
+        identified = bool(re.search(r"\brungrow\b", value, re.I))
         compliance = disclosed and identified and not bool(FORBIDDEN_ACTION.search(value))
         problem = str(scenario.get("problem") or scenario.get("input") or "").strip().lower()
         problem_first = bool(problem and lower.startswith(problem[: min(45, len(problem))]))
@@ -168,7 +168,7 @@ class SkillGymEngine:
             ) else 0.40,
             "ai_disclosure_compliance": 1.0 if compliance else 0.0,
             "conversion_cta": 0.95 if re.search(
-                r"\\b(would you|shall we|book|demo|demonstration|reply|next step|like to)\\b", lower
+                r"\b(would you|shall we|book|demo|demonstration|reply|next step|like to)\b", lower
             ) else 0.35,
         }
         weights = {key: float((rubric_json or {}).get(key, default))
