@@ -1457,6 +1457,7 @@ async def extract_public_business_page(body: dict,
 async def create_marketing_image(body: dict,
     p: Principal=Depends(require_permission("content.draft"))):
     from .artifact_engine import ArtifactEngine
+    authorize_product_access(p,str(body.get("product_id","")))
     try: return ArtifactEngine().generate_marketing_image(**body)
     except (ValueError,PermissionError) as exc: raise HTTPException(422,str(exc)) from exc
 
@@ -1464,6 +1465,7 @@ async def create_marketing_image(body: dict,
 async def create_pdf_artifact(body: dict,
     p: Principal=Depends(require_permission("proposal.draft"))):
     from .artifact_engine import ArtifactEngine
+    authorize_product_access(p,str(body.get("product_id","")))
     try: return ArtifactEngine().generate_pdf_brochure_and_quote(**body)
     except (ValueError,PermissionError) as exc: raise HTTPException(422,str(exc)) from exc
 
