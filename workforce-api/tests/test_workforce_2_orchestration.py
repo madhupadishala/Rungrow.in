@@ -61,6 +61,9 @@ async def test_founder_directive_executes_department_graph_and_single_use_approv
                     order = await service.claim_work_order("integration-worker")
                     if order is None:
                         break
+                    assert order["locked_by_employee_id"] == "integration-worker"
+                    assert order["lock_expires_at"] is not None
+                    assert order["max_budget_cents"] >= order["spent_cents"]
                     outcome = await service.execute_work_order(order)
                     assert outcome["status"] in {"APPROVED_BY_HEAD", "REVISION_REQUESTED"}
                     completed_orders += 1
@@ -100,6 +103,25 @@ async def test_founder_directive_executes_department_graph_and_single_use_approv
         async with factory() as session:
             async with PostgresWorkforceRepository(session, other):
                 visible = await session.execute(text("SELECT count(*) FROM executive_directives"))
-                assert visible.scalar_one() == 0
+                assert visible.scalar_one() == 0        # Budget ceiling pauses execution and requires a single-use approval.
+        async with factory() as session:
+            async with PostgresWorkforceRepository(session, principal) as repo:
+                service = WorkforceOrchestrator(repo, principal, WorkforceToolRegistry(directory_fetcher=FixtureDirectoryFetcher()))
+                budget_directive = await service.submit_directive(
+                    "Check budget enforcement for a Hyderabad photography prospecting work order",
+                    "photo-studio-growth-os")
+                await session.execute(text("""UPDATE department_work_orders SET max_budget_cents=0
+                    WHERE tenant_id=:tenant AND directive_id=:directive AND department='Growth & Marketing'"""),
+                    {"tenant":tenant,"directive":budget_directive["id"]})
+                held_order = await service.claim_work_order("budget-worker")
+                assert held_order is not None
+                assert held_order["locked_by_employee_id"] == "budget-worker"
+                held = await service.execute_work_order(held_order)
+                assert held["status"] == "AWAITING_APPROVAL"
+                detail = await service.get_directive(budget_directive["id"])
+                assert detail["status"] == "AWAITING_APPROVAL"
+                growth = next(x for x in detail["department_work_orders"] if x["department"] == "Growth & Marketing")
+                assert growth["status"] == "AWAITING_APPROVAL"
+                assert growth["spent_cents"] == 0
     finally:
         await engine.dispose()
