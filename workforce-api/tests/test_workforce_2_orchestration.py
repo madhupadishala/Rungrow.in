@@ -31,14 +31,31 @@ async def test_founder_directive_executes_department_graph_and_single_use_approv
                     "Prepare a campaign and lead pipeline for Photo Studio Growth OS in Hyderabad",
                     "photo-studio-growth-os")
                 assert created["department_count"] == 5
-                for _ in range(5):
+                # Simulate one manager revision request, then a passing specialist resubmission.
+                original_acceptance = service._acceptance
+                review_attempts = {"legal": 0}
+                def acceptance(tool_name, result):
+                    if tool_name == "compliance_disclosure_check" and review_attempts["legal"] == 0:
+                        review_attempts["legal"] += 1
+                        return False
+                    return original_acceptance(tool_name, result)
+                service._acceptance = acceptance
+                completed_orders = 0
+                while True:
                     order = await service.claim_work_order("integration-worker")
-                    assert order is not None
+                    if order is None:
+                        break
                     outcome = await service.execute_work_order(order)
-                    assert outcome["status"] == "APPROVED_BY_HEAD"
+                    assert outcome["status"] in {"APPROVED_BY_HEAD", "REVISION_REQUESTED"}
+                    completed_orders += 1
+                    assert completed_orders <= 7
                 detail = await service.get_directive(created["id"])
                 assert detail["status"] == "AWAITING_APPROVAL"
                 assert len(detail["department_work_orders"]) == 5
+                assert completed_orders == 6
+                legal_order = next(x for x in detail["department_work_orders"] if x["department"] == "Legal, Risk & Compliance")
+                assert legal_order["revision_count"] == 1
+                assert len(legal_order["review_history"]) == 2
                 assert all(x["status"] == "APPROVED_BY_HEAD" for x in detail["department_work_orders"])
                 assert len(detail["tool_execution_proofs"]) == 5
                 assert all(x["status"] == "PASSED" for x in detail["tool_execution_proofs"])
