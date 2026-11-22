@@ -27,6 +27,7 @@ class WorkforceOrchestrator:
 
     async def submit_directive(self, command: str, product_id: str | None=None) -> dict:
         if not command or len(command.strip())<8: raise ValueError("Founder directive is too short")
+        if not product_id: raise ValueError("A product scope is required for a Founder directive")
         if product_id and product_id not in {e.product_id for e in BY_ID.values() if e.product_id}:
             raise ValueError("Unknown product scope")
         if product_id and "*" not in self.principal.permissions and product_id not in self.principal.product_ids:
@@ -83,14 +84,25 @@ class WorkforceOrchestrator:
         employee=BY_ID[order["specialist_role_id"]]
         payload=order["tool_input"]
         if isinstance(payload,str): payload=json.loads(payload)
+        if order["tool_name"]=="icp_lead_scoring":
+            prior=await self.session.execute(text("""SELECT deliverable FROM department_work_orders
+              WHERE tenant_id=:tenant AND directive_id=:directive AND department='Growth & Marketing'
+                AND status='APPROVED_BY_HEAD'"""),{"tenant":self.principal.tenant_id,"directive":order["directive_id"]})
+            research=prior.mappings().first()
+            if research:
+                delivered=research["deliverable"]
+                if isinstance(delivered,str): delivered=json.loads(delivered)
+                payload={**payload,"candidates":delivered.get("candidates",[])}
         started=time.perf_counter()
         try:
             # Public research is an async, robots-aware operation; all other tools are pure.
             if order["tool_name"]=="public_directory_research":
-                from .commercial_intelligence import RobotsCompliantHttpFetcher
                 fetcher=self.tools.directory_fetcher
-                batch=await fetcher.discover(query=payload.get("query",""),city=payload.get("city",""),
-                    product_id=payload.get("product_id") or "",source_urls=payload.get("source_urls",[]))
+                if not fetcher.allow_domains:
+                    batch=type("BlockedBatch",(),{"candidates":[],"blocked":[{"url":u,"reason":"No research domain allowlist is configured"} for u in payload.get("source_urls",[])]})()
+                else:
+                    batch=await fetcher.discover(query=payload.get("query",""),city=payload.get("city",""),
+                        product_id=payload.get("product_id") or "",source_urls=payload.get("source_urls",[]))
                 result={"candidates":batch.candidates,"blocked":batch.blocked,
                         "robots_policy":"fail_closed","source_count":len(batch.candidates)}
                 digest=hashlib.sha256(_json(payload).encode()).hexdigest()
@@ -133,7 +145,7 @@ class WorkforceOrchestrator:
             return result.get("robots_policy")=="fail_closed" and all(x.get("source_url") for x in result.get("candidates",[]))
         if tool_name=="icp_lead_scoring": return isinstance(result.get("scores"),list)
         if tool_name=="campaign_budget_estimate": return result.get("recommended_budget_inr",0)>=0 and not result.get("spend_authorised",True)
-        if tool_name=="compliance_disclosure_check": return "passed" in result and result.get("publication_authorised") is False
+        if tool_name=="compliance_disclosure_check": return result.get("passed") is True and result.get("publication_authorised") is False
         if tool_name=="product_handoff_draft": return result.get("external_contact_performed") is False
         return False
 
