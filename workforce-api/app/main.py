@@ -1003,3 +1003,122 @@ async def approve_founder_directive(directive_id: str, body: FounderDirectiveApp
         return await service.approve_external(directive_id, body.approval_id)
     except PermissionError as exc:
         raise HTTPException(409, str(exc)) from exc
+
+class SingleUseApprovalRequest(BaseModel):
+    reason: str = Field(default="Founder approved governed dispatch", max_length=1000)
+
+@app.post("/v1/approvals/{approval_id}/approve")
+async def approve_single_use_outbox_action(approval_id: str,
+    body: SingleUseApprovalRequest,
+    p: Principal = Depends(require_permission("approval.decide")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo)):
+    from sqlalchemy import text
+    import httpx
+    approval_rows=await repo.list_approvals()
+    approval=next((x for x in approval_rows if str(x["id"])==approval_id),None)
+    if not approval:
+        raise HTTPException(404,"Approval not found")
+    authorize_product_access(p,approval.get("product_id"))
+    if approval.get("status")!="PENDING":
+        raise HTTPException(409,"Approval is not pending or was already consumed")
+    outbox=await repo._one("""SELECT * FROM wf_outbox_events
+      WHERE approval_id=:approval AND tenant_id=:tenant FOR UPDATE""",
+      {"approval":approval_id,"tenant":p.tenant_id})
+    if not outbox:
+        raise HTTPException(404,"Governed outbox event not found")
+    if outbox["payload_hash"]!=approval["payload_hash"]:
+        raise HTTPException(409,"Outbox payload hash does not match approval token")
+    approved=await repo.decide_approval(approval_id,"approved",body.reason,approval.get("product_id"))
+    event=outbox["payload"] if isinstance(outbox["payload"],dict) else json.loads(outbox["payload"])
+    dispatch=event.get("dispatch_payload") or {}
+    await repo.session.execute(text("""UPDATE wf_outbox_events SET status='DISPATCHING',
+      attempt_count=attempt_count+1,updated_at=now() WHERE id=:id AND tenant_id=:tenant
+      AND status='QUEUED_FOR_APPROVAL'"""),{"id":outbox["id"],"tenant":p.tenant_id})
+    try:
+        if approval["action_type"] in {"whatsapp.send","email.send"}:
+            from .communications import IntegrationNotConfiguredError, TransactionalEmailGateway, WhatsAppCloudGateway
+            employee=BY_ID.get(approval["employee_id"])
+            if employee is None:
+                raise HTTPException(403,"Approving employee role is unavailable")
+            if not dispatch.get("to") or not dispatch.get("message"):
+                await repo.session.execute(text("""UPDATE wf_outbox_events SET status='BLOCKED_INVALID_RECIPIENT',
+                  last_error='A verified recipient address and message are required',updated_at=now()
+                  WHERE id=:id AND tenant_id=:tenant"""),{"id":outbox["id"],"tenant":p.tenant_id})
+                await repo.append_audit("outbox.dispatch_blocked_invalid_recipient","outbox_event",
+                    str(outbox["id"]),approval["product_id"],{"approval_id":approval_id})
+                raise HTTPException(422,"A verified recipient address is required before dispatch")
+            run=await repo.create_agent_run(product_id=approval["product_id"],employee_id=employee.id,
+                task="Founder-approved outbound communication",status="planned",
+                summary="Governed dispatch from single-use approval",steps=[],
+                correlation_id=str(outbox["id"]),is_sandbox=False)
+            gateway=WhatsAppCloudGateway(repo) if approval["action_type"]=="whatsapp.send" else TransactionalEmailGateway(repo)
+            try:
+                result=await gateway.send(principal=p,employee=employee,run=run,
+                    payload=dispatch,approval_id=approval_id)
+            except IntegrationNotConfiguredError as exc:
+                await repo.session.execute(text("""UPDATE wf_outbox_events SET status='BLOCKED_UNCONFIGURED',
+                  last_error=:error,updated_at=now() WHERE id=:id AND tenant_id=:tenant"""),
+                  {"error":str(exc)[:1000],"id":outbox["id"],"tenant":p.tenant_id})
+                await repo.append_audit("outbox.dispatch_blocked_unconfigured","outbox_event",
+                    str(outbox["id"]),approval["product_id"],{"approval_id":approval_id,"channel":event.get("channel")})
+                raise HTTPException(503,str(exc)) from exc
+            await repo.session.execute(text("""UPDATE wf_outbox_events SET status='SENT',
+              provider_response=CAST(:response AS jsonb),dispatched_at=now(),updated_at=now()
+              WHERE id=:id AND tenant_id=:tenant"""),
+              {"response":json.dumps(result,default=str),"id":outbox["id"],"tenant":p.tenant_id})
+            await repo.append_audit("outbox.communication_sent","outbox_event",str(outbox["id"]),
+                approval["product_id"],{"approval_id":approval_id,"channel":event.get("channel")})
+            return {"approval_id":approval_id,"status":"SENT","provider_result":result}
+        if approval["action_type"]=="product.onboarding.dispatch":
+            payload=dispatch
+            adapter_payload=payload.get("adapter_payload") or {}
+            headers=payload.get("signature_headers") or {}
+            employee=BY_ID.get(approval["employee_id"])
+            if employee is None:
+                raise HTTPException(403,"Onboarding employee role is unavailable")
+            run=await repo.create_agent_run(product_id=approval["product_id"],employee_id=employee.id,
+                task="Founder-approved product onboarding adapter dispatch",status="planned",
+                summary="Signed v1 adapter dispatch attempt",steps=[],
+                correlation_id=str(outbox["id"]),is_sandbox=False)
+            await repo.consume_approval(approval_id,product_id=approval["product_id"],
+                employee_id=employee.id,action_type=approval["action_type"],payload=payload,run_id=run["id"])
+            product=adapter_payload.get("product_id","")
+            url=os.getenv("RUNGROW_PRODUCT_ADAPTER_DISPATCH_URL") or os.getenv(
+                "RUNGROW_ADAPTER_DISPATCH_URL_"+product.upper().replace("-","_"),"")
+            if not url:
+                await repo.session.execute(text("""UPDATE wf_outbox_events SET status='BLOCKED_UNCONFIGURED',
+                  last_error='Product adapter dispatch URL is not configured',updated_at=now()
+                  WHERE id=:id AND tenant_id=:tenant"""),{"id":outbox["id"],"tenant":p.tenant_id})
+                await repo.append_audit("outbox.adapter_dispatch_blocked_unconfigured","outbox_event",
+                    str(outbox["id"]),approval["product_id"],{"approval_id":approval_id,
+                    "signature_present":bool(headers.get("X-RunGrow-Signature"))})
+                raise HTTPException(503,"Product adapter dispatch URL is not configured")
+            raw=json.dumps(adapter_payload,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()
+            request_headers={**headers,"Content-Type":"application/json",
+                "X-RunGrow-External-Tenant-Id":str(adapter_payload.get("external_tenant_id","")),
+                "X-RunGrow-Tenant-ID":str(adapter_payload.get("workforce_tenant_id","")),
+                "X-RunGrow-Product-ID":product,"X-RunGrow-Scopes":"tenant.provision",
+                "X-Correlation-ID":str(adapter_payload.get("correlation_id",""))}
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response=await client.post(url,content=raw,headers=request_headers)
+            response.raise_for_status()
+            response_data={"http_status":response.status_code,"response_hash":__import__("hashlib").sha256(response.content).hexdigest(),
+                "delivery":"adapter_acknowledged_not_verified"}
+            await repo.session.execute(text("""UPDATE wf_outbox_events SET status='DISPATCH_ACCEPTED',
+              provider_response=CAST(:response AS jsonb),dispatched_at=now(),updated_at=now()
+              WHERE id=:id AND tenant_id=:tenant"""),
+              {"response":json.dumps(response_data),"id":outbox["id"],"tenant":p.tenant_id})
+            await repo.append_audit("outbox.adapter_dispatch_attempted","outbox_event",str(outbox["id"]),
+                approval["product_id"],{"approval_id":approval_id,"signature_present":True,
+                "http_status":response.status_code,"delivery":"not_claimed"})
+            return {"approval_id":approval_id,"status":"DISPATCH_ACCEPTED","delivery":"not_claimed"}
+        raise HTTPException(403,"Approval action is not an outbox dispatch action")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await repo.session.execute(text("""UPDATE wf_outbox_events SET status='FAILED',
+          last_error=:error,updated_at=now() WHERE id=:id AND tenant_id=:tenant"""),
+          {"error":str(exc)[:1000],"id":outbox["id"],"tenant":p.tenant_id})
+        await repo.append_audit("outbox.dispatch_failed","outbox_event",str(outbox["id"]),
+            approval["product_id"],{"approval_id":approval_id,"error_type":type(exc).__name__})
+        raise HTTPException(502,"Governed dispatch failed; inspect the outbox audit event") from exc
