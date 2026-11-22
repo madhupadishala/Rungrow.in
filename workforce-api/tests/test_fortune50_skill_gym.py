@@ -26,7 +26,7 @@ def test_fortune50_registry_has_56_roles_across_11_departments_and_all_six_speci
     assert BY_ID["social-media-lead"].manager=="growth-director"
     assert all(BY_ID[x].manager=="social-media-lead" for x in expected-{"social-media-lead","customer-advocacy"})
     assert BY_ID["customer-advocacy"].manager=="cs-director"
-    assert all(BY_ID[x].mission and BY_ID[x].skills and BY_ID[x].permissions and BY_ID[x].boundary for x in expected)
+    assert all(BY_ID[x].mission and BY_ID[x].skills and BY_ID[x].permissions and BY_ID[x].boundary and BY_ID[x].kpis for x in expected)
 
 
 def test_fortune50_skill_catalog_contains_100_plus_unique_versionable_rubric_skills():
