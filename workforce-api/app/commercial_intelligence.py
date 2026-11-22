@@ -73,6 +73,7 @@ class RobotsDisallowed(PermissionError):
 class DiscoveryBatch:
     candidates: list[dict[str, Any]] = field(default_factory=list)
     blocked: list[dict[str, str]] = field(default_factory=list)
+    usage: list[dict[str, int]] = field(default_factory=list)
 
 
 class DirectoryFetcher(Protocol):
@@ -328,6 +329,8 @@ class TinyFishResearchProvider:
                 if str(data.get("status", "COMPLETED")).upper() not in {"COMPLETED", "SUCCESS"}:
                     raise ValueError("TinyFish extraction run did not complete successfully")
                 extracted = data.get("result", data.get("data", {}))
+                steps = int(data.get("numOfSteps", data.get("num_of_steps", self.max_steps)))
+                batch.usage.append({"steps": max(0, min(steps, self.max_steps))})
                 if isinstance(extracted, str):
                     extracted = json.loads(extracted)
                 if not isinstance(extracted, dict):
