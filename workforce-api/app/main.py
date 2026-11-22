@@ -1405,6 +1405,8 @@ async def queue_social_publish(body: SocialPublishRequest,
     p: Principal=Depends(require_permission("campaign.publish")),
     repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
     authorize_product_access(p,body.product_id)
+    if body.channel.lower() not in {"linkedin","instagram","x","youtube","whatsapp","telegram"}:
+        raise HTTPException(422,"Unsupported social publishing channel")
     if "social-publisher" not in BY_ID: raise HTTPException(503,"Social publisher role is unavailable")
     if not re.search(r"\bAI\b|artificial intelligence",body.content,re.I) or "RunGrow" not in body.content:
         raise HTTPException(422,"AI identity and RunGrow disclosure are mandatory")
