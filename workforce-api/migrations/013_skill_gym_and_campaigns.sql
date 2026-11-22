@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS agent_skills (
     CHECK (status IN ('DRAFT','SANDBOX_TESTING','PROMOTED','REJECTED')),
   latest_score numeric(5,4),
   version_hash text NOT NULL,
+  version_number integer NOT NULL DEFAULT 1 CHECK (version_number >= 1),
   created_by text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
