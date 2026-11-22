@@ -57,8 +57,13 @@ class ArtifactEngine:
                     origin = f"{parsed.scheme}://{parsed.netloc}"
                     async def guard(route):
                         request_url = route.request.url
-                        target = urlparse(request_url)
-                        if target.scheme not in {"http", "https"} or target.hostname != parsed.hostname:
+                        try:
+                            normalized, host = self.fetcher._validate_url(request_url)
+                            robots = await self.fetcher._get_robots(host, urlparse(normalized).scheme)
+                            allowed = robots.can_fetch(self.fetcher.user_agent, normalized)
+                        except Exception:
+                            allowed = False
+                        if not allowed:
                             await route.abort()
                         else:
                             await route.continue_()
