@@ -38,6 +38,9 @@ class ArtifactEngine:
         return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(value or ""))[:limit]
 
     async def headless_browser_page_extract(self, url: str) -> dict:
+        # An empty allowlist is not an "allow all" configuration for browser extraction.
+        if not getattr(self.fetcher, "allow_domains", set()):
+            raise ArtifactPolicyError("Public page extraction requires RUNGROW_ARTIFACT_ALLOW_DOMAINS")
         # Robots/domain/SSRF validation is performed before a browser is allowed to load.
         fetched = await self.fetcher.fetch_page(url)
         parsed = urlparse(url)
