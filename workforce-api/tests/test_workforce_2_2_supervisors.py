@@ -239,7 +239,7 @@ async def test_postgres16_outreach_approval_dispatch_is_single_use_and_fails_clo
                    'Outreach','Prepare approved outreach','[]'::jsonb,'outbound-sdr','personalized_outreach_draft',
                    '{}'::jsonb,100,0,'IN_PROGRESS',0)"""),
                   {"id":order_id,"tenant":tenant,"directive":directive_id})
-                payload={"to":"+15551234567","channel":"whatsapp","body":"Hello. I am RunGrow's AI assistant."}
+                payload={"product_id":"photo-studio-growth-os","to":"+15551234567","channel":"whatsapp","body":"Hello. I am RunGrow's AI assistant."}
                 draft,_,_=WorkforceToolRegistry().execute(name="personalized_outreach_draft",
                     employee=BY_ID["outbound-sdr"],principal_permissions=frozenset({"*"}),
                     tenant_id=tenant,payload=payload)
