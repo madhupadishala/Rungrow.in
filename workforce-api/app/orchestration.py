@@ -148,7 +148,7 @@ class WorkforceOrchestrator:
             if order["tool_name"]=="public_directory_research":
                 source_urls=payload.get("source_urls",[])
                 if not source_urls:
-                    source_urls=await self.tools.directory_search.search(payload.get("query",""),payload.get("city",""),limit=20)
+                    source_urls=await self.tools.directory_search.search(payload.get("query",""),payload.get("city",""),limit=5)
                 payload["source_urls"]=source_urls
                 if hasattr(fetcher,"max_steps"):
                     step_cost=max(1,int(os.getenv("TINYFISH_STEP_COST_CENTS","2")))
