@@ -1052,6 +1052,8 @@ async def approve_single_use_outbox_action(approval_id: str,
                 summary="Governed dispatch from single-use approval",steps=[],
                 correlation_id=str(outbox["id"]),is_sandbox=False)
             gateway=WhatsAppCloudGateway(repo) if approval["action_type"]=="whatsapp.send" else TransactionalEmailGateway(repo)
+            if approval["action_type"]=="email.artifacts.send":
+                gateway.action_type="email.artifacts.send"
             try:
                 result=await gateway.send(principal=p,employee=employee,run=run,
                     payload=dispatch,approval_id=approval_id)
