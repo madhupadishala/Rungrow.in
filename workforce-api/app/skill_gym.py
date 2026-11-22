@@ -27,7 +27,7 @@ class SkillGymEngine:
     async def seed_catalog(self):
         """Idempotently materialise the curated catalog into this tenant."""
         for skill in FORTUNE50_SKILLS:
-            await self.build_or_update_skill(**skill)
+            await self.build_or_update_skill(**{k:skill[k] for k in ('skill_id','department','role_id','category','skill_name','instructions','rubric_json')})
         return {"seeded":len(FORTUNE50_SKILLS),"catalog_count":len(FORTUNE50_SKILLS)}
 
     async def build_or_update_skill(self, *, skill_id, department, role_id, category,
