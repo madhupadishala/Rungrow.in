@@ -14,6 +14,7 @@ from app.repositories import PostgresWorkforceRepository
 from app.registry import BY_ID
 from app.skill_registry import resolve_runtime_skill_bundle
 from app.tool_registry import WorkforceToolRegistry, ToolAuthorizationError
+from app.orchestration import WorkforceOrchestrator
 
 DB_URL=os.getenv("RUNGROW_TEST_DATABASE_URL")
 
