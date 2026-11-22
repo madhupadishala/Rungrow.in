@@ -247,10 +247,10 @@ async def test_postgres16_outreach_approval_dispatch_is_single_use_and_fails_clo
                     {"principal":founder.user_id})
                 with pytest.raises(Exception) as raised:
                     await approve_single_use_outbox_action(str(approval["id"]),SingleUseApprovalRequest(),founder,repo)
-                assert getattr(raised.value,"status_code",None)==503
-                outbox=(await session.execute(text("SELECT status FROM wf_outbox_events WHERE approval_id=:id"),
-                    {"id":approval["id"]})).scalar_one()
-                assert outbox=="BLOCKED_UNCONFIGURED"
+                outbox_row=(await session.execute(text("SELECT status,last_error FROM wf_outbox_events WHERE approval_id=:id"),
+                    {"id":approval["id"]})).mappings().one()
+                assert getattr(raised.value,"status_code",None)==503, f"dispatch error={raised.value}; outbox={dict(outbox_row)}"
+                assert outbox_row["status"]=="BLOCKED_UNCONFIGURED"
                 approved=(await session.execute(text("SELECT status FROM wf_approvals WHERE id=:id"),
                     {"id":approval["id"]})).scalar_one()
                 assert approved=="APPROVED"
@@ -306,7 +306,7 @@ async def test_postgres16_signed_onboarding_approval_consumes_once_and_records_b
                 await session.execute(text("SELECT set_config('app.current_principal_id',:principal,true)"),
                     {"principal":founder.user_id})
                 with pytest.raises(Exception) as raised:
-                    await approve_single_use_outbox_action(approval["id"],SingleUseApprovalRequest(),founder,repo)
+                    await approve_single_use_outbox_action(str(approval["id"]),SingleUseApprovalRequest(),founder,repo)
                 assert getattr(raised.value,"status_code",None)==503
                 outbox=(await session.execute(text("SELECT status FROM wf_outbox_events WHERE approval_id=:id"),
                     {"id":approval["id"]})).scalar_one()
