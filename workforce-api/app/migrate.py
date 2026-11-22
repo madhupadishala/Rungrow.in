@@ -2,7 +2,8 @@
 
 Run with: python -m app.migrate
 The legacy 001_workforce.sql bootstrap is intentionally excluded; the canonical
-chain starts at 001_initial_workforce_schema.sql.
+chain starts at 001_initial_workforce_schema.sql. New numbered migrations (including
+010_workforce_2_orchestration.sql) are discovered automatically and checksum-verified.
 """
 from __future__ import annotations
 
