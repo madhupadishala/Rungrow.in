@@ -39,5 +39,39 @@
      activeDirectiveId=result.id;await refreshDirective(result.id);
    }catch(e){$("w2-status").textContent=e.message}
  });
- if(location.protocol==="https:"&&location.hostname==="localhost")$("api-base").value=location.origin;
+
+ let voiceSessionId="",voiceActive=false,voiceRecognition=null,liveKitRoom=null,voicePendingApproval="";
+ const voiceTranscript=$("voice-transcript");
+ function addVoiceLine(speaker,message){const p=document.createElement("p");p.className="voice-line "+(speaker==="CEO"?"ceo":"founder");const b=document.createElement("b");b.textContent=speaker==="CEO"?"Digital CEO":"Founder";p.appendChild(b);p.appendChild(document.createTextNode(message));voiceTranscript.appendChild(p);voiceTranscript.scrollTop=voiceTranscript.scrollHeight}
+ function speakVoice(message){if(!("speechSynthesis" in window))return;window.speechSynthesis.cancel();const utterance=new SpeechSynthesisUtterance(message);utterance.rate=1;utterance.pitch=1;window.speechSynthesis.speak(utterance)}
+ async function sendVoiceTurn(transcript,source="text",interruptedAt=null){
+   if(!voiceSessionId)throw new Error("Start a voice session first.");
+   addVoiceLine("FOUNDER",transcript);
+   const payload={transcript,source};if(interruptedAt!==null)payload.interrupted_at_ms=interruptedAt;
+   const result=await api("/v1/voice/sessions/"+encodeURIComponent(voiceSessionId)+"/turn",{method:"POST",body:JSON.stringify(payload)});
+   addVoiceLine("CEO",result.response);speakVoice(result.response);
+   if(result.action?.type==="approval_confirmation_required"){voicePendingApproval=result.action.approval_id;const box=$("voice-approval-confirm");box.hidden=false;box.innerHTML="";const row=document.createElement("div");row.className="voice-confirm";const label=document.createElement("span");label.textContent="Confirm single-use approval "+voicePendingApproval;const button=document.createElement("button");button.className="run";button.textContent="Confirm & dispatch";button.addEventListener("click",()=>sendVoiceTurn("confirm approval","text").catch(e=>addVoiceLine("CEO",e.message)));row.append(label,button);box.appendChild(row)}
+   if(result.action?.type==="approval_executed"){$("voice-approval-confirm").hidden=true;voicePendingApproval=""}
+   return result;
+ }
+ function startBrowserRecognition(){
+   const Speech=window.SpeechRecognition||window.webkitSpeechRecognition;
+   if(!Speech){$("voice-state").textContent="Session active · use text input";return}
+   voiceRecognition=new Speech();voiceRecognition.lang="en-IN";voiceRecognition.continuous=true;voiceRecognition.interimResults=true;
+   let speechStartedAt=0;
+   voiceRecognition.onresult=event=>{let finalText="",interim="";for(let i=event.resultIndex;i<event.results.length;i++){const text=event.results[i][0].transcript;if(event.results[i].isFinal)finalText+=text;else interim+=text}if(finalText.trim())sendVoiceTurn(finalText.trim(),"web_speech",speechStartedAt?Math.max(0,Date.now()-speechStartedAt):null).catch(e=>addVoiceLine("CEO",e.message));};
+   voiceRecognition.onstart=()=>{speechStartedAt=Date.now();$("voice-state").textContent="● Listening"};
+   voiceRecognition.onerror=e=>{$("voice-state").textContent="Microphone: "+e.error};
+   voiceRecognition.onend=()=>{if(voiceActive){try{voiceRecognition.start()}catch(_){}}else $("voice-state").textContent="Session active"};
+   try{voiceRecognition.start();$("voice-mic").textContent="Microphone listening"}catch(e){$("voice-state").textContent="Microphone unavailable · use text"}
+ }
+ $("voice-start").addEventListener("click",async()=>{try{connect();const product_id=$("voice-product").value;const created=await api("/v1/voice/sessions",{method:"POST",body:JSON.stringify({client_mode:"browser",product_id})});voiceSessionId=created.session_id;voiceActive=true;$("voice-session-id").textContent=voiceSessionId;$("voice-transport").textContent=created.transport==="livekit"?"LiveKit room connected":"Browser fallback · no live room configured";$("voice-state").textContent="● Session active";$("voice-start").disabled=true;$("voice-stop").disabled=false;$("voice-send").disabled=false;$("voice-mic").disabled=false;voiceTranscript.innerHTML="";addVoiceLine("CEO",created.identity_disclosure);speakVoice(created.identity_disclosure);
+   if(created.transport==="livekit"&&window.LivekitClient&&created.participant_token){try{const Room=window.LivekitClient.Room;liveKitRoom=new Room();await liveKitRoom.connect(created.livekit_url,created.participant_token);$("voice-transport").textContent="LiveKit connected · browser speech bridge active"}catch(e){$("voice-state").textContent="LiveKit connection failed · browser-only mode";}}
+   startBrowserRecognition();
+ }catch(e){$("voice-state").textContent=e.message}});
+ $("voice-stop").addEventListener("click",()=>{voiceActive=false;if(voiceRecognition){voiceRecognition.onend=null;voiceRecognition.stop();voiceRecognition=null}if(liveKitRoom){liveKitRoom.disconnect();liveKitRoom=null}window.speechSynthesis?.cancel();voiceSessionId="";$("voice-start").disabled=false;$("voice-stop").disabled=true;$("voice-send").disabled=true;$("voice-mic").disabled=true;$("voice-state").textContent="VOICE SESSION ENDED";$("voice-session-id").textContent="No active session"});
+ $("voice-send").addEventListener("click",async()=>{const value=$("voice-text").value.trim();if(!value)return;try{await sendVoiceTurn(value,"text");$("voice-text").value=""}catch(e){addVoiceLine("CEO",e.message)}});
+ $("voice-text").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();$("voice-send").click()}});
+ $("voice-mic").addEventListener("click",()=>{if(!voiceActive)return;if(voiceRecognition){voiceRecognition.onend=null;voiceRecognition.stop();voiceRecognition=null;$("voice-mic").textContent="Start microphone";$("voice-state").textContent="Session active · microphone paused"}else startBrowserRecognition()});
+\n if(location.protocol==="https:"&&location.hostname==="localhost")$("api-base").value=location.origin;
 })();
