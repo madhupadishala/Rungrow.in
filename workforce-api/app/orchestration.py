@@ -1,6 +1,6 @@
 """Durable CEO -> department head -> specialist orchestration for Workforce 2.1."""
 from __future__ import annotations
-import asyncio, hashlib, json, re, time
+import asyncio, hashlib, json, re, time, os
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -139,6 +139,7 @@ class WorkforceOrchestrator:
                 payload={**payload,"candidates":delivered.get("candidates",[])}
         started=time.perf_counter()
         reserved_cents=0
+        batch=None
         try:
             fetcher=self.tools.directory_fetcher
             if order["tool_name"]=="public_directory_research":
@@ -174,6 +175,10 @@ class WorkforceOrchestrator:
             else:
                 result,latency,digest=self.tools.execute(name=order["tool_name"],employee=employee,
                     principal_permissions=self.principal.permissions,tenant_id=self.principal.tenant_id,payload=payload)
+            actual_cents=reserved_cents
+            if batch is not None and hasattr(fetcher,"max_steps") and getattr(batch,"usage",None):
+                actual_cents=sum(int(x.get("steps",fetcher.max_steps)) for x in batch.usage)*max(1,int(os.getenv("TINYFISH_STEP_COST_CENTS","2")))
+            await self._settle_work_order_budget(order,reserved_cents,actual_cents)
             passed=self._acceptance(order["tool_name"],result)
             status="PASSED" if passed else "FAILED"
             await self.session.execute(text("""INSERT INTO employee_tool_executions
@@ -198,7 +203,7 @@ class WorkforceOrchestrator:
                "employee":employee.id,"tool":order["tool_name"],"hash":digest,"input":_json(payload),
                "latency":int((time.perf_counter()-started)*1000),"error":str(exc)[:1000]})
             await self.session.execute(text("""UPDATE department_work_orders SET status='REJECTED',
-              last_error=:error,updated_at=now() WHERE id=:id AND tenant_id=:tenant"""),
+              last_error=:error,locked_by_employee_id=NULL,lock_expires_at=NULL,claimed_by=NULL,claimed_at=NULL,updated_at=now() WHERE id=:id AND tenant_id=:tenant"""),
               {"error":str(exc)[:1000],"id":order["id"],"tenant":self.principal.tenant_id})
             await self._refresh_directive(order["directive_id"])
             return {"work_order_id":str(order["id"]),"status":"REJECTED","error":str(exc)[:1000]}
@@ -225,7 +230,8 @@ class WorkforceOrchestrator:
             status="REJECTED"; deliverable=result
         await self.session.execute(text("""UPDATE department_work_orders SET status=:status,
           revision_count=revision_count+CASE WHEN :status='REVISION_REQUESTED' THEN 1 ELSE 0 END,
-          review_history=CAST(:history AS jsonb),deliverable=CAST(:deliverable AS jsonb),updated_at=now()
+          review_history=CAST(:history AS jsonb),deliverable=CAST(:deliverable AS jsonb),
+          locked_by_employee_id=NULL,lock_expires_at=NULL,claimed_by=NULL,claimed_at=NULL,updated_at=now()
           WHERE id=:id AND tenant_id=:tenant"""),
           {"status":status,"history":_json(history),"deliverable":_json(deliverable),
            "id":order["id"],"tenant":self.principal.tenant_id})
@@ -236,7 +242,8 @@ class WorkforceOrchestrator:
         rows=await self.session.execute(text("""SELECT status,department,deliverable FROM department_work_orders
           WHERE tenant_id=:tenant AND directive_id=:id"""),{"tenant":self.principal.tenant_id,"id":directive_id})
         items=[dict(x) for x in rows.mappings().all()]
-        if any(x["status"]=="REJECTED" for x in items): status="FAILED"
+        if any(x["status"]=="AWAITING_APPROVAL" for x in items): status="AWAITING_APPROVAL"
+        elif any(x["status"]=="REJECTED" for x in items): status="FAILED"
         elif items and all(x["status"]=="APPROVED_BY_HEAD" for x in items): status="IN_REVIEW"
         else: status="DELEGATED"
         if status=="IN_REVIEW":
