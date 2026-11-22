@@ -57,7 +57,7 @@ class WorkforceToolRegistry:
             self.directory_fetcher=TinyFishResearchProvider(api_key=os.getenv('TINYFISH_API_KEY'),allow_domains=allow_domains,deny_domains=deny_domains)
         else:
             self.directory_fetcher=RobotsCompliantHttpFetcher(allow_domains=allow_domains,deny_domains=deny_domains)
-        self.directory_search = SearXNGDirectorySearch(allow_domains=self.directory_fetcher.allow_domains)
+        self.directory_search = SearXNGDirectorySearch(allow_domains=getattr(self.directory_fetcher, 'allow_domains', allow_domains))
         self._tools: dict[str, SpecialistTool] = {}
         self.register(SpecialistTool("public_directory_research",frozenset({"market-intel","lead-research"}),
             frozenset({"research.public"}),self._research))
