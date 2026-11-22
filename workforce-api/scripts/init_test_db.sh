@@ -48,6 +48,10 @@ GRANT USAGE ON SCHEMA public TO $APP_USER;
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO $APP_USER;
 GRANT SELECT, INSERT, UPDATE ON TABLE prospect_records, campaign_plans TO $APP_USER;
 REVOKE DELETE, TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA public FROM $APP_USER;
+-- Workforce 2.1 tables are durable application records and require explicit DELETE
+-- grants after the global least-privilege revoke above.
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
+  executive_directives, department_work_orders, employee_tool_executions TO $APP_USER;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO $APP_USER;
 GRANT SELECT, INSERT, DELETE ON rate_limit_events TO $APP_USER;
 GRANT SELECT, INSERT ON release_gate_signoffs TO $APP_USER;
