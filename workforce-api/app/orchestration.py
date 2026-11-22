@@ -49,7 +49,33 @@ class WorkforceOrchestrator:
         city=city_match.group(1).strip() if city_match else ""
         urls_match=re.search(r"https?://[^\s,;]+",command)
         urls=[urls_match.group(0)] if urls_match else []
-        for spec in DEPARTMENT_PLAN:
+        plan=list(DEPARTMENT_PLAN)
+        generated={}
+        if self.model_gateway is not None:
+            from pydantic import BaseModel
+            class DepartmentPlanItem(BaseModel):
+                department: str
+                title: str
+                objective: str
+                max_budget_cents: int
+                dependencies: list[str] = []
+            class CEOPlan(BaseModel):
+                orders: list[DepartmentPlanItem]
+            decision,_=await self.model_gateway.generate_structured(
+                messages=[{"role":"system","content":"You are RunGrow Digital CEO. Return a concrete objective-specific plan for each relevant department. Use only these departments: "+", ".join(x["department"] for x in DEPARTMENT_PLAN)+". Budget is an integer INR paise ceiling, not spend authorization. Dependencies must refer to department names. Never enable live outreach or onboarding for DISCOVERY_ONLY products."},
+                    {"role":"user","content":_json({"founder_objective":command,"product_id":product_id,"product_playbook":PRODUCT_PLAYBOOKS[product_id]})}],
+                output_model=CEOPlan,tenant_id=tenant,product_id=product_id,employee_id="digital-ceo",run_id=directive_id)
+            generated={x.department:x for x in decision.orders}
+        elif product_id=="growtoys":
+            # Offline plan preserves research-only discovery and removes commercial execution.
+            plan=[x for x in plan if x["department"] in {"Growth & Marketing","Product & Design","Legal, Risk & Compliance"}]
+        for spec in plan:
+            generated_item=generated.get(spec["department"])
+            if generated_item:
+                spec={**spec,"title":generated_item.title,"objective":generated_item.objective,
+                    "budget":max(1,min(1000000,generated_item.max_budget_cents)),"dependencies":generated_item.dependencies}
+            else:
+                spec={**spec,"objective":command.strip(),"budget":10000}
             payload={"product_id":product_id,"query":command[:300],"city":city,"source_urls":urls,
                      "candidates":[],"lead_count":20,"cost_per_lead_inr":100,
                      "contingency_pct":0.15,"draft":command + " RunGrow AI assistant acting on behalf of RunGrow.","prospect":{},"sales_context":{},
@@ -66,7 +92,7 @@ class WorkforceOrchestrator:
                 CAST(:dependencies AS jsonb),:specialist,:tool,CAST(:payload AS jsonb))"""),
               {"tenant":tenant,"directive":directive_id,"product":product_id,"department":spec["department"],
                "head":spec["head"],"title":spec["title"],"objective":command,
-               "dependencies":_json(deps),"specialist":spec["specialist"],"tool":spec["tool"],"payload":_json(payload)})
+               "dependencies":_json(spec.get("dependencies",deps)),"specialist":spec["specialist"],"tool":spec["tool"],"payload":_json(payload),"budget":spec.get("budget",10000)})
         await self.session.execute(text("UPDATE executive_directives SET status='DELEGATED',updated_at=now() WHERE id=:id"),{"id":directive_id})
         await self.repo.append_audit("directive.delegated","executive_directive",directive_id,product_id,
                                      {"department_count":len(DEPARTMENT_PLAN),"command_hash":hashlib.sha256(command.encode()).hexdigest()})
