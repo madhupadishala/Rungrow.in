@@ -206,7 +206,7 @@ class ArtifactEngine:
                  Paragraph(xml_escape(self._safe_text(product_id)), styles["Heading2"]), Spacer(1, 8*mm)]
         if quote:
             story += [Paragraph("Prepared for: " + xml_escape(self._safe_text(customer_name)), styles["BodyText"]),
-                      Paragraph("Currency: INR • GST shown separately", styles["BodyText"]), Spacer(1, 5*mm)]
+                      Paragraph("Currency: INR - GST shown separately", styles["BodyText"]), Spacer(1, 5*mm)]
             rows = [["Description", "Qty", "Unit price (INR)", "Amount (INR)"]]
             subtotal = 0.0
             for item in line_items:
@@ -226,12 +226,12 @@ class ArtifactEngine:
             story += [table, Spacer(1, 8*mm),
                       Paragraph("Commercial terms are subject to final agreement and applicable tax review.", styles["BodyText"])]
         else:
-            story += [Paragraph(self._safe_text(playbook.get("icp", "Business operations")), styles["BodyText"]),
-                      Spacer(1, 4*mm), Paragraph("Practical workflows • Measurable outcomes • Human-governed execution", styles["BodyText"]),
+            story += [Paragraph(xml_escape(self._safe_text(playbook.get("icp", "Business operations"))), styles["BodyText"]),
+                      Spacer(1, 4*mm), Paragraph("Practical workflows - Measurable outcomes - Human-governed execution", styles["BodyText"]),
                       PageBreak(), Paragraph("Product highlights", styles["Heading1"])]
             for line in ("Structured lead and customer workflows", "Operational visibility and reporting",
                          "Role-based execution with human approvals", "Evidence-backed customer onboarding"):
-                story.append(Paragraph("• " + line, styles["BodyText"])); story.append(Spacer(1, 3*mm))
+                story.append(Paragraph("- " + line, styles["BodyText"])); story.append(Spacer(1, 3*mm))
         doc.build(story)
         data = path.read_bytes()
         if not data.startswith(b"%PDF-"):
