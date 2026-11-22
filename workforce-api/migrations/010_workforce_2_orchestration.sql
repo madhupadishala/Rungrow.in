@@ -79,3 +79,15 @@ CREATE POLICY employee_tool_executions_tenant_scope ON employee_tool_executions 
  USING(tenant_id=current_setting('app.current_tenant_id',true))
  WITH CHECK(tenant_id=current_setting('app.current_tenant_id',true));
 
+
+DO $do$
+DECLARE table_name text;
+BEGIN
+ FOREACH table_name IN ARRAY ARRAY[
+   'executive_directives','department_work_orders','employee_tool_executions'
+ ] LOOP
+   EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);
+   EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', table_name);
+ END LOOP;
+END
+$do$;
