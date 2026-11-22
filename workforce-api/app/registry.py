@@ -86,10 +86,32 @@ def _competency_profile(row):
         technical += ("Financial reconciliation", "Policy and control evidence review", "Approval and audit-trail validation")
     else:
         technical += ("Operational dashboard analysis", "Structured work-order tracking", "Document and evidence quality review")
-    audience = ("Indian Photo Studios", "Independent Clinics & Dental/Derma Practices", "SaaS Onboarding")
+    audience = ["Indian Photo Studios", "Independent Clinics & Dental/Derma Practices", "SaaS Onboarding"]
+    audience_by_department = {
+        "Executive Office": "Indian SMB operating models, board governance and capital planning",
+        "Growth & Marketing": "Indian SMB brand strategy, digital media and channel attribution",
+        "Sales & Revenue": "Indian SMB buying journeys, INR proposals and commercial qualification",
+        "Customer Success": "Indian SMB adoption, customer health, retention and verified ROI",
+        "Technology": "Multi-tenant SaaS architecture, APIs, security and reliability",
+        "Product & Engineering": "SaaS product discovery, delivery quality and integration contracts",
+        "Finance": "Indian INR commercial controls, GST-aware operations and reconciliation",
+        "Legal & Compliance": "Indian business compliance, consent, privacy and approval evidence",
+    }
+    audience.append(audience_by_department.get(department, "Indian SMB operations and SaaS delivery"))
+    preferred_registers = {
+        "Executive Office": ("executive", "consultative"),
+        "Growth & Marketing": ("educational", "consultative"),
+        "Sales & Revenue": ("consultative", "executive"),
+        "Customer Success": ("consultative", "educational"),
+        "Technology": ("technical", "educational"),
+        "Product & Engineering": ("technical", "consultative"),
+        "Finance": ("executive", "technical"),
+        "Legal & Compliance": ("technical", "executive"),
+    }
+    registers = preferred_registers.get(department, ("consultative", "educational"))
     languages = (
         "English (Indian Business)", "Telugu", "Hindi", "Hinglish",
-        "Registers: consultative, educational, executive, technical",
+        "Communication registers: " + ", ".join(registers),
     )
     guards = tuple(dict.fromkeys((
         "No unsolicited bulk outreach, spam, scraping of private groups, or consent bypass",
@@ -99,7 +121,7 @@ def _competency_profile(row):
         "Respect tenant isolation, least privilege, product eligibility, and immutable audit evidence",
         boundary,
     )))
-    return technical, languages, audience, guards
+    return technical, languages, tuple(audience), guards
 
 EMPLOYEES=tuple(
     Employee(*r, *_competency_profile(r)) for r in DATA
