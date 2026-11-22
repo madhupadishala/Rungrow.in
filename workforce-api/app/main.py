@@ -1175,8 +1175,10 @@ async def create_voice_session(
             repo, p, client_mode=body.client_mode, product_id=body.product_id
         )
     except LiveKitNotConfigured as exc:
-        raise HTTPException(503, {"detail": str(exc), "session_id": exc.session_id,
-                                  "live_room": "unavailable"}) from exc
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=503, content={
+            "detail": str(exc), "session_id": exc.session_id, "live_room": "unavailable"
+        })
     except VoiceSessionForbidden as exc:
         raise HTTPException(403, str(exc)) from exc
     except PermissionError as exc:
