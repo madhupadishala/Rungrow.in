@@ -87,7 +87,31 @@ jobs:
           export PATH="/tmp/ci-bin:$PATH"
           bash ./scripts/init_test_db.sh
       - name: Run workforce API tests
-        run: pytest -v tests
+        shell: bash
+        run: |
+          set +e
+          pytest -v tests --junitxml=/tmp/workforce-pytest.xml
+          test_exit=$?
+          set -e
+          python - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          path = "/tmp/workforce-pytest.xml"
+          if not os.path.exists(path):
+              summary = "Pytest did not produce a JUnit report (collection or startup failure)."
+              counts = {"tests": 0, "failures": 0, "errors": 1, "skipped": 0}
+          else:
+              root = ET.parse(path).getroot()
+              suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+              counts = {key: sum(int(suite.attrib.get(key, 0)) for suite in suites)
+                        for key in ("tests", "failures", "errors", "skipped")}
+              summary = f"Tests: {counts['tests']} · Failed: {counts['failures']} · Errors: {counts['errors']} · Skipped: {counts['skipped']}"
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+              out.write("### Workforce API pytest\n\n" + summary + "\n")
+          print(summary)
+          if test_exit:
+              raise SystemExit(test_exit)
+
 
   marketing-site:
     runs-on: ubuntu-latest
