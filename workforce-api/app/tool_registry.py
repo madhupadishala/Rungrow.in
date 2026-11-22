@@ -32,11 +32,11 @@ class WorkforceToolRegistry:
         self.register(SpecialistTool("icp_lead_scoring",frozenset({"market-intel","lead-research","sales-ops"}),
             frozenset({"lead.enrich"}),self._score))
         self.register(SpecialistTool("campaign_budget_estimate",frozenset({"growth-director","campaigns","finance"}),
-            frozenset({"campaign.draft"}),self._budget))
+            frozenset({"finance.read"}),self._budget))
         self.register(SpecialistTool("compliance_disclosure_check",frozenset({"legal","brand","campaigns"}),
             frozenset({"compliance.read"}),self._compliance))
         self.register(SpecialistTool("product_handoff_draft",frozenset({"sales-ops","ae","cs-director","onboarding"}),
-            frozenset({"product.read"}),self._handoff))
+            frozenset({"customer.read"}),self._handoff))
 
     def register(self, tool: SpecialistTool):
         if tool.name in self._tools: raise ValueError(f"Duplicate tool: {tool.name}")
@@ -51,8 +51,8 @@ class WorkforceToolRegistry:
         if employee.id not in tool.roles: raise ToolAuthorizationError("Role is not authorised for this tool")
         if not tool.required_permissions.issubset(set(employee.permissions)):
             raise ToolAuthorizationError("Registered employee permissions do not grant this tool")
-        if "*" not in principal_permissions and not tool.required_permissions.issubset(principal_permissions):
-            raise ToolAuthorizationError("Calling principal lacks required permissions")
+        if "*" not in principal_permissions and not ({"agent.run","work.assign"} & set(principal_permissions)):
+            raise ToolAuthorizationError("Orchestration principal lacks agent execution authority")
         if tool.external_effect and not approved_external:
             raise ToolAuthorizationError("External action requires single-use human approval")
         started=time.perf_counter()
