@@ -1035,7 +1035,7 @@ async def approve_single_use_outbox_action(approval_id: str,
       attempt_count=attempt_count+1,updated_at=now() WHERE id=:id AND tenant_id=:tenant
       AND status='QUEUED_FOR_APPROVAL'"""),{"id":outbox["id"],"tenant":p.tenant_id})
     try:
-        if approval["action_type"] in {"whatsapp.send","email.send"}:
+        if approval["action_type"] in {"whatsapp.send","email.send","email.artifacts.send"}:
             from .communications import IntegrationNotConfiguredError, TransactionalEmailGateway, WhatsAppCloudGateway
             employee=BY_ID.get(approval["employee_id"])
             if employee is None:
@@ -1052,6 +1052,8 @@ async def approve_single_use_outbox_action(approval_id: str,
                 summary="Governed dispatch from single-use approval",steps=[],
                 correlation_id=str(outbox["id"]),is_sandbox=False)
             gateway=WhatsAppCloudGateway(repo) if approval["action_type"]=="whatsapp.send" else TransactionalEmailGateway(repo)
+            if approval["action_type"]=="email.artifacts.send":
+                gateway.action_type="email.artifacts.send"
             try:
                 result=await gateway.send(principal=p,employee=employee,run=run,
                     payload=dispatch,approval_id=approval_id)
@@ -1367,6 +1369,23 @@ class SocialPublishRequest(BaseModel):
     content: str = Field(min_length=20,max_length=8000)
     utm: dict = Field(default_factory=dict)
 
+class SkillMdImportRequest(BaseModel):
+    skill_md: str = Field(min_length=20,max_length=65536)
+    department: str = Field(min_length=2,max_length=100)
+    role_id: str = Field(min_length=2,max_length=100)
+    scenarios: list[dict] = Field(default_factory=lambda: [
+        {"problem":"Manual lead follow-up delays reduce enquiries for an Indian photo studio","vertical":"Indian Photo Studio"},
+        {"problem":"Independent clinics need reliable customer onboarding and daily workflow visibility","vertical":"Independent Clinic"},
+    ],min_length=1,max_length=30)
+
+class ArtifactEmailQueueRequest(BaseModel):
+    product_id: str = Field(min_length=2,max_length=120)
+    to: list[str] = Field(min_length=1,max_length=20)
+    subject: str = Field(min_length=1,max_length=180)
+    body: str = Field(min_length=1,max_length=12000)
+    artifacts: list[dict] = Field(default_factory=list,max_length=10)
+
+
 @app.get("/v1/skills/catalog")
 async def skill_catalog(p: Principal=Depends(require_permission("skills.read"))):
     return {"count":len(FORTUNE50_SKILLS),"skills":list(FORTUNE50_SKILLS)}
@@ -1399,6 +1418,97 @@ async def skill_test_runs(skill_id: str,p: Principal=Depends(require_permission(
                           repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
     try: return await SkillGymEngine(repo,p).list_test_runs(skill_id)
     except LookupError as exc: raise HTTPException(404,str(exc)) from exc
+
+@app.post("/v1/skills/import-skill-md")
+async def import_skill_md(body: SkillMdImportRequest,
+    p: Principal=Depends(require_permission("skills.manage")),
+    repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    from .skill_importer import parse_skill_md, skill_to_gym_payload, SkillImportError
+    if body.role_id not in BY_ID:
+        raise HTTPException(404,"Unknown workforce role")
+    role=BY_ID[body.role_id]
+    if role.department!=body.department:
+        raise HTTPException(422,"Imported skill department does not match role registry")
+    try:
+        parsed=parse_skill_md(body.skill_md)
+        payload=skill_to_gym_payload(parsed,department=body.department,role_id=body.role_id)
+        gym=SkillGymEngine(repo,p)
+        await gym.build_or_update_skill(**payload)
+        result=await gym.run_realtime_skill_test(payload["skill_id"],body.scenarios)
+        return {"format":"Agent Skills SKILL.md","name":parsed.name,
+            "description":parsed.description,"license":parsed.license,
+            "compatibility":parsed.compatibility,"metadata":parsed.metadata,
+            "declared_tools_not_granted":list(parsed.allowed_tools),**result}
+    except SkillImportError as exc:
+        raise HTTPException(422,str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422,str(exc)) from exc
+
+@app.post("/v1/artifacts/browser/extract")
+async def extract_public_business_page(body: dict,
+    p: Principal=Depends(require_permission("research.public"))):
+    from .artifact_engine import ArtifactEngine
+    try:
+        return await ArtifactEngine().headless_browser_page_extract(str(body.get("url","")))
+    except (ValueError,PermissionError) as exc:
+        raise HTTPException(403,str(exc)) from exc
+
+@app.post("/v1/artifacts/marketing-image")
+async def create_marketing_image(body: dict,
+    p: Principal=Depends(require_permission("content.draft"))):
+    from .artifact_engine import ArtifactEngine
+    authorize_product_access(p,str(body.get("product_id","")))
+    try: return ArtifactEngine().generate_marketing_image(**body)
+    except (ValueError,PermissionError) as exc: raise HTTPException(422,str(exc)) from exc
+
+@app.post("/v1/artifacts/pdf")
+async def create_pdf_artifact(body: dict,
+    p: Principal=Depends(require_permission("proposal.draft"))):
+    from .artifact_engine import ArtifactEngine
+    authorize_product_access(p,str(body.get("product_id","")))
+    try: return ArtifactEngine().generate_pdf_brochure_and_quote(**body)
+    except (ValueError,PermissionError) as exc: raise HTTPException(422,str(exc)) from exc
+
+@app.post("/v1/artifacts/excel")
+async def create_excel_artifact(body: dict,
+    p: Principal=Depends(require_permission("analytics.read"))):
+    from .artifact_engine import ArtifactEngine
+    try: return ArtifactEngine().manage_excel_tracker(**body)
+    except ValueError as exc: raise HTTPException(422,str(exc)) from exc
+
+@app.post("/v1/artifacts/email/queue")
+async def queue_governed_artifact_email(body: ArtifactEmailQueueRequest,
+    p: Principal=Depends(require_permission("message.draft")),
+    repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    from .artifact_engine import ArtifactEngine
+    authorize_product_access(p,body.product_id)
+    playbook=PRODUCT_PLAYBOOKS.get(body.product_id)
+    if not playbook or playbook.get("stage")=="DISCOVERY_ONLY":
+        raise HTTPException(403,"Product is not eligible for commercial email collateral")
+    try:
+        payload=ArtifactEngine().governed_email_payload(
+            to=body.to,subject=body.subject,body=body.body,artifacts=body.artifacts)
+    except (ValueError,PermissionError) as exc:
+        raise HTTPException(422,str(exc)) from exc
+    dispatch={"to":payload["to"],"subject":payload["subject"],"message":payload["body"],
+              "attachments":payload["attachments"]}
+    approval=await repo.create_approval(product_id=body.product_id,employee_id="outbound-sdr",
+        action_type="email.artifacts.send",payload=dispatch,
+        expires_at=datetime.now(timezone.utc)+timedelta(minutes=30))
+    event={"channel":"email","dispatch_payload":dispatch}
+    await repo.session.execute(sql_text("""INSERT INTO wf_outbox_events
+      (id,tenant_id,product_id,directive_id,work_order_id,approval_id,employee_id,action_type,
+       payload_hash,payload,status,created_at,updated_at)
+      VALUES (:id,:tenant,:product,NULL,NULL,:approval,'outbound-sdr','email.artifacts.send',
+       :hash,CAST(:payload AS jsonb),'QUEUED_FOR_APPROVAL',now(),now())"""),
+      {"id":str(uuid4()),"tenant":p.tenant_id,"product":body.product_id,
+       "approval":approval["id"],"hash":approval["payload_hash"],"payload":json.dumps(event)})
+    await repo.append_audit("email.artifacts_queued","outbox_event",str(approval["id"]),
+        body.product_id,{"approval_id":approval["id"],"attachment_count":len(payload["attachments"]),
+        "status":"QUEUED_FOR_APPROVAL"})
+    return {"approval_id":approval["id"],"status":"QUEUED_FOR_APPROVAL",
+        "approval_status":approval["status"],"attachment_count":len(payload["attachments"]),
+        "dispatch_status":"NOT_DISPATCHED","single_use_approval_required":True}
 
 @app.post("/v1/social/publish")
 async def queue_social_publish(body: SocialPublishRequest,

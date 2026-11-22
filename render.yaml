@@ -6,7 +6,15 @@ services:
     dockerContext: .
     healthCheckPath: /health/ready
     preDeployCommand: python -m app.migrate
+    disk:
+      name: rungrow-artifacts
+      mountPath: /var/data/rungrow-artifacts
+      sizeGB: 1
     envVars:
+      - key: RUNGROW_ARTIFACT_ROOT
+        value: /var/data/rungrow-artifacts
+      - key: RUNGROW_ARTIFACT_ALLOW_DOMAINS
+        sync: false
       - key: APP_ENV
         value: production
       - key: DATABASE_URL

@@ -13,6 +13,7 @@ from .registry import BY_ID, Employee
 from .commercial_intelligence import RobotsCompliantHttpFetcher, TinyFishResearchProvider, score_icp, AI_IDENTITY_DISCLOSURE
 from .skill_registry import PRODUCT_PLAYBOOKS
 from .adapters.base import SignedWebhookVerifier
+from .artifact_engine import ArtifactEngine
 
 @dataclass(frozen=True)
 class SpecialistTool:
@@ -59,6 +60,7 @@ class WorkforceToolRegistry:
             self.directory_fetcher=RobotsCompliantHttpFetcher(allow_domains=allow_domains,deny_domains=deny_domains)
         self.directory_search = SearXNGDirectorySearch(allow_domains=getattr(self.directory_fetcher, 'allow_domains', allow_domains))
         self._tools: dict[str, SpecialistTool] = {}
+        self.artifacts = ArtifactEngine()
         self.register(SpecialistTool("public_directory_research",frozenset({"market-intel","lead-research"}),
             frozenset({"research.public"}),self._research))
         self.register(SpecialistTool("icp_lead_scoring",frozenset({"market-intel","lead-research","sales-ops"}),
@@ -88,6 +90,18 @@ class WorkforceToolRegistry:
             frozenset({"campaign.draft"}),self._social_event_campaign_plan))
         self.register(SpecialistTool("social_publish_dispatch",frozenset({"social-publisher"}),
             frozenset({"content.draft","compliance.read"}),self._social_publish_dispatch))
+
+        # Workforce 2.5 verifiable file and browser intelligence capabilities.
+        self.register(SpecialistTool("headless_browser_page_extract",frozenset({"market-intel","lead-research","social-media-lead"}),
+            frozenset({"research.public"}),self._artifact_browser))
+        self.register(SpecialistTool("generate_marketing_image",frozenset({"social-publisher","social-media-lead","brand"}),
+            frozenset({"content.draft"}),self._artifact_image))
+        self.register(SpecialistTool("generate_pdf_brochure_and_quote",frozenset({"ae","solutions","brand"}),
+            frozenset({"proposal.draft"}),self._artifact_pdf))
+        self.register(SpecialistTool("manage_excel_tracker",frozenset({"sales-ops","performance","onboarding","social-media-lead"}),
+            frozenset({"analytics.read"}),self._artifact_excel))
+        self.register(SpecialistTool("send_governed_email_with_artifacts",frozenset({"outbound-sdr","ae","executive-assistant"}),
+            frozenset({"message.draft"}),self._artifact_email))
 
     def register(self, tool: SpecialistTool):
         if tool.name in self._tools: raise ValueError(f"Duplicate tool: {tool.name}")
@@ -329,6 +343,30 @@ class WorkforceToolRegistry:
             {"phase":"live_event","tasks":["host run-of-show","consent-based recording","moderated Q&A","demo and attendance capture"]},
             {"phase":"post_event","tasks":["attendee segmentation","requested follow-up drafts","demo and quotation handoff","event ROI review"]}],
             "follow_up_days":[0,1,3,7],"external_actions_authorised":False}
+
+    async def _artifact_browser(self,p):
+        return await self.artifacts.headless_browser_page_extract(str(p.get("url","")))
+
+    def _artifact_image(self,p):
+        return self.artifacts.generate_marketing_image(
+            product_id=str(p.get("product_id","")),headline=str(p.get("headline","")),
+            subheadline=str(p.get("subheadline","")),format=str(p.get("format","square")),
+            highlights=p.get("highlights") or [])
+
+    def _artifact_pdf(self,p):
+        return self.artifacts.generate_pdf_brochure_and_quote(
+            product_id=str(p.get("product_id","")),customer_name=str(p.get("customer_name","")),
+            tier=p.get("tier"),months=int(p.get("months",12)),quote=bool(p.get("quote",False)),
+            items=p.get("items"),gst_rate=float(p.get("gst_rate",18)))
+
+    def _artifact_excel(self,p):
+        return self.artifacts.manage_excel_tracker(
+            tracker_type=str(p.get("tracker_type","")),rows=p.get("rows"))
+
+    def _artifact_email(self,p):
+        return self.artifacts.governed_email_payload(
+            to=p.get("to") or [],subject=str(p.get("subject","")),body=str(p.get("body","")),
+            artifacts=p.get("artifacts") or [])
 
     def _social_publish_dispatch(self,p):
         product=str(p.get("product_id",""))

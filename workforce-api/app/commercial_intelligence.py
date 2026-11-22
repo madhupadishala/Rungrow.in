@@ -8,6 +8,7 @@ import json
 import re
 import socket
 import time
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Any, Protocol
@@ -218,9 +219,11 @@ class RobotsCompliantHttpFetcher:
         snippet = (parser.meta.get("description") or parser.meta.get("og:description") or "").strip()[:2000]
         if not name:
             raise ValueError("Directory page did not expose a usable business title")
-        return {"business_name": name, "evidence_snippet": snippet, "source_url": normalized,
+        return {"business_name": name, "title": name, "evidence_snippet": snippet, "source_url": normalized,
                 "domain": host, "city": "", "public_contact_channel": None,
-                "decision_maker_name": None, "evidence_urls": [normalized]}
+                "decision_maker_name": None, "evidence_urls": [normalized],
+                "html": response.text[:1_000_000],
+                "fetched_at": datetime.now(timezone.utc).isoformat()}
 
     async def discover(self, *, query: str, city: str, product_id: str,
                        source_urls: list[str]) -> DiscoveryBatch:
