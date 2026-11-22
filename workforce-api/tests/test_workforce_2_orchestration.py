@@ -103,7 +103,9 @@ async def test_founder_directive_executes_department_graph_and_single_use_approv
         async with factory() as session:
             async with PostgresWorkforceRepository(session, other):
                 visible = await session.execute(text("SELECT count(*) FROM executive_directives"))
-                assert visible.scalar_one() == 0        # Budget ceiling pauses execution and requires a single-use approval.
+                assert visible.scalar_one() == 0
+
+        # Budget ceiling pauses execution and requires a single-use approval.
         async with factory() as session:
             async with PostgresWorkforceRepository(session, principal) as repo:
                 service = WorkforceOrchestrator(repo, principal, WorkforceToolRegistry(directory_fetcher=FixtureDirectoryFetcher()))
@@ -112,6 +114,9 @@ async def test_founder_directive_executes_department_graph_and_single_use_approv
                     "photo-studio-growth-os")
                 await session.execute(text("""UPDATE department_work_orders SET max_budget_cents=0
                     WHERE tenant_id=:tenant AND directive_id=:directive AND department='Growth & Marketing'"""),
+                    {"tenant":tenant,"directive":budget_directive["id"]})
+                await session.execute(text("""UPDATE department_work_orders SET status='APPROVED_BY_HEAD'
+                    WHERE tenant_id=:tenant AND directive_id=:directive AND department<>'Growth & Marketing'"""),
                     {"tenant":tenant,"directive":budget_directive["id"]})
                 held_order = await service.claim_work_order("budget-worker")
                 assert held_order is not None
