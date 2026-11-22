@@ -93,7 +93,7 @@ jobs:
           pytest -v tests --junitxml=/tmp/workforce-pytest.xml
           test_exit=$?
           set -e
-          python - <<'PY'
+          TEST_EXIT="$test_exit" python - <<'PY'
           import os
           import xml.etree.ElementTree as ET
           path = "/tmp/workforce-pytest.xml"
@@ -109,8 +109,8 @@ jobs:
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
               out.write("### Workforce API pytest\n\n" + summary + "\n")
           print(summary)
-          if test_exit:
-              raise SystemExit(test_exit)
+          raise SystemExit(int(os.environ["TEST_EXIT"]))
+          PY
 
 
   marketing-site:
@@ -156,10 +156,19 @@ jobs:
             [[ "$code" -eq 0 ]] || exit 1
           done
       - name: Build Next.js application when one exists
-        if: hashFiles('package.json') != ''
+        shell: bash
         run: |
-          npm ci
-          npm run build
+          if [[ -f package.json ]]; then
+            npm ci
+            npm run build
+          else
+            echo "No root Next.js package.json; static marketing entrypoint validated."
+          fi
       - name: Typecheck Next.js application when a TypeScript config exists
-        if: hashFiles('package.json', 'tsconfig.json') != ''
-        run: npx tsc --noEmit
+        shell: bash
+        run: |
+          if [[ -f package.json && -f tsconfig.json ]]; then
+            npx tsc --noEmit
+          else
+            echo "No root TypeScript application/config; no typecheck target."
+          fi
