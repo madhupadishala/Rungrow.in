@@ -69,7 +69,9 @@ class WorkforceOrchestrator:
     async def claim_work_order(self, worker_id: str) -> dict | None:
         row=await self.session.execute(text("""WITH candidate AS (
           SELECT w.id FROM department_work_orders w
-          WHERE w.tenant_id=:tenant AND (w.status IN ('ASSIGNED','REVISION_REQUESTED') OR (w.status='IN_PROGRESS' AND w.claimed_at < now() - interval '3 minutes'))
+          WHERE w.tenant_id=:tenant AND (w.status IN ('ASSIGNED','REVISION_REQUESTED') OR
+            (w.status='IN_PROGRESS' AND (w.lock_expires_at <= now() OR
+             (w.lock_expires_at IS NULL AND w.claimed_at < now() - interval '3 minutes')))
             AND NOT EXISTS (
               SELECT 1 FROM jsonb_array_elements_text(w.dependencies) d(dep)
               WHERE NOT EXISTS (SELECT 1 FROM department_work_orders prior
@@ -77,11 +79,12 @@ class WorkforceOrchestrator:
                   AND prior.status='APPROVED_BY_HEAD'))
           ORDER BY w.created_at LIMIT 1 FOR UPDATE SKIP LOCKED
         ) UPDATE department_work_orders w SET status='IN_PROGRESS',claimed_by=:worker,
-          claimed_at=now(),updated_at=now() FROM candidate c WHERE w.id=c.id
-          RETURNING w.*"""),{"tenant":self.principal.tenant_id,"worker":worker_id})
+          claimed_at=now(),locked_by_employee_id=:worker,
+          lock_expires_at=now()+interval '180 seconds',updated_at=now()
+          FROM candidate c WHERE w.id=c.id RETURNING w.*"""),
+          {"tenant":self.principal.tenant_id,"worker":worker_id})
         item=row.mappings().first()
         return _dict(item)
-
     async def _reserve_work_order_budget(self, order: dict, reserve_cents: int) -> bool:
         worker=order.get('locked_by_employee_id') or order.get('claimed_by')
         row=await self.session.execute(text("""UPDATE department_work_orders
