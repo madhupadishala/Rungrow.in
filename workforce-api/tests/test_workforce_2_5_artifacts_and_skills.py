@@ -21,7 +21,7 @@ license: Apache-2.0
 compatibility: RunGrow Workforce 2.5
 metadata:
   author: RunGrow
-  version: 1.0
+  version: "1.0"
 allowed-tools:
   - research.public
   - content.draft
