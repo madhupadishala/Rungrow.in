@@ -6,6 +6,7 @@ from app.policy import Principal
 from app.repositories import PostgresWorkforceRepository, session_factory
 from app.main import _WorkItemPlan, get_model_gateway
 from app.orchestrator import DurableTaskOrchestrator
+from app.orchestration import WorkforceOrchestrator
 
 async def run_worker():
     if settings.app_env == "production":
@@ -41,8 +42,16 @@ async def run_worker():
         try:
             async with factory() as session:
                 async with PostgresWorkforceRepository(session,principal) as repo:
-                    orchestrator=DurableTaskOrchestrator(repo,worker_id)
-                    task=await orchestrator.claim()
+                    workforce_v2=WorkforceOrchestrator(repo,principal)
+                    department_order=await workforce_v2.claim_work_order(worker_id)
+                    if department_order:
+                        status="BUSY"
+                        await beat("BUSY")
+                        await workforce_v2.execute_work_order(department_order)
+                        processed=1
+                    else:
+                        orchestrator=DurableTaskOrchestrator(repo,worker_id)
+                        task=await orchestrator.claim()
                     if task:
                         status="BUSY"
                         await beat("BUSY")
