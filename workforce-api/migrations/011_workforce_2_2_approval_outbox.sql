@@ -29,3 +29,20 @@ DROP POLICY IF EXISTS wf_outbox_tenant_isolation ON wf_outbox_events;
 CREATE POLICY wf_outbox_tenant_isolation ON wf_outbox_events
   USING (tenant_id = current_setting('app.current_tenant_id', true))
   WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true));
+
+-- Approval deciders need tenant/product-scoped visibility of pending tokens,
+-- independently of requester_id/approver_id, before the decision is recorded.
+DROP POLICY IF EXISTS wf_approvals_authorized_decider ON wf_approvals;
+CREATE POLICY wf_approvals_authorized_decider ON wf_approvals FOR ALL
+  USING (
+    tenant_id = current_setting('app.current_tenant_id', true)
+    AND current_setting('app.can_decide_approvals', true) = 'true'
+    AND (product_id IS NULL OR product_id = ANY(string_to_array(
+      current_setting('app.product_ids', true), ',')))
+  )
+  WITH CHECK (
+    tenant_id = current_setting('app.current_tenant_id', true)
+    AND current_setting('app.can_decide_approvals', true) = 'true'
+    AND (product_id IS NULL OR product_id = ANY(string_to_array(
+      current_setting('app.product_ids', true), ',')))
+  );
