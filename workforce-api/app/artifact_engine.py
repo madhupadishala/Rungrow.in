@@ -120,9 +120,9 @@ class ArtifactEngine:
         draw.ellipse((width-370, 90, width+120, 580), fill=PALETTE["haldi"])
         draw.rounded_rectangle((64, 70, width-64, height-70), radius=34,
                                outline=PALETTE["terracotta"], width=5)
-        font_bold = ImageFont.truetype("DejaVuSans-Bold.ttf", 64 if format == "square" else 76)
-        font_regular = ImageFont.truetype("DejaVuSans.ttf", 34)
-        font_small = ImageFont.truetype("DejaVuSans.ttf", 28)
+        font_bold = ImageFont.load_default(size=64 if format == "square" else 76)
+        font_regular = ImageFont.load_default(size=34)
+        font_small = ImageFont.load_default(size=28)
         draw.text((110, 150), "RUNGROW  •  BUSINESS GROWTH", font=font_small, fill=PALETTE["terracotta"])
         y = 300
         for line in self._wrap(headline, 24 if format == "square" else 20):
@@ -202,8 +202,8 @@ class ArtifactEngine:
                  Paragraph(self._safe_text(product_id), styles["Heading2"]), Spacer(1, 8*mm)]
         if quote:
             story += [Paragraph("Prepared for: " + self._safe_text(customer_name), styles["BodyText"]),
-                      Paragraph("Currency: INR (₹) • GST shown separately", styles["BodyText"]), Spacer(1, 5*mm)]
-            rows = [["Description", "Qty", "Unit price (₹)", "Amount (₹)"]]
+                      Paragraph("Currency: INR • GST shown separately", styles["BodyText"]), Spacer(1, 5*mm)]
+            rows = [["Description", "Qty", "Unit price (INR)", "Amount (INR)"]]
             subtotal = 0.0
             for item in line_items:
                 amount = float(item["quantity"]) * float(item["unit_price_inr"])
