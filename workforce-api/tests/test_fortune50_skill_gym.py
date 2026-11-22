@@ -49,15 +49,25 @@ async def test_postgres16_skill_gym_passes_sandbox_and_promotes_at_threshold():
                 skill=await gym.build_or_update_skill(skill_id="custom.social.hook",department="Growth & Marketing",
                     role_id="social-media-lead",category="digital_media",skill_name="Problem-first reel hook",
                     instructions="Start with a verified Indian SMB pain point, disclose AI and offer a useful next step.")
-                assert skill["status"]=="DRAFT"
+                assert skill["status"]=="DRAFT" and skill["version_number"]==1
                 result=await gym.run_realtime_skill_test("custom.social.hook",[
                     {"problem":"Manual follow-up delays lose local photography studio enquiries","vertical":"Indian photography SMB"},
                     {"problem":"Clinic staff spend hours reconciling daily counter records","vertical":"Indian clinic SMB"}])
                 assert result["passed"] is True
                 assert result["overall_score"]>=.85
-                stored=await repo._one("SELECT status,latest_score FROM agent_skills WHERE tenant_id=:tenant AND skill_id=:id",
+                stored=await repo._one("SELECT status,latest_score,version_number FROM agent_skills WHERE tenant_id=:tenant AND skill_id=:id",
                     {"tenant":principal.tenant_id,"id":"custom.social.hook"})
                 assert stored["status"]=="PROMOTED" and float(stored["latest_score"])>=.85
+                assert stored["version_number"]==1
+                same=await gym.build_or_update_skill(skill_id="custom.social.hook",department="Growth & Marketing",
+                    role_id="social-media-lead",category="digital_media",skill_name="Problem-first reel hook",
+                    instructions="Start with a verified Indian SMB pain point, disclose AI and offer a useful next step.")
+                assert same["status"]=="PROMOTED" and same["version_number"]==1
+                changed=await gym.build_or_update_skill(skill_id="custom.social.hook",department="Growth & Marketing",
+                    role_id="social-media-lead",category="digital_media",skill_name="Problem-first reel hook",
+                    instructions="Start with a verified Indian SMB pain point, cite evidence, disclose AI and offer a useful next step.")
+                assert changed["status"]=="DRAFT" and changed["version_number"]==2
+                assert changed["latest_score"] is None
                 runs=await gym.list_test_runs("custom.social.hook")
                 assert len(runs)==2 and all(x["passed"] for x in runs)
     finally: await engine.dispose()
