@@ -1,6 +1,7 @@
 """Durable CEO -> department head -> specialist orchestration for Workforce 2.1."""
 from __future__ import annotations
 import asyncio, hashlib, json, re, time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 from sqlalchemy import text
@@ -44,7 +45,7 @@ class WorkforceOrchestrator:
         for spec in DEPARTMENT_PLAN:
             payload={"product_id":product_id,"query":command[:300],"city":city,"source_urls":urls,
                      "candidates":[],"lead_count":20,"cost_per_lead_inr":100,
-                     "contingency_pct":0.15,"draft":command,"prospect":{},"sales_context":{},
+                     "contingency_pct":0.15,"draft":command + " RunGrow AI assistant acting on behalf of RunGrow.","prospect":{},"sales_context":{},
                      "next_step":"human discovery","source_evidence":[]}
             deps=[]
             if spec["department"]=="Sales & Revenue": deps=["Growth & Marketing"]
@@ -178,10 +179,17 @@ class WorkforceOrchestrator:
         if status=="IN_REVIEW":
             proposal={"directive_id":str(directive_id),"departments":[{"department":x["department"],"deliverable":x["deliverable"]} for x in items],
                       "external_actions":"NOT_EXECUTED","human_approval_required":True}
+            directive=await self.session.execute(text("SELECT product_id FROM executive_directives WHERE id=:id AND tenant_id=:tenant"),
+                {"id":directive_id,"tenant":self.principal.tenant_id})
+            product_id=directive.scalar_one()
+            approval=await self.repo.create_approval(product_id=product_id,employee_id="digital-ceo",
+                action_type="directive.external_execution",payload=proposal,
+                expires_at=datetime.now(timezone.utc)+timedelta(minutes=15))
             status="AWAITING_APPROVAL"
             await self.session.execute(text("""UPDATE executive_directives SET status=:status,
-              consolidated_proposal=CAST(:proposal AS jsonb),updated_at=now() WHERE id=:id AND tenant_id=:tenant"""),
-              {"status":status,"proposal":_json(proposal),"id":directive_id,"tenant":self.principal.tenant_id})
+              approval_id=:approval,consolidated_proposal=CAST(:proposal AS jsonb),updated_at=now()
+              WHERE id=:id AND tenant_id=:tenant"""),
+              {"status":status,"approval":approval["id"],"proposal":_json(proposal),"id":directive_id,"tenant":self.principal.tenant_id})
         else:
             await self.session.execute(text("UPDATE executive_directives SET status=:status,updated_at=now() WHERE id=:id AND tenant_id=:tenant"),
                 {"status":status,"id":directive_id,"tenant":self.principal.tenant_id})
@@ -205,7 +213,7 @@ class WorkforceOrchestrator:
         row=await self.session.execute(text("""UPDATE executive_directives SET approval_id=:approval,
           status='COMPLETED',completed_at=now(),updated_at=now()
           WHERE id=:id AND tenant_id=:tenant AND status='AWAITING_APPROVAL'
-            AND approval_id IS NULL RETURNING id"""),
+            AND approval_id=:approval RETURNING id"""),
           {"approval":approval_id,"id":directive_id,"tenant":self.principal.tenant_id})
         if not row.scalar_one_or_none(): raise PermissionError("Directive is not awaiting approval or approval already consumed")
         await self.repo.append_audit("directive.approved","executive_directive",directive_id,None,{"approval_id":approval_id,"external_execution":"not_started"})
