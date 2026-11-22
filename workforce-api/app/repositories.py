@@ -272,7 +272,7 @@ class PostgresWorkforceRepository(ReleaseRepositoryMixin, ReportingRepositoryMix
           VALUES (:id,:tenant,:product,:actor,:action,:type,:resource,CAST(:details AS jsonb),now())
         """), {"id": str(uuid4()), "tenant": self.principal.tenant_id, "product": product_id,
                "actor": self.principal.user_id, "action": action, "type": resource_type,
-               "resource": resource_id, "details": json.dumps(details)})
+               "resource": resource_id, "details": json.dumps(details, default=str)})
 
     async def upsert_prospect(self, *, product_id, dedupe_key, business_name, city, segment,
                              decision_maker_name, public_contact_channel, source_url, evidence_urls,
