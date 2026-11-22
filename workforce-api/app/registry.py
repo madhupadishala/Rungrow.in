@@ -124,7 +124,13 @@ def _competency_profile(row):
     return technical, languages, tuple(audience), guards
 
 EMPLOYEES=tuple(
-    Employee(*r, *_competency_profile(r)) for r in DATA
+    Employee(
+        *r[:8],
+        r[8] if len(r) > 8 else None,
+        r[9] if len(r) > 9 else (),
+        *_competency_profile(r),
+    )
+    for r in DATA
 )
 BY_ID={e.id:e for e in EMPLOYEES}
 DEPARTMENTS=tuple(dict.fromkeys(e.department for e in EMPLOYEES))
