@@ -16,6 +16,10 @@ PRODUCT_PLAYBOOKS = {
  "photo-studio-growth-os":{"version":"psgo-playbook-2.2.1","stage":"COMMERCIAL","tiers":{"Starter":{"monthly_inr":4999},"Pro":{"monthly_inr":9999},"Studio Enterprise":{"monthly_inr":19999}},"pricing_status":"PROVISIONAL_FOUNDER_APPROVED","icp":"Photography studios, wedding photographers and creative businesses"},
  "clinics-counter":{"version":"clinics-counter-playbook-2.2.1","stage":"COMMERCIAL","tiers":{"Clinic Starter":{"monthly_inr":3999},"Multi-Chair Pro":{"monthly_inr":8999}},"pricing_status":"PROVISIONAL_FOUNDER_APPROVED","icp":"Clinics and small healthcare practices; avoid patient-level data in prospecting"},
  "growtoys":{"version":"growtoys-playbook-2.2.0","stage":"DISCOVERY_ONLY","tiers":{},"icp":"Discovery interviews only; no commercial claims or live conversion"},
+ "photo-studio-billing":{"version":"psb-playbook-2.2.0","stage":"COMMERCIAL","tiers":{},"icp":"Photography studios, photo labs and printing businesses"},
+ "entrepreneur-instagram-tools":{"version":"entrepreneur-playbook-2.2.0","stage":"COMMERCIAL","tiers":{},"icp":"Indian SMB owners, creators and Instagram sellers"},
+ "pharma-software-utilities":{"version":"pharma-playbook-2.2.0","stage":"COMMERCIAL","tiers":{},"icp":"Pharma businesses and pharmacovigilance teams"},
+ "artists-business-tools":{"version":"artists-playbook-2.2.0","stage":"COMMERCIAL","tiers":{},"icp":"Artists, performers and creative professionals"},
 }
 ROLE_OVERRIDES = {
  "market-intel":["Research and cite public account evidence."],
