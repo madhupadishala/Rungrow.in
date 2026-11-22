@@ -13,8 +13,8 @@ DEPARTMENT_SOPS = {
  "Engineering & IT": {"version":"engineering-sop-2.2.0","instructions":["Preserve tenant isolation, least privilege, auditability and backward compatibility.","Require tests for behavior changes; never deploy directly from an agent task."],"acceptance":["Security and tenant boundaries are explicit","Tests and rollback considerations are documented"],"compliance":["No production mutation or deployment without approval"]},
 }
 PRODUCT_PLAYBOOKS = {
- "photo-studio-growth-os":{"version":"psgo-playbook-2.2.0","stage":"COMMERCIAL","tiers":{"Starter":{"monthly_inr":999},"Growth":{"monthly_inr":1999},"Pro":{"monthly_inr":3999}},"icp":"Photography studios, wedding photographers and creative businesses"},
- "clinics-counter":{"version":"clinics-counter-playbook-2.2.0","stage":"COMMERCIAL","tiers":{"Starter":{"monthly_inr":799},"Growth":{"monthly_inr":1499},"Pro":{"monthly_inr":2999}},"icp":"Clinics and small healthcare practices; avoid patient-level data in prospecting"},
+ "photo-studio-growth-os":{"version":"psgo-playbook-2.2.0","stage":"COMMERCIAL","tiers":{},"pricing_status":"pending_source_reconciliation","icp":"Photography studios, wedding photographers and creative businesses"},
+ "clinics-counter":{"version":"clinics-counter-playbook-2.2.0","stage":"COMMERCIAL","tiers":{},"pricing_status":"pending_source_reconciliation","icp":"Clinics and small healthcare practices; avoid patient-level data in prospecting"},
  "growtoys":{"version":"growtoys-playbook-2.2.0","stage":"DISCOVERY_ONLY","tiers":{},"icp":"Discovery interviews only; no commercial claims or live conversion"},
 }
 ROLE_OVERRIDES = {
