@@ -259,6 +259,18 @@ class WorkforceOrchestrator:
     async def _review(self,order,result,passed,reason):
         history=order.get("review_history") or []
         if isinstance(history,str): history=json.loads(history)
+        if self.model_gateway is not None:
+            from pydantic import BaseModel
+            class SupervisorDecision(BaseModel):
+                accepted: bool
+                feedback: str
+            decision,_=await self.model_gateway.generate_structured(
+                messages=[{"role":"system","content":"You are the department supervisor. Evaluate evidence strictly against the injected SOP acceptance criteria. Request revision with concrete, actionable feedback if any criterion is unmet. Never approve external actions."},
+                    {"role":"user","content":_json({"department":order["department"],"skill_bundle":order.get("tool_input",{}).get("runtime_skill_bundle",{}),"evidence":result,"deterministic_acceptance":passed,"reason":reason})}],
+                output_model=SupervisorDecision,tenant_id=self.principal.tenant_id,product_id=order.get("product_id"),
+                employee_id=order["department_head_id"],run_id=str(order["id"]))
+            passed=bool(decision.accepted)
+            reason=decision.feedback
         feedback=reason if passed else ("Revision required by "+order["department_head_id"]+": address missing evidence and satisfy acceptance criteria before resubmission. "+reason)
         history.append({"reviewer":order["department_head_id"],"passed":passed,"reason":reason,"supervisor_feedback":feedback,"revision":order["revision_count"]})
         if passed:
