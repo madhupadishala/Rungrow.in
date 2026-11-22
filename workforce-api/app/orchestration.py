@@ -68,7 +68,11 @@ class WorkforceOrchestrator:
             generated={x.department:x for x in decision.orders}
         elif product_id=="growtoys":
             # Offline plan preserves research-only discovery and removes commercial execution.
-            plan=[x for x in plan if x["department"] in {"Growth & Marketing","Product & Design","Legal, Risk & Compliance"}]
+            plan=[x for x in plan if x["department"] in {"Growth & Marketing","Legal, Risk & Compliance"}]
+        if product_id=="growtoys":
+            allowed={"Growth & Marketing","Legal, Risk & Compliance"}
+            plan=[x for x in plan if x["department"] in allowed]
+            generated={k:v for k,v in generated.items() if k in allowed}
         for spec in plan:
             generated_item=generated.get(spec["department"])
             if generated_item:
@@ -83,7 +87,7 @@ class WorkforceOrchestrator:
             deps=[]
             if spec["department"]=="Sales & Revenue": deps=["Growth & Marketing"]
             if spec["department"]=="Finance & Administration": deps=["Sales & Revenue"]
-            if spec["department"]=="Legal, Risk & Compliance": deps=["Growth & Marketing","Sales & Revenue"]
+            if spec["department"]=="Legal, Risk & Compliance": deps=["Growth & Marketing","Sales & Revenue"] if product_id!="growtoys" else ["Growth & Marketing"]
             if spec["department"]=="Customer Success": deps=["Sales & Revenue"]
             await self.session.execute(text("""INSERT INTO department_work_orders
               (tenant_id,directive_id,product_id,department,department_head_id,title,objective,
@@ -95,8 +99,8 @@ class WorkforceOrchestrator:
                "dependencies":_json(spec.get("dependencies",deps)),"specialist":spec["specialist"],"tool":spec["tool"],"payload":_json(payload),"budget":spec.get("budget",10000)})
         await self.session.execute(text("UPDATE executive_directives SET status='DELEGATED',updated_at=now() WHERE id=:id"),{"id":directive_id})
         await self.repo.append_audit("directive.delegated","executive_directive",directive_id,product_id,
-                                     {"department_count":len(DEPARTMENT_PLAN),"command_hash":hashlib.sha256(command.encode()).hexdigest()})
-        return {"id":directive_id,"status":"DELEGATED","department_count":len(DEPARTMENT_PLAN)}
+                                     {"department_count":len(plan),"command_hash":hashlib.sha256(command.encode()).hexdigest()})
+        return {"id":directive_id,"status":"DELEGATED","department_count":len(plan)}
 
     async def claim_work_order(self, worker_id: str) -> dict | None:
         row=await self.session.execute(text("""WITH candidate AS (
