@@ -196,7 +196,7 @@ async def test_postgres16_department_head_executes_all_assigned_specialists_and_
                 assert all(len(x["input_evidence"]["skill_version_hash"])==64 for x in proofs)
                 outbound_proofs=[x for x in proofs if x["employee_id"]=="outbound-sdr"]
                 assert len(outbound_proofs)==2
-                assert outbound_proofs[0]["status"]=="REVISION_REQUESTED"
+                assert outbound_proofs[0]["status"]=="FAILED"
                 assert outbound_proofs[1]["status"]=="PASSED"
                 assert "supervisor_feedback" in outbound_proofs[1]["input_evidence"]
     finally:
