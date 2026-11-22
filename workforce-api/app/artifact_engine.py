@@ -321,8 +321,17 @@ class ArtifactEngine:
             path=Path(str(item.get("path",""))).resolve()
             if not path.is_relative_to(self.root) or not path.is_file():
                 raise ArtifactPolicyError("Attachment is not a verified RunGrow artifact")
+            raw=path.read_bytes()
+            digest=__import__("hashlib").sha256(raw).hexdigest()
+            if item.get("sha256") and item["sha256"]!=digest:
+                raise ArtifactPolicyError("Attachment checksum does not match the generated file")
+            allowed_mime={".pdf":"application/pdf",".xlsx":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                          ".png":"image/png"}
+            mime=allowed_mime.get(path.suffix.lower())
+            if not mime or (item.get("mime_type") and item["mime_type"]!=mime):
+                raise ArtifactPolicyError("Only verified PNG, PDF and XLSX attachments are supported")
             verified.append({"path":str(path),"filename":path.name,
-                             "mime_type":item.get("mime_type"),"sha256":item.get("sha256")})
+                             "mime_type":mime,"sha256":digest,"bytes":len(raw)})
         return {"to":to,"subject":subject,"body":body,"attachments":verified,
                 "approval_required":True,"status":"QUEUED_FOR_APPROVAL",
                 "dispatch_status":"NOT_DISPATCHED"}
