@@ -71,7 +71,7 @@ class WorkforceOrchestrator:
           SELECT w.id FROM department_work_orders w
           WHERE w.tenant_id=:tenant AND (w.status IN ('ASSIGNED','REVISION_REQUESTED') OR
             (w.status='IN_PROGRESS' AND (w.lock_expires_at <= now() OR
-             (w.lock_expires_at IS NULL AND w.claimed_at < now() - interval '3 minutes')))
+             (w.lock_expires_at IS NULL AND w.claimed_at < now() - interval '3 minutes'))))
             AND NOT EXISTS (
               SELECT 1 FROM jsonb_array_elements_text(w.dependencies) d(dep)
               WHERE NOT EXISTS (SELECT 1 FROM department_work_orders prior
