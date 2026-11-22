@@ -75,7 +75,7 @@ class WorkforceOrchestrator:
               WHERE NOT EXISTS (SELECT 1 FROM department_work_orders prior
                 WHERE prior.directive_id=w.directive_id AND prior.department=d.dep
                   AND prior.status='APPROVED_BY_HEAD'))
-          ORDER BY w.created_at FOR UPDATE SKIP LOCKED LIMIT 1
+          ORDER BY w.created_at LIMIT 1 FOR UPDATE SKIP LOCKED
         ) UPDATE department_work_orders w SET status='IN_PROGRESS',claimed_by=:worker,
           claimed_at=now(),updated_at=now() FROM candidate c WHERE w.id=c.id
           RETURNING w.*"""),{"tenant":self.principal.tenant_id,"worker":worker_id})
