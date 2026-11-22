@@ -247,7 +247,7 @@ class TinyFishResearchProvider:
     """
     def __init__(self, *, api_key: str | None = None, allow_domains: set[str] | None = None,
                  deny_domains: set[str] | None = None, endpoint: str = "https://agent.tinyfish.ai/v1/automation/run",
-                 max_steps: int = 10, timeout_seconds: float = 180.0, transport=None):
+                 max_steps: int = 10, timeout_seconds: float = 45.0, transport=None):
         import os
         import logging
         self.api_key = (api_key or os.getenv("TINYFISH_API_KEY", "")).strip()
@@ -307,8 +307,8 @@ class TinyFishResearchProvider:
             self.audit_events.append({"event": "tinyfish.blocked.no_allowlist"})
             self.logger.warning("tinyfish_research_blocked reason=no_allowlist")
             return DiscoveryBatch(candidates=[], blocked=[{"url": str(u), "reason": reason} for u in source_urls] or [{"url": "", "reason": reason}])
-        if not isinstance(source_urls, list) or len(source_urls) > 20:
-            return DiscoveryBatch(candidates=[], blocked=[{"url": "", "reason": "TinyFish source_urls must contain at most 20 URLs"}])
+        if not isinstance(source_urls, list) or len(source_urls) > 5:
+            return DiscoveryBatch(candidates=[], blocked=[{"url": "", "reason": "TinyFish source_urls must contain at most 5 URLs per leased work order"}])
         schema = {
             "type": "object",
             "properties": {"businesses": {"type": "array", "items": {
