@@ -1122,3 +1122,188 @@ async def approve_single_use_outbox_action(approval_id: str,
         await repo.append_audit("outbox.dispatch_failed","outbox_event",str(outbox["id"]),
             approval["product_id"],{"approval_id":approval_id,"error_type":type(exc).__name__})
         raise HTTPException(502,"Governed dispatch failed; inspect the outbox audit event") from exc
+
+
+# Workforce 2.3 — authenticated realtime Founder voice interface.
+from .voice_ceo import (
+    AI_IDENTITY_DISCLOSURE, LiveKitNotConfigured, VoiceCEOSessionManager,
+    VoiceSessionForbidden,
+)
+
+class VoiceSessionCreateRequest(BaseModel):
+    client_mode: str = Field(default="livekit", pattern="^(browser|livekit)$")
+    product_id: str | None = Field(default=None, max_length=120)
+
+class VoiceTurnRequest(BaseModel):
+    transcript: str = Field(min_length=1, max_length=8000)
+    source: str = Field(default="web_speech", pattern="^(web_speech|livekit|text)$")
+    interrupted_at_ms: int | None = Field(default=None, ge=0)
+
+_voice_sessions = VoiceCEOSessionManager()
+
+def _spoken_executive_briefing(snapshot: dict) -> str:
+    revenue = snapshot.get("operating_revenue") or {}
+    capital = snapshot.get("investment_capital") or {}
+    tasks = snapshot.get("tasks") or []
+    completed = sum(int(row.get("completed") or 0) for row in tasks)
+    active = sum(int(row.get("active") or 0) for row in tasks)
+    pending = snapshot.get("pending_approvals") or []
+    department_rows = [row for row in tasks if row.get("department")]
+    department_summary = "; ".join(
+        f"{row['department']}: {row.get('completed', 0)} completed, {row.get('active', 0)} active"
+        for row in department_rows[:5]
+    ) or "Department-level task evidence is not yet available."
+    return (
+        f"{AI_IDENTITY_DISCLOSURE} Executive briefing. "
+        f"Operating revenue is ₹{float(revenue.get('actual_inr') or 0):,.0f} against the ₹5 crore baseline. "
+        f"Investment capital received is ₹{float(capital.get('received_inr') or 0):,.0f} against a separate ₹5 crore baseline. "
+        f"These are separate ledgers and neither figure is inferred. "
+        f"There are {len(pending)} pending approvals, {completed} completed tasks and {active} active tasks. "
+        f"{department_summary} "
+        + ("The highest priority is to review pending approvals before expiry." if pending
+           else "There are no pending approvals in the current repository snapshot.")
+    )
+
+@app.post("/v1/voice/sessions")
+async def create_voice_session(
+    body: VoiceSessionCreateRequest,
+    p: Principal = Depends(require_permission("voice.use")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo),
+):
+    try:
+        return await _voice_sessions.create_session(
+            repo, p, client_mode=body.client_mode, product_id=body.product_id
+        )
+    except LiveKitNotConfigured as exc:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=503, content={
+            "detail": str(exc), "session_id": exc.session_id, "live_room": "unavailable"
+        })
+    except VoiceSessionForbidden as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+@app.post("/v1/voice/sessions/{session_id}/turn")
+async def process_voice_turn(
+    session_id: str,
+    body: VoiceTurnRequest,
+    p: Principal = Depends(require_permission("voice.use")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo),
+):
+    try:
+        turn = await _voice_sessions.append_turn(
+            repo, p, session_id, body.transcript,
+            interrupted_at_ms=body.interrupted_at_ms, source=body.source
+        )
+    except VoiceSessionForbidden as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    transcript = turn["transcript"].strip()
+    lowered = transcript.lower()
+    response = ""
+    action = {"type": "conversation", "execution": "none"}
+
+    # Voice approval is deliberately two-step: request, then a distinct spoken
+    # confirmation within five minutes. The existing approval endpoint remains
+    # the sole dispatcher and retains its product, RBAC and single-use checks.
+    approval_request = re.fullmatch(r"(?:approve|review approval)\s+([0-9a-fA-F-]{20,})", transcript, re.I)
+    if approval_request:
+        if "approval.decide" not in p.permissions and "*" not in p.permissions:
+            raise HTTPException(403, "Permission required: approval.decide")
+        approval_id = approval_request.group(1)
+        approvals = await repo.list_approvals()
+        approval = next((item for item in approvals if str(item.get("id")) == approval_id), None)
+        if not approval or str(approval.get("status", "")).upper() != "PENDING":
+            raise HTTPException(404, "Pending approval not found in this tenant")
+        authorize_product_access(p, approval.get("product_id"))
+        await repo.session.execute(
+            __import__("sqlalchemy").text("""
+              UPDATE voice_sessions SET pending_approval_id=:approval,
+                pending_approval_requested_at=now()
+              WHERE id=:session AND tenant_id=:tenant AND principal_id=:principal
+            """),
+            {"approval": approval_id, "session": session_id,
+             "tenant": p.tenant_id, "principal": p.user_id},
+        )
+        response = (
+            f"Approval {approval_id} is pending. I have not executed it. "
+            "Say 'confirm approval' or use the visual confirmation control to authorize this single action."
+        )
+        action = {"type": "approval_confirmation_required", "approval_id": approval_id,
+                  "execution": "not_started"}
+    elif re.fullmatch(r"(?:confirm approval|yes,? confirm approval|confirm it)", lowered):
+        if "approval.decide" not in p.permissions and "*" not in p.permissions:
+            raise HTTPException(403, "Permission required: approval.decide")
+        row = (await repo.session.execute(
+            __import__("sqlalchemy").text("""
+              SELECT pending_approval_id, pending_approval_requested_at
+              FROM voice_sessions
+              WHERE id=:session AND tenant_id=:tenant AND principal_id=:principal
+              FOR UPDATE
+            """),
+            {"session": session_id, "tenant": p.tenant_id, "principal": p.user_id},
+        )).mappings().first()
+        if not row or not row["pending_approval_id"] or not row["pending_approval_requested_at"]:
+            raise HTTPException(409, "No pending voice approval confirmation exists")
+        age = (datetime.now(timezone.utc) - row["pending_approval_requested_at"]).total_seconds()
+        if age < 0 or age > 300:
+            raise HTTPException(409, "Voice approval confirmation expired; request the approval again")
+        approval_id = str(row["pending_approval_id"])
+        result = await approve_single_use_outbox_action(
+            approval_id,
+            SingleUseApprovalRequest(reason="Founder explicitly confirmed through authenticated voice session"),
+            p, repo,
+        )
+        await repo.session.execute(
+            __import__("sqlalchemy").text("""
+              UPDATE voice_sessions SET pending_approval_id=NULL,
+                pending_approval_requested_at=NULL
+              WHERE id=:session AND tenant_id=:tenant
+            """), {"session": session_id, "tenant": p.tenant_id}
+        )
+        response = f"Your explicit approval was submitted. Governed dispatch status: {result.get('status', 'recorded')}."
+        action = {"type": "approval_executed", "approval_id": approval_id,
+                  "status": result.get("status"), "execution": "governed"}
+    elif any(term in lowered for term in ("briefing", "company status", "executive status", "how are we doing", "revenue status", "capital status")):
+        if "executive.read" not in p.permissions and "*" not in p.permissions:
+            raise HTTPException(403, "Permission required: executive.read")
+        snapshot = await _ceo_service(repo).briefing(generated_by=p.user_id)
+        response = _spoken_executive_briefing(snapshot)
+        action = {"type": "executive_briefing", "execution": "read_only"}
+    else:
+        if "work.assign" not in p.permissions and "*" not in p.permissions:
+            raise HTTPException(403, "Permission required: work.assign")
+        if not turn.get("product_id"):
+            response = "I can prepare that directive, but this voice session has no product scope. Start a new session with the intended product selected."
+            action = {"type": "scope_required", "execution": "not_started"}
+        else:
+            try:
+                directive = await WorkforceOrchestrator(repo, p).submit_directive(
+                    transcript, turn["product_id"]
+                )
+                response = (
+                    f"Directive accepted by the Digital CEO for {turn['product_id']}. "
+                    f"{directive.get('department_count', 0)} department work orders were created. "
+                    "Specialists will prepare evidence; external actions remain approval-gated."
+                )
+                action = {"type": "directive_created", "directive_id": directive.get("id"),
+                          "department_count": directive.get("department_count"),
+                          "execution": "delegated_not_externally_dispatched"}
+            except (PermissionError, ValueError) as exc:
+                raise HTTPException(403 if isinstance(exc, PermissionError) else 422, str(exc)) from exc
+
+    await _voice_sessions.append_response(repo, p, session_id, response)
+    return {
+        "session_id": session_id, "turn_id": turn["turn_id"],
+        "response": response, "action": action,
+        "interrupted_at_ms": turn["interrupted_at_ms"],
+        "context_turn_count": len(turn["context"]),
+        "identity_disclosure": AI_IDENTITY_DISCLOSURE,
+    }
