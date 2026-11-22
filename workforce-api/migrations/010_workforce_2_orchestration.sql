@@ -79,4 +79,3 @@ CREATE POLICY employee_tool_executions_tenant_scope ON employee_tool_executions 
  USING(tenant_id=current_setting('app.current_tenant_id',true))
  WITH CHECK(tenant_id=current_setting('app.current_tenant_id',true));
 
-GRANT SELECT, INSERT, UPDATE ON executive_directives, department_work_orders, employee_tool_executions TO rungrow_app_user;
