@@ -104,11 +104,14 @@ class WorkforceOrchestrator:
                 if "*" not in self.principal.permissions and not ({"agent.run","work.assign"} & set(self.principal.permissions)):
                     raise PermissionError("Orchestration principal lacks agent execution authority")
                 fetcher=self.tools.directory_fetcher
+                source_urls=payload.get("source_urls",[])
+                if not source_urls:
+                    source_urls=await self.tools.directory_search.search(payload.get("query",""),payload.get("city",""),limit=20)
                 if not fetcher.allow_domains:
-                    batch=type("BlockedBatch",(),{"candidates":[],"blocked":[{"url":u,"reason":"No research domain allowlist is configured"} for u in payload.get("source_urls",[])]})()
+                    batch=type("BlockedBatch",(),{"candidates":[],"blocked":[{"url":u,"reason":"No research domain allowlist is configured"} for u in source_urls]})()
                 else:
                     batch=await fetcher.discover(query=payload.get("query",""),city=payload.get("city",""),
-                        product_id=payload.get("product_id") or "",source_urls=payload.get("source_urls",[]))
+                        product_id=payload.get("product_id") or "",source_urls=source_urls)
                 result={"candidates":batch.candidates,"blocked":batch.blocked,
                         "robots_policy":"fail_closed","source_count":len(batch.candidates)}
                 digest=hashlib.sha256(_json(payload).encode()).hexdigest()
@@ -148,7 +151,7 @@ class WorkforceOrchestrator:
     @staticmethod
     def _acceptance(tool_name,result):
         if tool_name=="public_directory_research":
-            return result.get("robots_policy")=="fail_closed" and all(x.get("source_url") for x in result.get("candidates",[]))
+            return result.get("robots_policy")=="fail_closed" and int(result.get("source_count",0))>0 and all(x.get("source_url") for x in result.get("candidates",[]))
         if tool_name=="icp_lead_scoring": return isinstance(result.get("scores"),list)
         if tool_name=="campaign_budget_estimate": return result.get("recommended_budget_inr",0)>=0 and not result.get("spend_authorised",True)
         if tool_name=="compliance_disclosure_check": return result.get("passed") is True and result.get("publication_authorised") is False
