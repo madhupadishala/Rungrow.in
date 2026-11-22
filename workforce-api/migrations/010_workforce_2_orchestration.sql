@@ -33,19 +33,25 @@ CREATE TABLE IF NOT EXISTS department_work_orders (
  specialist_role_id text NOT NULL,
  tool_name text NOT NULL,
  tool_input jsonb NOT NULL DEFAULT '{}'::jsonb CHECK(jsonb_typeof(tool_input)='object'),
- status text NOT NULL DEFAULT 'ASSIGNED' CHECK(status IN ('ASSIGNED','IN_PROGRESS','REVISION_REQUESTED','APPROVED_BY_HEAD','REJECTED')),
+ status text NOT NULL DEFAULT 'ASSIGNED' CHECK(status IN ('ASSIGNED','IN_PROGRESS','REVISION_REQUESTED','APPROVED_BY_HEAD','REJECTED','AWAITING_APPROVAL')),
  revision_count integer NOT NULL DEFAULT 0 CHECK(revision_count BETWEEN 0 AND 2),
  review_history jsonb NOT NULL DEFAULT '[]'::jsonb CHECK(jsonb_typeof(review_history)='array'),
  deliverable jsonb NOT NULL DEFAULT '{}'::jsonb CHECK(jsonb_typeof(deliverable)='object'),
  last_error text,
  claimed_by text,
  claimed_at timestamptz,
+ locked_by_employee_id text,
+ lock_expires_at timestamptz,
+ max_budget_cents integer NOT NULL DEFAULT 100 CHECK(max_budget_cents >= 0),
+ spent_cents integer NOT NULL DEFAULT 0 CHECK(spent_cents >= 0 AND spent_cents <= max_budget_cents),
  created_at timestamptz NOT NULL DEFAULT now(),
  updated_at timestamptz NOT NULL DEFAULT now(),
  UNIQUE(tenant_id,directive_id,department)
 );
 CREATE INDEX IF NOT EXISTS department_work_orders_claim
  ON department_work_orders(tenant_id,status,created_at);
+CREATE INDEX IF NOT EXISTS department_work_orders_lock_expiry
+ ON department_work_orders(tenant_id,lock_expires_at) WHERE status='IN_PROGRESS';
 CREATE INDEX IF NOT EXISTS department_work_orders_directive
  ON department_work_orders(tenant_id,directive_id,created_at);
 ALTER TABLE department_work_orders ENABLE ROW LEVEL SECURITY;
