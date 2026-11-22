@@ -15,8 +15,29 @@
  function renderWorkload(rows){$("workload-rows").innerHTML=rows.map(x=>'<tr><td>'+esc(x.title)+'</td><td>'+esc(x.department)+'</td><td>'+esc(names[x.product_id]||"Shared")+'</td><td>'+x.active_tasks+'</td><td>'+x.completed_tasks+'</td><td>'+esc(x.availability)+'</td></tr>').join("")||'<tr><td colspan="6">No employee workload records.</td></tr>'}
  function renderApprovals(rows,pendingBrief=[]){const pending=rows.filter(x=>String(x.status).toUpperCase()==="PENDING");const timing=new Map(pendingBrief.map(x=>[x.approval_id,x]));const duration=n=>{if(n==null)return "—";const s=Math.max(0,Number(n));return s>=3600?Math.floor(s/3600)+"h "+Math.floor(s%3600/60)+"m":s>=60?Math.floor(s/60)+"m "+Math.floor(s%60)+"s":s+"s"};$("approval-count").textContent=pending.length+" PENDING";$("approval-list").innerHTML=pending.map(a=>{const t=timing.get(String(a.id))||{};return '<article class="approval" data-id="'+esc(a.id)+'" data-product="'+esc(a.product_id||"")+'"><div class="approval-head"><b>'+esc(a.action_type)+'</b><span>'+esc(names[a.product_id]||a.product_id||"Company")+'</span></div><small>Employee: '+esc(a.employee_id)+' · Age: '+duration(t.age_seconds)+' · Expires in: '+duration(t.seconds_until_expiry)+'</small><input class="decision-reason" maxlength="1000" placeholder="Mandatory decision rationale"><div class="approval-actions"><button data-decision="approved">Approve</button><button class="reject" data-decision="rejected">Reject</button></div></article>'}).join("")||'<p class="empty">No pending human decisions.</p>'}
  $("connect").addEventListener("click",()=>load().catch(e=>{$("connection-state").textContent="● "+e.message}));
- $("refresh").addEventListener("click",()=>load().catch(e=>{$("connection-state").textContent="● "+e.message}));
+ $("refresh").addEventListener("click",()=>load().then(()=>activeDirectiveId?refreshDirective(activeDirectiveId):null).catch(e=>{$("connection-state").textContent="● "+e.message}));
  $("dispatch").addEventListener("click",async()=>{try{connect();const directive=$("directive").value.trim();if(directive.length<8)throw new Error("Directive must contain at least 8 characters.");const product_ids=[...$("directive-products").selectedOptions].map(x=>x.value);const result=await api("/v1/ceo/directives",{method:"POST",body:JSON.stringify({directive,product_ids,is_sandbox:$("sandbox").checked})});$("directive-result").textContent=result.task_count+" product-scoped tasks queued · "+(result.is_sandbox?"SANDBOX":"PRODUCTION")+" · execution not started";await load()}catch(e){$("directive-result").textContent=e.message}});
  $("approval-list").addEventListener("click",async e=>{const button=e.target.closest("button[data-decision]");if(!button)return;const article=button.closest(".approval"),reason=article.querySelector(".decision-reason").value.trim();if(reason.length<8){article.querySelector(".decision-reason").focus();return}try{connect();await api("/v1/workforce/approvals/"+encodeURIComponent(article.dataset.id)+"/decision",{method:"POST",body:JSON.stringify({decision:button.dataset.decision,reason,product_id:article.dataset.product||null})});await load()}catch(err){article.querySelector(".approval-head").insertAdjacentHTML("beforeend",'<small>'+esc(err.message)+'</small>')}});
+
+ let activeDirectiveId="";
+ async function refreshDirective(id){
+   connect();const d=await api("/v1/directives/"+encodeURIComponent(id));
+   $("w2-status").textContent="Directive "+id+" · "+d.status+" · "+(d.department_work_orders||[]).filter(x=>x.status==="APPROVED_BY_HEAD").length+"/"+(d.department_work_orders||[]).length+" department approvals";
+   $("w2-orders").innerHTML=(d.department_work_orders||[]).map(x=>"<tr><td>"+esc(x.department)+"</td><td>"+esc(x.department_head_id)+"</td><td>"+esc(x.tool_name)+"</td><td>"+esc(x.status)+"</td><td>"+Number(x.revision_count||0)+"</td></tr>").join("")||"<tr><td colspan='5'>No department work orders.</td></tr>";
+   $("w2-proposal").hidden=!d.consolidated_proposal||!Object.keys(d.consolidated_proposal).length;
+   $("w2-proposal").textContent=d.consolidated_proposal?JSON.stringify(d.consolidated_proposal,null,2):"";
+   const box=$("w2-approval");box.innerHTML="";
+   if(d.status==="AWAITING_APPROVAL"&&d.approval_id){
+     const b=document.createElement("button");b.className="run";b.textContent="Approve consolidated proposal (single use)";
+     b.addEventListener("click",async()=>{try{await api("/v1/directives/"+encodeURIComponent(id)+"/approve",{method:"POST",body:JSON.stringify({approval_id:d.approval_id})});await refreshDirective(id)}catch(e){$("w2-status").textContent=e.message}});
+     box.appendChild(b);
+   }
+ }
+ $("w2-submit").addEventListener("click",async()=>{
+   try{connect();const command=$("w2-directive").value.trim();const product_id=$("w2-product").value;
+     const result=await api("/v1/directives",{method:"POST",body:JSON.stringify({command,product_id})});
+     activeDirectiveId=result.id;await refreshDirective(result.id);
+   }catch(e){$("w2-status").textContent=e.message}
+ });
  if(location.protocol==="https:"&&location.hostname==="localhost")$("api-base").value=location.origin;
 })();

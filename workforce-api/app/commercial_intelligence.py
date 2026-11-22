@@ -73,6 +73,7 @@ class RobotsDisallowed(PermissionError):
 class DiscoveryBatch:
     candidates: list[dict[str, Any]] = field(default_factory=list)
     blocked: list[dict[str, str]] = field(default_factory=list)
+    usage: list[dict[str, int]] = field(default_factory=list)
 
 
 class DirectoryFetcher(Protocol):
@@ -234,6 +235,151 @@ class RobotsCompliantHttpFetcher:
                 batch.blocked.append({"url": exc.url, "reason": exc.reason})
             except (ValueError, PermissionError, httpx.HTTPError) as exc:
                 batch.blocked.append({"url": url, "reason": str(exc)[:300]})
+        return batch
+
+
+
+class TinyFishResearchProvider:
+    """Governed, read-only TinyFish public-directory extractor.
+
+    TinyFish Agent runs are limited to approved domains, a bounded step count,
+    and a JSON schema. It never submits forms, contacts prospects, or publishes.
+    """
+    def __init__(self, *, api_key: str | None = None, allow_domains: set[str] | None = None,
+                 deny_domains: set[str] | None = None, endpoint: str = "https://agent.tinyfish.ai/v1/automation/run",
+                 max_steps: int = 10, timeout_seconds: float = 45.0, transport=None):
+        import os
+        import logging
+        self.api_key = (api_key or os.getenv("TINYFISH_API_KEY", "")).strip()
+        self.allow_domains = {x.strip().lower().lstrip(".") for x in (allow_domains or set()) if x.strip()}
+        self.deny_domains = {x.strip().lower().lstrip(".") for x in (deny_domains or set()) if x.strip()}
+        self.endpoint = endpoint
+        self.max_steps = max(1, min(int(max_steps), 10))
+        self.timeout_seconds = timeout_seconds
+        self.transport = transport
+        self.audit_events: list[dict[str, Any]] = []
+        self.logger = logging.getLogger("rungrow.research.tinyfish")
+
+    @staticmethod
+    def _domain_matches(host: str, domains: set[str]) -> bool:
+        return any(host == d or host.endswith("." + d) for d in domains)
+
+    def _approved_url(self, value: str) -> str:
+        parsed = urlparse(str(value))
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if parsed.scheme not in {"http", "https"} or not host or parsed.username or parsed.password:
+            raise PermissionError("TinyFish source must be a credential-free public HTTP(S) URL")
+        if host in {"localhost"} or host.endswith((".localhost", ".local", ".internal")):
+            raise PermissionError("TinyFish source cannot target local or private hosts")
+        try:
+            address = ipaddress.ip_address(host)
+            if not address.is_global:
+                raise PermissionError("TinyFish source cannot target a private or non-global IP")
+        except ValueError as exc:
+            if "does not appear to be an IPv4 or IPv6 address" not in str(exc):
+                raise
+        if self.transport is None:
+            try:
+                resolved = {ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(host, None)}
+            except (OSError, ValueError) as exc:
+                raise PermissionError("TinyFish source host could not be resolved safely") from exc
+            if not resolved or any(not address.is_global for address in resolved):
+                raise PermissionError("TinyFish source resolves to a private or non-global address")
+        if not self.allow_domains:
+            raise PermissionError("TinyFish research is disabled: RUNGROW_RESEARCH_ALLOW_DOMAINS is empty")
+        if not self._domain_matches(host, self.allow_domains):
+            raise PermissionError("TinyFish source domain is not allowlisted")
+        if self._domain_matches(host, self.deny_domains):
+            raise PermissionError("TinyFish source domain is explicitly denied")
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path or "/", "", parsed.query, ""))
+
+    async def discover(self, *, query: str, city: str, product_id: str,
+                       source_urls: list[str]) -> DiscoveryBatch:
+        import logging
+        batch = DiscoveryBatch()
+        if not self.api_key:
+            reason = "TinyFish provider is unconfigured: TINYFISH_API_KEY is missing"
+            self.audit_events.append({"event": "tinyfish.blocked.unconfigured"})
+            self.logger.warning("tinyfish_research_blocked reason=missing_api_key")
+            return DiscoveryBatch(candidates=[], blocked=[{"url": str(u), "reason": reason} for u in source_urls] or [{"url": "", "reason": reason}])
+        if not self.allow_domains:
+            reason = "TinyFish research is disabled: RUNGROW_RESEARCH_ALLOW_DOMAINS is empty"
+            self.audit_events.append({"event": "tinyfish.blocked.no_allowlist"})
+            self.logger.warning("tinyfish_research_blocked reason=no_allowlist")
+            return DiscoveryBatch(candidates=[], blocked=[{"url": str(u), "reason": reason} for u in source_urls] or [{"url": "", "reason": reason}])
+        if not isinstance(source_urls, list) or len(source_urls) > 5:
+            return DiscoveryBatch(candidates=[], blocked=[{"url": "", "reason": "TinyFish source_urls must contain at most 5 URLs per leased work order"}])
+        schema = {
+            "type": "object",
+            "properties": {"businesses": {"type": "array", "items": {
+                "type": "object",
+                "properties": {
+                    "business_name": {"type": "string"}, "city": {"type": "string"},
+                    "category": {"type": "string"}, "public_phone": {"type": ["string", "null"]},
+                    "public_website": {"type": ["string", "null"]}
+                },
+                "required": ["business_name", "city", "category", "public_phone", "public_website"]
+            }}},
+            "required": ["businesses"]
+        }
+        for raw_url in source_urls:
+            try:
+                source_url = self._approved_url(raw_url)
+                if not self.api_key:
+                    raise PermissionError("TinyFish API key is missing")
+                goal = (
+                    "Read this public business directory page only. Extract business listings relevant to "
+                    f"{query!r} in {city!r}. Return only publicly displayed business name, city, category, "
+                    "public phone and public website. Do not log in, submit forms, contact anyone, or perform "
+                    "any action that changes website state. Return JSON matching the supplied schema."
+                )
+                async with httpx.AsyncClient(timeout=self.timeout_seconds, follow_redirects=False,
+                                             transport=self.transport) as client:
+                    response = await client.post(self.endpoint,
+                        headers={"X-API-Key": self.api_key, "Content-Type": "application/json",
+                                 "X-TF-Client-Name": "rungrow-workforce", "X-TF-Client-Version": "2.1"},
+                        json={"url": source_url, "goal": goal, "output_schema": schema,
+                              "agent_config": {"mode": "strict", "max_steps": self.max_steps}})
+                response.raise_for_status()
+                data = response.json()
+                if str(data.get("status", "COMPLETED")).upper() not in {"COMPLETED", "SUCCESS"}:
+                    raise ValueError("TinyFish extraction run did not complete successfully")
+                extracted = data.get("result", data.get("data", {}))
+                steps = int(data.get("numOfSteps", data.get("num_of_steps", self.max_steps)))
+                batch.usage.append({"steps": max(0, min(steps, self.max_steps))})
+                if isinstance(extracted, str):
+                    extracted = json.loads(extracted)
+                if not isinstance(extracted, dict):
+                    raise ValueError("TinyFish returned a non-object extraction result")
+                businesses = extracted.get("businesses", [])
+                if not isinstance(businesses, list):
+                    raise ValueError("TinyFish result businesses must be an array")
+                for item in businesses[:50]:
+                    name = str(item.get("business_name", "")).strip()[:300]
+                    if not name:
+                        continue
+                    public_phone = str(item.get("public_phone") or "").strip()[:80] or None
+                    website = str(item.get("public_website") or "").strip()[:500] or None
+                    candidate_city = str(item.get("city") or city).strip()[:160]
+                    category = str(item.get("category") or query).strip()[:160]
+                    batch.candidates.append({
+                        "business_name": name, "city": candidate_city, "segment": category,
+                        "category": category, "phone": public_phone, "website": website,
+                        "public_contact_channel": ("phone:" + public_phone) if public_phone else None,
+                        "source_url": source_url, "evidence_urls": [source_url],
+                        "evidence_snippet": "TinyFish structured extraction from allowlisted public directory",
+                        "domain": urlparse(source_url).hostname, "decision_maker_name": None
+                    })
+                self.audit_events.append({"event": "tinyfish.extraction.completed",
+                    "source_domain": urlparse(source_url).hostname, "records": min(len(businesses), 50),
+                    "tenant_safe": True, "outreach": False})
+            except (ValueError, PermissionError, httpx.HTTPError, json.JSONDecodeError, TypeError, AttributeError) as exc:
+                reason = str(exc)[:300]
+                batch.blocked.append({"url": str(raw_url)[:1000], "reason": reason})
+                self.audit_events.append({"event": "tinyfish.extraction.blocked",
+                    "source_domain": urlparse(str(raw_url)).hostname, "reason": reason})
+                self.logger.warning("tinyfish_research_blocked domain=%s reason=%s",
+                    urlparse(str(raw_url)).hostname or "invalid", reason)
         return batch
 
 

@@ -1,7 +1,7 @@
 name: Workforce CI
 on:
   push:
-    branches: [main, feat/month-1-day-1-operating-foundation, feat/ai-workforce-platform]
+    branches: [main, feat/month-1-day-1-operating-foundation, feat/ai-workforce-platform, feat/workforce-2-orchestration]
   pull_request:
     branches: [main, feat/month-1-day-1-operating-foundation]
   workflow_dispatch:
@@ -53,7 +53,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e '.[dev]'
-      - name: Bootstrap schema_migrations and apply 001–009 with production checksum runner
+      - name: Bootstrap schema_migrations and apply 001–010 with production checksum runner
         run: |
           # Runner package mirrors can transiently fail. Retry installation without
           # making PostgreSQL migration validation dependent on a single mirror request.
@@ -87,7 +87,31 @@ jobs:
           export PATH="/tmp/ci-bin:$PATH"
           bash ./scripts/init_test_db.sh
       - name: Run workforce API tests
-        run: pytest -v tests
+        shell: bash
+        run: |
+          set +e
+          pytest -v tests --junitxml=/tmp/workforce-pytest.xml
+          test_exit=$?
+          set -e
+          TEST_EXIT="$test_exit" python - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          path = "/tmp/workforce-pytest.xml"
+          if not os.path.exists(path):
+              summary = "Pytest did not produce a JUnit report (collection or startup failure)."
+              counts = {"tests": 0, "failures": 0, "errors": 1, "skipped": 0}
+          else:
+              root = ET.parse(path).getroot()
+              suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+              counts = {key: sum(int(suite.attrib.get(key, 0)) for suite in suites)
+                        for key in ("tests", "failures", "errors", "skipped")}
+              summary = f"Tests: {counts['tests']} · Failed: {counts['failures']} · Errors: {counts['errors']} · Skipped: {counts['skipped']}"
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+              out.write("### Workforce API pytest\n\n" + summary + "\n")
+          print(summary)
+          raise SystemExit(int(os.environ["TEST_EXIT"]))
+          PY
+
 
   marketing-site:
     runs-on: ubuntu-latest
@@ -95,21 +119,56 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify preserved static marketing entrypoint
         run: test -s index.html
-      - name: Validate Workforce browser scripts
+      - name: Validate marketing scripts, manifests and API image
+        shell: bash
         run: |
+          set +e
           node --check workforce/scripts/workforce.js
+          s1=$?
           node --check workforce/scripts/ceo.js
-      - name: Validate production deployment manifests
-        run: |
+          s2=$?
           node -e "JSON.parse(require('fs').readFileSync('vercel.json', 'utf8'))"
+          s3=$?
           python -m pip install pyyaml
-          python -c "import yaml; yaml.safe_load(open('render.yaml', encoding='utf-8'))"
+          s4=$?
+          if [[ "$s4" -eq 0 ]]; then
+            python -c "import yaml; yaml.safe_load(open('render.yaml', encoding='utf-8'))"
+            s5=$?
+          else
+            s5=1
+          fi
           docker build --pull -f workforce-api/Dockerfile -t rungrow-workforce-api:ci .
+          s6=$?
+          set -e
+          {
+            echo "### Marketing-site validation"
+            echo
+            echo "| Check | Exit code |"
+            echo "|---|---:|"
+            echo "| workforce.js syntax | $s1 |"
+            echo "| ceo.js syntax | $s2 |"
+            echo "| vercel.json | $s3 |"
+            echo "| PyYAML install | $s4 |"
+            echo "| render.yaml | $s5 |"
+            echo "| Workforce API Docker build | $s6 |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for code in "$s1" "$s2" "$s3" "$s4" "$s5" "$s6"; do
+            [[ "$code" -eq 0 ]] || exit 1
+          done
       - name: Build Next.js application when one exists
-        if: hashFiles('package.json') != ''
+        shell: bash
         run: |
-          npm ci
-          npm run build
+          if [[ -f package.json ]]; then
+            npm ci
+            npm run build
+          else
+            echo "No root Next.js package.json; static marketing entrypoint validated."
+          fi
       - name: Typecheck Next.js application when a TypeScript config exists
-        if: hashFiles('package.json', 'tsconfig.json') != ''
-        run: npx tsc --noEmit
+        shell: bash
+        run: |
+          if [[ -f package.json && -f tsconfig.json ]]; then
+            npx tsc --noEmit
+          else
+            echo "No root TypeScript application/config; no typecheck target."
+          fi
