@@ -124,8 +124,12 @@ async def test_postgres16_skill_and_test_run_rls_isolation():
 async def test_social_trend_hook_research_extracts_allowlisted_public_evidence():
     fetcher=MockDirectoryFetcher(candidates=[{"business_name":"Hyderabad Photo Studio","evidence_snippet":"Wedding photography studios need faster client follow-up","source_url":"https://example.org/studio"}])
     tools=WorkforceToolRegistry(directory_fetcher=fetcher)
-    result=await tools.research_social_trends(query="photography studio follow-up",city="Hyderabad",
-        product_id="photo-studio-growth-os",source_urls=["https://example.org/studio"])
+    result,latency,digest=await tools.execute_async(
+        name="social_trend_hook_research",employee=BY_ID["social-media-lead"],
+        principal_permissions=frozenset({"agent.run"}),tenant_id="tenant-social",
+        payload={"query":"photography studio follow-up","city":"Hyderabad",
+            "product_id":"photo-studio-growth-os","source_urls":["https://example.org/studio"]})
+    assert latency>=0 and len(digest)==64
     assert result["robots_compliant"] is True
     assert result["hooks"] and "follow-up" in result["hooks"][0]
     assert fetcher.calls[0]["city"]=="Hyderabad"
@@ -192,9 +196,9 @@ async def test_postgres16_skill_catalog_seeds_120_tenant_scoped_definitions_idem
                 gym=SkillGymEngine(repo,principal)
                 first=await gym.seed_catalog()
                 second=await gym.seed_catalog()
-                rows=await repo._rows("SELECT skill_id,status,version_hash FROM agent_skills WHERE tenant_id=:tenant",
+                rows=await repo._rows("SELECT skill_id,status,version_hash,version_number FROM agent_skills WHERE tenant_id=:tenant",
                     {"tenant":principal.tenant_id})
                 assert first["seeded"]==120 and second["seeded"]==120
                 assert len(rows)==120
-                assert all(x["status"]=="DRAFT" and len(x["version_hash"])==64 for x in rows)
+                assert all(x["status"]=="DRAFT" and len(x["version_hash"])==64 and x["version_number"]==1 for x in rows)
     finally: await engine.dispose()
