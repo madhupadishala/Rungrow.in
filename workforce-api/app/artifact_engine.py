@@ -123,7 +123,7 @@ class ArtifactEngine:
         font_bold = ImageFont.load_default(size=64 if format == "square" else 76)
         font_regular = ImageFont.load_default(size=34)
         font_small = ImageFont.load_default(size=28)
-        draw.text((110, 150), "RUNGROW  •  BUSINESS GROWTH", font=font_small, fill=PALETTE["terracotta"])
+        draw.text((110, 150), "RUNGROW  |  BUSINESS GROWTH", font=font_small, fill=PALETTE["terracotta"])
         y = 300
         for line in self._wrap(headline, 24 if format == "square" else 20):
             draw.text((110, y), line, font=font_bold, fill=PALETTE["ink"])
@@ -135,12 +135,12 @@ class ArtifactEngine:
         y += 55
         for item in (highlights or [])[:5]:
             draw.rounded_rectangle((110, y, width-110, y+76), radius=18, fill="#FFFFFF", outline=PALETTE["haldi"], width=3)
-            draw.text((140, y+19), "✓  " + self._safe_text(item, 64), font=font_small, fill=PALETTE["leaf"])
+            draw.text((140, y+19), "-  " + self._safe_text(item, 64), font=font_small, fill=PALETTE["leaf"])
             y += 100
         footer_y = height - 210
         draw.rectangle((100, footer_y, width-100, footer_y+3), fill=PALETTE["terracotta"])
         draw.text((110, footer_y+28), "Practical systems for ambitious Indian SMBs", font=font_small, fill=PALETTE["ink"])
-        draw.text((110, footer_y+80), "AI-assisted • Human-governed • RunGrow", font=font_small, fill=PALETTE["terracotta"])
+        draw.text((110, footer_y+80), "AI-assisted | Human-governed | RunGrow", font=font_small, fill=PALETTE["terracotta"])
         path = self._write_path("png")
         image.save(path, format="PNG", optimize=True)
         data = path.read_bytes()
