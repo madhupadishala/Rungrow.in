@@ -244,7 +244,7 @@ async def test_postgres16_outreach_approval_dispatch_is_single_use_and_fails_clo
                    "payload":__import__("json").dumps({"channel":"whatsapp","dispatch_payload":payload})})
                 repo.principal=founder
                 with pytest.raises(Exception) as raised:
-                    await approve_single_use_outbox_action(approval["id"],SingleUseApprovalRequest(),founder,repo)
+                    await approve_single_use_outbox_action(str(approval["id"]),SingleUseApprovalRequest(),founder,repo)
                 assert getattr(raised.value,"status_code",None)==503
                 outbox=(await session.execute(text("SELECT status FROM wf_outbox_events WHERE approval_id=:id"),
                     {"id":approval["id"]})).scalar_one()
