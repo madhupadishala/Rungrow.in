@@ -56,6 +56,17 @@ class WorkforceToolRegistry:
         else:
             self.directory_fetcher=RobotsCompliantHttpFetcher(allow_domains=allow_domains,deny_domains=deny_domains)
         self.directory_search = SearXNGDirectorySearch(allow_domains=self.directory_fetcher.allow_domains)
+        self._tools: dict[str, SpecialistTool] = {}
+        self.register(SpecialistTool("public_directory_research",frozenset({"market-intel","lead-research"}),
+            frozenset({"research.public"}),self._research))
+        self.register(SpecialistTool("icp_lead_scoring",frozenset({"market-intel","lead-research","sales-ops"}),
+            frozenset({"lead.enrich"}),self._score))
+        self.register(SpecialistTool("campaign_budget_estimate",frozenset({"growth-director","campaigns","finance"}),
+            frozenset({"finance.read"}),self._budget))
+        self.register(SpecialistTool("compliance_disclosure_check",frozenset({"legal","brand","campaigns"}),
+            frozenset({"compliance.read"}),self._compliance))
+        self.register(SpecialistTool("product_handoff_draft",frozenset({"sales-ops","ae","cs-director","onboarding"}),
+            frozenset({"customer.read"}),self._handoff))
     def register(self, tool: SpecialistTool):
         if tool.name in self._tools: raise ValueError(f"Duplicate tool: {tool.name}")
         self._tools[tool.name] = tool
