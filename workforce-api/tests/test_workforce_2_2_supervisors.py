@@ -15,6 +15,7 @@ from app.registry import BY_ID
 from app.skill_registry import resolve_runtime_skill_bundle
 from app.tool_registry import WorkforceToolRegistry, ToolAuthorizationError
 from app.orchestration import WorkforceOrchestrator
+from app.main import approve_single_use_outbox_action, SingleUseApprovalRequest
 
 DB_URL=os.getenv("RUNGROW_TEST_DATABASE_URL")
 
@@ -185,5 +186,118 @@ async def test_postgres16_department_head_executes_all_assigned_specialists_and_
                 assert {x["employee_id"] for x in proofs}=={"lead-research","outbound-sdr"}
                 assert all(len(x["input_evidence"]["skill_version_hash"])==64 for x in proofs)
                 assert all(x["status"]=="PASSED" for x in proofs)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_postgres16_outreach_approval_dispatch_is_single_use_and_fails_closed(monkeypatch):
+    assert DB_URL, "CI must supply PostgreSQL 16 RUNGROW_TEST_DATABASE_URL"
+    monkeypatch.delenv("WHATSAPP_ACCESS_TOKEN",raising=False)
+    monkeypatch.delenv("WHATSAPP_PHONE_NUMBER_ID",raising=False)
+    engine=create_async_engine(DB_URL,pool_pre_ping=True)
+    factory=async_sessionmaker(engine,expire_on_commit=False)
+    tenant="w22-outreach-"+uuid4().hex
+    directive_id=str(uuid4()); order_id=str(uuid4())
+    founder=Principal("w22-founder",tenant,"founder",frozenset({"*"}),
+        product_ids=frozenset({"photo-studio-growth-os"}))
+    agent=Principal("outbound-sdr",tenant,"agent",frozenset({"*"}),
+        actor_type="agent",product_ids=frozenset({"photo-studio-growth-os"}))
+    try:
+        async with factory() as session:
+            async with PostgresWorkforceRepository(session,agent) as repo:
+                await session.execute(text("""INSERT INTO executive_directives
+                  (id,tenant_id,product_id,founder_id,command,status)
+                  VALUES (:id,:tenant,'photo-studio-growth-os','w22-founder','Prepare outreach','DELEGATED')"""),
+                  {"id":directive_id,"tenant":tenant})
+                await session.execute(text("""INSERT INTO department_work_orders
+                  (id,tenant_id,directive_id,product_id,department,department_head_id,title,objective,
+                   dependencies,specialist_role_id,tool_name,tool_input,max_budget_cents,spent_cents,status,revision_count)
+                  VALUES (:id,:tenant,:directive,'photo-studio-growth-os','Sales & Revenue','cro',
+                   'Outreach','Prepare approved outreach','[]'::jsonb,'outbound-sdr','personalized_outreach_draft',
+                   '{}'::jsonb,100,0,'IN_PROGRESS',0)"""),
+                  {"id":order_id,"tenant":tenant,"directive":directive_id})
+                payload={"to":"+15551234567","message":"Hello. I am RunGrow's AI assistant."}
+                approval=await repo.create_approval(product_id="photo-studio-growth-os",
+                    employee_id="outbound-sdr",action_type="whatsapp.send",payload=payload,
+                    expires_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc)+__import__("datetime").timedelta(hours=1))
+                await session.execute(text("""INSERT INTO wf_outbox_events
+                  (id,tenant_id,product_id,directive_id,work_order_id,approval_id,employee_id,
+                   action_type,payload_hash,payload,status)
+                  VALUES (:id,:tenant,'photo-studio-growth-os',:directive,:order,:approval,
+                   'outbound-sdr','whatsapp.send',:hash,CAST(:payload AS jsonb),'QUEUED_FOR_APPROVAL')"""),
+                  {"id":str(uuid4()),"tenant":tenant,"directive":directive_id,"order":order_id,
+                   "approval":approval["id"],"hash":approval["payload_hash"],
+                   "payload":__import__("json").dumps({"channel":"whatsapp","dispatch_payload":payload})})
+                repo.principal=founder
+                with pytest.raises(Exception) as raised:
+                    await approve_single_use_outbox_action(approval["id"],SingleUseApprovalRequest(),founder,repo)
+                assert getattr(raised.value,"status_code",None)==503
+                outbox=(await session.execute(text("SELECT status FROM wf_outbox_events WHERE approval_id=:id"),
+                    {"id":approval["id"]})).scalar_one()
+                assert outbox=="BLOCKED_UNCONFIGURED"
+                approved=(await session.execute(text("SELECT status FROM wf_approvals WHERE id=:id"),
+                    {"id":approval["id"]})).scalar_one()
+                assert approved=="APPROVED"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_postgres16_signed_onboarding_approval_consumes_once_and_records_blocked_dispatch(monkeypatch):
+    assert DB_URL, "CI must supply PostgreSQL 16 RUNGROW_TEST_DATABASE_URL"
+    monkeypatch.delenv("RUNGROW_PRODUCT_ADAPTER_DISPATCH_URL",raising=False)
+    monkeypatch.delenv("RUNGROW_ADAPTER_DISPATCH_URL_PHOTO_STUDIO_GROWTH_OS",raising=False)
+    monkeypatch.setenv("STUDIO_GROWTH_OS_SERVICE_SECRET","test-adapter-secret")
+    tools=WorkforceToolRegistry()
+    payload,_,_=tools.execute(name="product_onboarding_trigger",employee=BY_ID["onboarding"],
+        principal_permissions=frozenset({"*"}),tenant_id="tenant-w22",
+        payload={"product_id":"photo-studio-growth-os","external_tenant_id":"customer-tenant",
+            "workforce_tenant_id":"workforce-tenant"})
+    engine=create_async_engine(DB_URL,pool_pre_ping=True)
+    factory=async_sessionmaker(engine,expire_on_commit=False)
+    tenant="w22-onboarding-"+uuid4().hex
+    directive_id=str(uuid4()); order_id=str(uuid4())
+    founder=Principal("w22-founder",tenant,"founder",frozenset({"*"}),
+        product_ids=frozenset({"photo-studio-growth-os"}))
+    agent=Principal("onboarding",tenant,"agent",frozenset({"*"}),
+        actor_type="agent",product_ids=frozenset({"photo-studio-growth-os"}))
+    try:
+        async with factory() as session:
+            async with PostgresWorkforceRepository(session,agent) as repo:
+                await session.execute(text("""INSERT INTO executive_directives
+                  (id,tenant_id,product_id,founder_id,command,status)
+                  VALUES (:id,:tenant,'photo-studio-growth-os','w22-founder','Trigger onboarding','DELEGATED')"""),
+                  {"id":directive_id,"tenant":tenant})
+                await session.execute(text("""INSERT INTO department_work_orders
+                  (id,tenant_id,directive_id,product_id,department,department_head_id,title,objective,
+                   dependencies,specialist_role_id,tool_name,tool_input,max_budget_cents,spent_cents,status,revision_count)
+                  VALUES (:id,:tenant,:directive,'photo-studio-growth-os','Customer Success','cs-director',
+                   'Onboarding','Prepare onboarding','[]'::jsonb,'onboarding','product_onboarding_trigger',
+                   '{}'::jsonb,100,0,'IN_PROGRESS',0)"""),
+                  {"id":order_id,"tenant":tenant,"directive":directive_id})
+                approval=await repo.create_approval(product_id="photo-studio-growth-os",
+                    employee_id="onboarding",action_type="product.onboarding.dispatch",payload=payload,
+                    expires_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc)+__import__("datetime").timedelta(hours=1))
+                await session.execute(text("""INSERT INTO wf_outbox_events
+                  (id,tenant_id,product_id,directive_id,work_order_id,approval_id,employee_id,
+                   action_type,payload_hash,payload,status)
+                  VALUES (:id,:tenant,'photo-studio-growth-os',:directive,:order,:approval,
+                   'onboarding','product.onboarding.dispatch',:hash,CAST(:outbox AS jsonb),'QUEUED_FOR_APPROVAL')"""),
+                  {"id":str(uuid4()),"tenant":tenant,"directive":directive_id,"order":order_id,
+                   "approval":approval["id"],"hash":approval["payload_hash"],
+                   "outbox":__import__("json").dumps({"channel":"product_adapter","dispatch_payload":payload})})
+                repo.principal=founder
+                with pytest.raises(Exception) as raised:
+                    await approve_single_use_outbox_action(approval["id"],SingleUseApprovalRequest(),founder,repo)
+                assert getattr(raised.value,"status_code",None)==503
+                outbox=(await session.execute(text("SELECT status FROM wf_outbox_events WHERE approval_id=:id"),
+                    {"id":approval["id"]})).scalar_one()
+                assert outbox=="BLOCKED_UNCONFIGURED"
+                consumed=(await session.execute(text("SELECT consumed_at FROM wf_approvals WHERE id=:id"),
+                    {"id":approval["id"]})).scalar_one()
+                assert consumed is not None
+                audit=(await repo.list_audit("photo-studio-growth-os"))
+                assert any(x["action"]=="outbox.adapter_dispatch_blocked_unconfigured" for x in audit)
     finally:
         await engine.dispose()
