@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 from urllib.parse import urlparse
 from .registry import BY_ID, Employee
-from .commercial_intelligence import RobotsCompliantHttpFetcher, score_icp, AI_IDENTITY_DISCLOSURE
+from .commercial_intelligence import RobotsCompliantHttpFetcher, TinyFishResearchProvider, score_icp, AI_IDENTITY_DISCLOSURE
 
 @dataclass(frozen=True)
 class SpecialistTool:
@@ -47,22 +47,15 @@ class SearXNGDirectorySearch:
 
 class WorkforceToolRegistry:
     def __init__(self, directory_fetcher=None):
-        self.directory_fetcher = directory_fetcher or RobotsCompliantHttpFetcher(
-            allow_domains={x.strip() for x in __import__("os").getenv("RUNGROW_RESEARCH_ALLOW_DOMAINS","").split(",") if x.strip()},
-            deny_domains={x.strip() for x in __import__("os").getenv("RUNGROW_RESEARCH_DENY_DOMAINS","").split(",") if x.strip()})
+        allow_domains={x.strip().lower().lstrip('.') for x in os.getenv('RUNGROW_RESEARCH_ALLOW_DOMAINS','').split(',') if x.strip()}
+        deny_domains={x.strip().lower().lstrip('.') for x in os.getenv('RUNGROW_RESEARCH_DENY_DOMAINS','').split(',') if x.strip()}
+        if directory_fetcher is not None:
+            self.directory_fetcher=directory_fetcher
+        elif os.getenv('TINYFISH_API_KEY','').strip():
+            self.directory_fetcher=TinyFishResearchProvider(api_key=os.getenv('TINYFISH_API_KEY'),allow_domains=allow_domains,deny_domains=deny_domains)
+        else:
+            self.directory_fetcher=RobotsCompliantHttpFetcher(allow_domains=allow_domains,deny_domains=deny_domains)
         self.directory_search = SearXNGDirectorySearch(allow_domains=self.directory_fetcher.allow_domains)
-        self._tools: dict[str, SpecialistTool] = {}
-        self.register(SpecialistTool("public_directory_research",frozenset({"market-intel","lead-research"}),
-            frozenset({"research.public"}),self._research))
-        self.register(SpecialistTool("icp_lead_scoring",frozenset({"market-intel","lead-research","sales-ops"}),
-            frozenset({"lead.enrich"}),self._score))
-        self.register(SpecialistTool("campaign_budget_estimate",frozenset({"growth-director","campaigns","finance"}),
-            frozenset({"finance.read"}),self._budget))
-        self.register(SpecialistTool("compliance_disclosure_check",frozenset({"legal","brand","campaigns"}),
-            frozenset({"compliance.read"}),self._compliance))
-        self.register(SpecialistTool("product_handoff_draft",frozenset({"sales-ops","ae","cs-director","onboarding"}),
-            frozenset({"customer.read"}),self._handoff))
-
     def register(self, tool: SpecialistTool):
         if tool.name in self._tools: raise ValueError(f"Duplicate tool: {tool.name}")
         self._tools[tool.name] = tool
