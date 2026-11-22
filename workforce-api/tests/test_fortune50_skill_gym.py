@@ -141,6 +141,7 @@ def test_social_query_reply_chains_quote_and_blocks_growtoys():
         "query":"How much does the Pro plan cost?","tier":"Pro"})
     assert result["intent"]=="QUOTATION_REQUEST"
     assert result["quotation_status"]=="DRAFT_FOR_SALES_REVIEW"
+    assert result["handoff_role"]=="ae" and result["quotation_tool"]=="commercial_proposal_builder"
     assert result["quotation"]["line_items"][0]["unit_price_inr"]==9999
     blocked=tools._social_query_reply_draft({"product_id":"growtoys","query":"What is the price?"})
     assert blocked["quotation_status"]=="BLOCKED_DISCOVERY_ONLY"
