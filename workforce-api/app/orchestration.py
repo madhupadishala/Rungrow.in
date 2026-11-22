@@ -1,6 +1,7 @@
 """Durable CEO -> department head -> specialist orchestration for Workforce 2.1."""
 from __future__ import annotations
 import asyncio, hashlib, json, re, time
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
@@ -182,9 +183,14 @@ class WorkforceOrchestrator:
             directive=await self.session.execute(text("SELECT product_id FROM executive_directives WHERE id=:id AND tenant_id=:tenant"),
                 {"id":directive_id,"tenant":self.principal.tenant_id})
             product_id=directive.scalar_one()
-            approval=await self.repo.create_approval(product_id=product_id,employee_id="digital-ceo",
-                action_type="directive.external_execution",payload=proposal,
-                expires_at=datetime.now(timezone.utc)+timedelta(minutes=15))
+            original_principal=self.repo.principal
+            self.repo.principal=replace(original_principal,user_id="digital-ceo",actor_type="agent")
+            try:
+                approval=await self.repo.create_approval(product_id=product_id,employee_id="digital-ceo",
+                    action_type="directive.external_execution",payload=proposal,
+                    expires_at=datetime.now(timezone.utc)+timedelta(minutes=15))
+            finally:
+                self.repo.principal=original_principal
             status="AWAITING_APPROVAL"
             await self.session.execute(text("""UPDATE executive_directives SET status=:status,
               approval_id=:approval,consolidated_proposal=CAST(:proposal AS jsonb),updated_at=now()
