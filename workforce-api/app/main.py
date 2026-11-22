@@ -1411,12 +1411,11 @@ async def queue_social_publish(body: SocialPublishRequest,
     playbook=PRODUCT_PLAYBOOKS.get(body.product_id)
     if not playbook or playbook.get("stage")=="DISCOVERY_ONLY":
         raise HTTPException(403,"Product is not eligible for live campaign publishing")
-    payload={"channel":body.channel.lower(),"content":body.content,"utm":body.utm,
-             "product_id":body.product_id,"dispatch_payload":{"channel":body.channel.lower(),
-             "content":body.content,"utm":body.utm,"product_id":body.product_id}}
+    dispatch_payload={"channel":body.channel.lower(),"content":body.content,"utm":body.utm,
+                      "product_id":body.product_id}
     approval=await repo.create_approval(product_id=body.product_id,employee_id="social-publisher",
-        action_type="social.publish",payload=payload,expires_at=datetime.now(timezone.utc)+timedelta(minutes=30))
-    outbox_payload={"channel":body.channel.lower(),"dispatch_payload":payload["dispatch_payload"]}
+        action_type="social.publish",payload=dispatch_payload,expires_at=datetime.now(timezone.utc)+timedelta(minutes=30))
+    outbox_payload={"channel":body.channel.lower(),"dispatch_payload":dispatch_payload}
     await repo.session.execute(sql_text("""INSERT INTO wf_outbox_events
       (id,tenant_id,product_id,directive_id,work_order_id,approval_id,employee_id,action_type,
        payload_hash,payload,status,created_at,updated_at)
