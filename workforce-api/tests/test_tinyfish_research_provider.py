@@ -3,6 +3,7 @@ import httpx
 import pytest
 
 from app.commercial_intelligence import TinyFishResearchProvider
+from app.tool_registry import WorkforceToolRegistry
 
 
 @pytest.mark.asyncio
@@ -77,3 +78,12 @@ async def test_tinyfish_provider_blocks_non_allowlisted_domains_before_network()
     assert not calls
     assert not batch.candidates
     assert "not allowlisted" in batch.blocked[0]["reason"]
+
+
+def test_workforce_registry_selects_tinyfish_only_when_api_key_configured(monkeypatch):
+    monkeypatch.setenv('TINYFISH_API_KEY', 'test-only-key')
+    monkeypatch.setenv('RUNGROW_RESEARCH_ALLOW_DOMAINS', 'directory.example.org')
+    registry = WorkforceToolRegistry()
+    assert isinstance(registry.directory_fetcher, TinyFishResearchProvider)
+    assert 'public_directory_research' in registry.names()
+    assert registry.directory_fetcher.allow_domains == {'directory.example.org'}
