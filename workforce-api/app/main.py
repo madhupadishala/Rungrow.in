@@ -1112,6 +1112,43 @@ async def approve_single_use_outbox_action(approval_id: str,
                 approval["product_id"],{"approval_id":approval_id,"signature_present":True,
                 "http_status":response.status_code,"delivery":"not_claimed"})
             return {"approval_id":approval_id,"status":"DISPATCH_ACCEPTED","delivery":"not_claimed"}
+        if approval["action_type"]=="social.publish":
+            employee=BY_ID.get("social-publisher")
+            if employee is None: raise HTTPException(403,"Social publisher role is unavailable")
+            run=await repo.create_agent_run(product_id=approval["product_id"],employee_id=employee.id,
+                task="Founder-approved social publishing dispatch",status="planned",
+                summary="Single-use approval-gated social post dispatch",steps=[],
+                correlation_id=str(outbox["id"]),is_sandbox=False)
+            await repo.consume_approval(approval_id,product_id=approval["product_id"],
+                employee_id=employee.id,action_type="social.publish",payload=dispatch,run_id=run["id"])
+            endpoint=os.getenv("RUNGROW_SOCIAL_PUBLISH_DISPATCH_URL","").strip()
+            secret=os.getenv("RUNGROW_SOCIAL_PUBLISH_SECRET","")
+            if not endpoint or not secret:
+                await repo.session.execute(text("""UPDATE wf_outbox_events SET status='BLOCKED_UNCONFIGURED',
+                  last_error='Social publishing gateway URL or signing secret is not configured',updated_at=now()
+                  WHERE id=:id AND tenant_id=:tenant"""),{"id":outbox["id"],"tenant":p.tenant_id})
+                await repo.append_audit("social.publish_blocked_unconfigured","outbox_event",
+                    str(outbox["id"]),approval["product_id"],{"approval_id":approval_id,"channel":event.get("channel")})
+                raise HTTPException(503,"Social publishing gateway is not configured; approval consumed and dispatch blocked")
+            raw=json.dumps(dispatch,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()
+            import hmac, hashlib
+            signature=hmac.new(secret.encode(),raw,hashlib.sha256).hexdigest()
+            async with httpx.AsyncClient(timeout=15.0,follow_redirects=False) as client:
+                response=await client.post(endpoint,content=raw,headers={
+                    "Content-Type":"application/json","X-RunGrow-Signature":signature,
+                    "Idempotency-Key":approval_id,"X-RunGrow-Approval-ID":approval_id})
+            response.raise_for_status()
+            proof={"http_status":response.status_code,
+                "response_sha256":hashlib.sha256(response.content).hexdigest(),
+                "delivery":"gateway_acknowledged_not_verified"}
+            await repo.session.execute(text("""UPDATE wf_outbox_events SET status='DISPATCH_ACCEPTED',
+              provider_response=CAST(:proof AS jsonb),dispatched_at=now(),updated_at=now()
+              WHERE id=:id AND tenant_id=:tenant"""),
+              {"proof":json.dumps(proof),"id":outbox["id"],"tenant":p.tenant_id})
+            await repo.append_audit("social.publish_dispatch_accepted","outbox_event",str(outbox["id"]),
+                approval["product_id"],{"approval_id":approval_id,"channel":event.get("channel"),
+                "delivery":"not_claimed"})
+            return {"approval_id":approval_id,"status":"DISPATCH_ACCEPTED","delivery":"gateway_acknowledged_not_verified"}
         raise HTTPException(403,"Approval action is not an outbox dispatch action")
     except HTTPException:
         raise
@@ -1307,3 +1344,87 @@ async def process_voice_turn(
         "context_turn_count": len(turn["context"]),
         "identity_disclosure": AI_IDENTITY_DISCLOSURE,
     }
+
+
+# Workforce 2.4 — tenant-scoped skill gym and governed social launch APIs.
+from .skill_gym import SkillGymEngine
+from .skill_registry import FORTUNE50_SKILLS
+from sqlalchemy import text as sql_text
+
+class SkillBuildAndTestRequest(BaseModel):
+    skill_id: str = Field(min_length=3,max_length=120)
+    department: str = Field(min_length=2,max_length=100)
+    role_id: str = Field(min_length=2,max_length=100)
+    category: str = Field(min_length=2,max_length=80)
+    skill_name: str = Field(min_length=2,max_length=180)
+    instructions: str = Field(min_length=20,max_length=12000)
+    rubric_json: dict | None = None
+    scenarios: list[dict] = Field(min_length=1,max_length=30)
+
+class SocialPublishRequest(BaseModel):
+    product_id: str = Field(min_length=2,max_length=120)
+    channel: str = Field(min_length=2,max_length=40)
+    content: str = Field(min_length=20,max_length=8000)
+    utm: dict = Field(default_factory=dict)
+
+@app.get("/v1/skills/catalog")
+async def skill_catalog(p: Principal=Depends(require_permission("skills.read"))):
+    return {"count":len(FORTUNE50_SKILLS),"skills":list(FORTUNE50_SKILLS)}
+
+@app.post("/v1/skills/seed")
+async def seed_skill_catalog(p: Principal=Depends(require_permission("skills.manage")),
+                             repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    return await SkillGymEngine(repo,p).seed_catalog()
+
+@app.post("/v1/skills/build-and-test")
+async def build_and_test_skill(body: SkillBuildAndTestRequest,
+    p: Principal=Depends(require_permission("skills.manage")),
+    repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    if body.role_id not in BY_ID: raise HTTPException(404,"Unknown workforce role")
+    role=BY_ID[body.role_id]
+    if role.department!=body.department: raise HTTPException(422,"Skill department does not match role registry")
+    if "*" not in p.permissions and "skills.manage" not in p.permissions:
+        raise HTTPException(403,"Skill management permission required")
+    engine=SkillGymEngine(repo,p)
+    try:
+        await engine.build_or_update_skill(skill_id=body.skill_id,department=body.department,
+            role_id=body.role_id,category=body.category,skill_name=body.skill_name,
+            instructions=body.instructions,rubric_json=body.rubric_json)
+        return await engine.run_realtime_skill_test(body.skill_id,body.scenarios)
+    except LookupError as exc: raise HTTPException(404,str(exc)) from exc
+    except ValueError as exc: raise HTTPException(422,str(exc)) from exc
+
+@app.get("/v1/skills/{skill_id}/test-runs")
+async def skill_test_runs(skill_id: str,p: Principal=Depends(require_permission("skills.read")),
+                          repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    try: return await SkillGymEngine(repo,p).list_test_runs(skill_id)
+    except LookupError as exc: raise HTTPException(404,str(exc)) from exc
+
+@app.post("/v1/social/publish")
+async def queue_social_publish(body: SocialPublishRequest,
+    p: Principal=Depends(require_permission("campaign.publish")),
+    repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
+    authorize_product_access(p,body.product_id)
+    if "social-publisher" not in BY_ID: raise HTTPException(503,"Social publisher role is unavailable")
+    if not re.search(r"\\bAI\\b|artificial intelligence",body.content,re.I) or "RunGrow" not in body.content:
+        raise HTTPException(422,"AI identity and RunGrow disclosure are mandatory")
+    playbook=PRODUCT_PLAYBOOKS.get(body.product_id)
+    if not playbook or playbook.get("stage")=="DISCOVERY_ONLY":
+        raise HTTPException(403,"Product is not eligible for live campaign publishing")
+    payload={"channel":body.channel.lower(),"content":body.content,"utm":body.utm,
+             "product_id":body.product_id,"dispatch_payload":{"channel":body.channel.lower(),
+             "content":body.content,"utm":body.utm,"product_id":body.product_id}}
+    approval=await repo.create_approval(product_id=body.product_id,employee_id="social-publisher",
+        action_type="social.publish",payload=payload,expires_at=datetime.now(timezone.utc)+timedelta(minutes=30))
+    outbox_payload={"channel":body.channel.lower(),"dispatch_payload":payload["dispatch_payload"]}
+    await repo.session.execute(sql_text("""INSERT INTO wf_outbox_events
+      (id,tenant_id,product_id,directive_id,work_order_id,approval_id,employee_id,action_type,
+       payload_hash,payload,status,created_at,updated_at)
+      VALUES (:id,:tenant,:product,NULL,NULL,:approval,'social-publisher','social.publish',
+       :hash,CAST(:payload AS jsonb),'QUEUED_FOR_APPROVAL',now(),now())"""),
+      {"id":str(uuid4()),"tenant":p.tenant_id,"product":body.product_id,
+       "approval":approval["id"],"hash":approval["payload_hash"],"payload":json.dumps(outbox_payload)})
+    await repo.append_audit("social.publish_queued","outbox_event",str(approval["id"]),body.product_id,
+        {"approval_id":approval["id"],"channel":body.channel.lower(),"status":"QUEUED_FOR_APPROVAL"})
+    return {"approval_id":approval["id"],"status":"QUEUED_FOR_APPROVAL",
+            "dispatch_status":"NOT_DISPATCHED","single_use_approval_required":True}
