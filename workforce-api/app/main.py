@@ -1426,4 +1426,5 @@ async def queue_social_publish(body: SocialPublishRequest,
     await repo.append_audit("social.publish_queued","outbox_event",str(approval["id"]),body.product_id,
         {"approval_id":approval["id"],"channel":body.channel.lower(),"status":"QUEUED_FOR_APPROVAL"})
     return {"approval_id":approval["id"],"status":"QUEUED_FOR_APPROVAL",
+            "approval_status":approval["status"],"approval_payload_hash":approval["payload_hash"],
             "dispatch_status":"NOT_DISPATCHED","single_use_approval_required":True}
