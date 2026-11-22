@@ -237,68 +237,72 @@ class ArtifactEngine:
         from openpyxl.utils import get_column_letter
         if tracker_type not in {"lead_pipeline", "social_calendar", "customer_onboarding"}:
             raise ValueError("Unsupported tracker_type")
-        wb = Workbook()
-        summary = wb.active; summary.title = "Summary"
-        ws = wb.create_sheet({"lead_pipeline":"Leads","social_calendar":"30-Day Calendar",
-                              "customer_onboarding":"Onboarding"}[tracker_type])
-        if tracker_type == "lead_pipeline":
-            headers = ["Lead","Company","Product","Stage","Owner","Value INR","Next Follow-up","Probability","Weighted INR"]
-            data = rows or []
-            for idx, item in enumerate(data, start=2):
-                pass
-            for item in data: ws.append([item.get("lead",""),item.get("company",""),item.get("product",""),
-                item.get("stage","New"),item.get("owner",""),float(item.get("value_inr",0)),
-                item.get("next_follow_up",""),float(item.get("probability",0)),f"=F{ws.max_row+1}*H{ws.max_row+1}"])
+        wb=Workbook()
+        summary=wb.active; summary.title="Summary"
+        sheet_name={"lead_pipeline":"Leads","social_calendar":"30-Day Calendar",
+                    "customer_onboarding":"Onboarding"}[tracker_type]
+        ws=wb.create_sheet(sheet_name)
+        if tracker_type=="lead_pipeline":
+            headers=["Lead","Company","Product","Stage","Owner","Value INR","Next Follow-up","Probability","Weighted INR"]
+            data=rows or []
+            ws.append(headers)
+            for item in data:
+                row=ws.max_row+1
+                ws.append([item.get("lead",""),item.get("company",""),item.get("product",""),
+                    item.get("stage","New"),item.get("owner",""),float(item.get("value_inr",0)),
+                    item.get("next_follow_up",""),float(item.get("probability",0)),f"=F{row}*H{row}"])
             if not data: ws.append(["","","","New","",0,"",0,"=F2*H2"])
-            summary_rows = [["Metric","Value"],["Total Leads","=COUNTA(Leads!A:A)-1"],
-                            ["Pipeline INR","=SUM(Leads!F:F)"],["Weighted Pipeline INR","=SUM(Leads!I:I)"]]
-        elif tracker_type == "social_calendar":
-            headers = ["Date","Channel","Content Pillar","Topic","Format","CTA","UTM Campaign","Status","Approval"]
-            data = rows or [{"date":(date.today()+timedelta(days=i)).isoformat(),"channel":["LinkedIn","Instagram","X","YouTube Shorts"][i%4],
-                "pillar":"Problem-solving" if i%5 else "Product offer","topic":["Lead follow-up","Customer trust","Operations","Revenue visibility","Product walkthrough"][i%5],
-                "format":["Carousel","Short video","Text post"][i%3],"cta":"Request a guided demo","utm_campaign":f"rungrow-day-{i+1}","status":"DRAFT","approval":"REQUIRED"} for i in range(30)]
+            summary_rows=[["Metric","Value"],["Total Leads","=COUNTA(Leads!A:A)-1"],
+                ["Pipeline INR","=SUM(Leads!F:F)"],["Weighted Pipeline INR","=SUM(Leads!I:I)"]]
+        elif tracker_type=="social_calendar":
+            headers=["Date","Channel","Content Pillar","Topic","Format","CTA","UTM Campaign","Status","Approval"]
+            data=rows or [{"date":(date.today()+timedelta(days=i)).isoformat(),
+                "channel":["LinkedIn","Instagram","X","YouTube Shorts"][i%4],
+                "pillar":"Product offer" if i%5==4 else "Problem-solving",
+                "topic":["Lead follow-up","Customer trust","Operations","Revenue visibility","Product walkthrough"][i%5],
+                "format":["Carousel","Short video","Text post"][i%3],"cta":"Request a guided demo",
+                "utm_campaign":f"rungrow-day-{i+1}","status":"DRAFT","approval":"REQUIRED"} for i in range(30)]
+            ws.append(headers)
             for x in data: ws.append([x.get("date",""),x.get("channel",""),x.get("pillar",""),x.get("topic",""),
                 x.get("format",""),x.get("cta",""),x.get("utm_campaign",""),x.get("status","DRAFT"),x.get("approval","REQUIRED")])
-            headers = headers
-            summary_rows = [["Metric","Value"],["Scheduled Posts","=COUNTA('30-Day Calendar'!A:A)-1"],
-                            ["Approval Required","=COUNTIF('30-Day Calendar'!I:I,\"REQUIRED\")"]]
+            summary_rows=[["Metric","Value"],["Scheduled Posts","=COUNTA('30-Day Calendar'!A:A)-1"],
+                ["Approval Required",'=COUNTIF(\'30-Day Calendar\'!I:I,"REQUIRED")']]
         else:
-            headers = ["Customer","Product","Owner","Kickoff","Milestone","Due Date","Status","Completion %","Evidence Link"]
-            data = rows or []
+            headers=["Customer","Product","Owner","Kickoff","Milestone","Due Date","Status","Completion %","Evidence Link"]
+            data=rows or []
+            ws.append(headers)
             for x in data: ws.append([x.get("customer",""),x.get("product",""),x.get("owner",""),
                 x.get("kickoff",""),x.get("milestone",""),x.get("due_date",""),x.get("status","Not Started"),
                 float(x.get("completion",0)),x.get("evidence_link","")])
             if not data: ws.append(["","","","","","","Not Started",0,""])
-            summary_rows = [["Metric","Value"],["Milestones","=COUNTA(Onboarding!E:E)-1"],
-                            ["Completed","=COUNTIF(Onboarding!G:G,\"Complete\")"],
-                            ["Average Completion","=IFERROR(AVERAGE(Onboarding!H:H),0)"]]
-        ws.insert_rows(1); ws.append([]) if ws.max_row == 0 else None
-        for col, header in enumerate(headers, start=1):
-            cell=ws.cell(row=1,column=col,value=header)
-            cell.font=Font(bold=True,color="FFFFFF"); cell.fill=PatternFill("solid",fgColor="B85C38")
-            cell.alignment=Alignment(horizontal="center")
+            summary_rows=[["Metric","Value"],["Milestones","=COUNTA(Onboarding!E:E)-1"],
+                ["Completed",'=COUNTIF(Onboarding!G:G,"Complete")'],
+                ["Average Completion","=IFERROR(AVERAGE(Onboarding!H:H),0)"]]
+        for cell in ws[1]:
+            cell.font=Font(bold=True,color="FFFFFF")
+            cell.fill=PatternFill("solid",fgColor="B85C38")
+            cell.alignment=Alignment(horizontal="center",wrap_text=True)
         ws.freeze_panes="A2"; ws.auto_filter.ref=ws.dimensions
-        for col in range(1,len(headers)+1):
-            ws.column_dimensions[get_column_letter(col)].width=min(34,max(14,len(headers[col-1])+4))
+        for col,header in enumerate(headers,start=1):
+            ws.column_dimensions[get_column_letter(col)].width=min(36,max(14,len(header)+4))
         for row in summary_rows: summary.append(row)
         for cell in summary[1]:
-            cell.font=Font(bold=True,color="FFFFFF"); cell.fill=PatternFill("solid",fgColor="E7A928")
-        summary.column_dimensions["A"].width=28; summary.column_dimensions["B"].width=24
+            cell.font=Font(bold=True,color="FFFFFF")
+            cell.fill=PatternFill("solid",fgColor="E7A928")
+        summary.column_dimensions["A"].width=28; summary.column_dimensions["B"].width=30
         path=self._write_path("xlsx"); wb.save(path)
-        # Re-open to validate workbook container and expected sheet/formula structure.
         check=load_workbook(path,read_only=False,data_only=False)
-        if len(check.sheetnames)!=2 or check[ws.title].max_row < 2:
+        if check.sheetnames != ["Summary",sheet_name] or check[sheet_name].max_row < 2:
             raise RuntimeError("XLSX artifact verification failed")
         formulas=sum(1 for sheet in check for row in sheet.iter_rows() for cell in row
                      if isinstance(cell.value,str) and cell.value.startswith("="))
         data=path.read_bytes()
         return {"artifact_id":path.stem,"path":str(path),"filename":path.name,
-                "mime_type":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                "bytes":len(data),"sheets":check.sheetnames,"formula_count":formulas,
-                "sha256":__import__("hashlib").sha256(data).hexdigest()}
+            "mime_type":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "bytes":len(data),"sheets":check.sheetnames,"formula_count":formulas,
+            "sha256":__import__("hashlib").sha256(data).hexdigest()}
 
-    @staticmethod
-    def governed_email_payload(*, to: list[str], subject: str, body: str,
+    def governed_email_payload(self, *, to: list[str], subject: str, body: str,
                                artifacts: list[dict]) -> dict:
         import re
         if not to or len(to)>20 or any(not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", x) for x in to):
@@ -310,7 +314,7 @@ class ArtifactEngine:
         verified=[]
         for item in artifacts:
             path=Path(str(item.get("path",""))).resolve()
-            if not path.is_relative_to(ARTIFACT_ROOT) or not path.is_file():
+            if not path.is_relative_to(self.root) or not path.is_file():
                 raise ArtifactPolicyError("Attachment is not a verified RunGrow artifact")
             verified.append({"path":str(path),"filename":path.name,
                              "mime_type":item.get("mime_type"),"sha256":item.get("sha256")})
