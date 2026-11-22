@@ -77,6 +77,18 @@ class WorkforceToolRegistry:
             frozenset({"proposal.draft"}),self._proposal))
         self.register(SpecialistTool("product_onboarding_trigger",frozenset({"onboarding","sales-ops"}),
             frozenset({"customer.update"}),self._onboarding))
+
+        self.register(SpecialistTool("social_trend_hook_research",frozenset({"social-media-lead","market-intel","social-engagement"}),
+            frozenset({"research.public"}),self._social_trend_hook_research))
+        self.register(SpecialistTool("social_content_calendar_plan",frozenset({"social-media-lead","campaigns","social-events"}),
+            frozenset({"campaign.draft"}),self._social_content_calendar_plan))
+        self.register(SpecialistTool("social_query_reply_draft",frozenset({"social-engagement","inbound-sdr"}),
+            frozenset({"conversation.reply"}),self._social_query_reply_draft))
+        self.register(SpecialistTool("social_event_campaign_plan",frozenset({"social-events","campaigns"}),
+            frozenset({"campaign.draft"}),self._social_event_campaign_plan))
+        self.register(SpecialistTool("social_publish_dispatch",frozenset({"social-publisher"}),
+            frozenset({"content.draft","compliance.read"}),self._social_publish_dispatch))
+
     def register(self, tool: SpecialistTool):
         if tool.name in self._tools: raise ValueError(f"Duplicate tool: {tool.name}")
         self._tools[tool.name] = tool
@@ -210,3 +222,86 @@ class WorkforceToolRegistry:
         return {"adapter_payload":payload,"signature_headers":{"X-RunGrow-Signature":signature,
             "X-RunGrow-Timestamp":timestamp,"Idempotency-Key":nonce},
             "validated":True,"approval_required":True,"provisioned":False}
+
+
+    # Workforce 2.4: social growth tools. These handlers only prepare evidence,
+    # plans or approval payloads; publication remains a separate governed route.
+    def _social_trend_hook_research(self,p):
+        urls=p.get("source_urls",[])
+        if not isinstance(urls,list) or len(urls)>20: raise ValueError("source_urls must contain at most 20 URLs")
+        return {"status":"RESEARCH_READY","query":str(p.get("query","")).strip(),
+            "vertical":str(p.get("vertical","Indian SMB")),"city":str(p.get("city","")),
+            "source_urls":urls,"robots_compliant":True,"external_action":False,
+            "provider":"TinyFishResearchProvider_or_RobotsCompliantHttpFetcher"}
+
+    async def research_social_trends(self, *, query, city, product_id, source_urls):
+        self._assert_commercial_product(product_id)
+        batch=await self.directory_fetcher.discover(query=query,city=city,
+            product_id=product_id,source_urls=source_urls)
+        return {"product_id":product_id,"query":query,"city":city,
+            "high_performing_formats":[{"format":"problem-first short video","evidence":x.get("evidence_snippet",""),"source_url":x.get("source_url")} for x in batch.candidates],
+            "hooks":[x.get("evidence_snippet","")[:220] for x in batch.candidates if x.get("evidence_snippet")],
+            "pain_point_language":[x.get("evidence_snippet","")[:220] for x in batch.candidates if x.get("evidence_snippet")],
+            "sources":batch.candidates,"blocked":batch.blocked,"robots_compliant":True}
+
+    def _social_content_calendar_plan(self,p):
+        product=str(p.get("product_id",""))
+        self._assert_commercial_product(product)
+        channels=("LinkedIn","Instagram","X","YouTube Shorts")
+        weeks=max(1,min(12,int(p.get("weeks",4))))
+        posts=[]
+        for index in range(weeks*5):
+            offer=(index%5)==4
+            channel=channels[index%len(channels)]
+            slug=f"{product}-w{index//5+1}-p{index%5+1}"
+            posts.append({"day":index+1,"channel":channel,"content_type":"product_offer" if offer else "problem_solving",
+                "content_ratio":"20%" if offer else "80%","topic":p.get("topics",["reduce manual work","respond faster","improve customer follow-up","track business growth"])[index%4],
+                "utm":{"utm_source":channel.lower().replace(" ","_"),"utm_medium":"organic_social","utm_campaign":slug},
+                "status":"DRAFT","approval_required":True})
+        return {"product_id":product,"weeks":weeks,"channels":list(channels),"content_mix":{"problem_solving":.8,"product_offer":.2},
+            "posts":posts,"publishing_authorised":False}
+
+    def _social_query_reply_draft(self,p):
+        product=str(p.get("product_id",""))
+        playbook=self._assert_commercial_product(product)
+        query=str(p.get("query","")).strip()
+        if not query: raise ValueError("query is required")
+        intent="QUOTATION_REQUEST" if re.search(r"price|pricing|cost|quotation|quote|how much|₹|inr",query,re.I) else "PRODUCT_QUERY"
+        draft={"intent":intent,"reply":AI_IDENTITY_DISCLOSURE+" Thank you for reaching out. "+query[:500]+
+            " We can arrange a human walkthrough to understand your requirements.",
+            "external_reply_sent":False,"approval_required":True}
+        if intent=="QUOTATION_REQUEST":
+            if playbook.get("stage")=="DISCOVERY_ONLY":
+                return {**draft,"quotation_status":"BLOCKED_DISCOVERY_ONLY","quotation":None,
+                    "handoff":"Internal discovery only; no commercial quotation can be issued."}
+            tier=str(p.get("tier") or next(iter(playbook.get("tiers",{})), "Starter"))
+            proposal=self._proposal({"product_id":product,"tier":tier,"months":p.get("months",12)})
+            return {**draft,"quotation_status":"DRAFT_FOR_SALES_REVIEW","quotation":proposal,
+                "handoff_role":"ae","approval_required":True}
+        return {**draft,"quotation_status":"NOT_REQUESTED","handoff_role":"social-engagement"}
+
+    def _social_event_campaign_plan(self,p):
+        product=str(p.get("product_id",""))
+        self._assert_commercial_product(product)
+        event=str(p.get("event_type","webinar")).lower()
+        if event not in {"webinar","product_launch","demo_day","smb_workshop"}: raise ValueError("Unsupported event_type")
+        return {"product_id":product,"event_type":event,"phases":[
+            {"phase":"pre_launch","tasks":["audience and registration page","speaker and demo rehearsal","approval-gated invitations","reminder sequence"]},
+            {"phase":"live_event","tasks":["host run-of-show","consent-based recording","moderated Q&A","demo and attendance capture"]},
+            {"phase":"post_event","tasks":["attendee segmentation","requested follow-up drafts","demo and quotation handoff","event ROI review"]}],
+            "follow_up_days":[0,1,3,7],"external_actions_authorised":False}
+
+    def _social_publish_dispatch(self,p):
+        product=str(p.get("product_id",""))
+        self._assert_commercial_product(product,live_action=True)
+        channel=str(p.get("channel","")).lower()
+        if channel not in {"linkedin","instagram","x","youtube","whatsapp","telegram"}:
+            raise ValueError("Unsupported social publishing channel")
+        content=str(p.get("content","")).strip()
+        if len(content)<20: raise ValueError("Publishing content must contain at least 20 characters")
+        compliance=self._compliance({"draft":content})
+        if not compliance["passed"]: raise ToolAuthorizationError("AI disclosure and organisation identity are mandatory")
+        return {"product_id":product,"channel":channel,"content":content,
+            "utm":p.get("utm",{}),"approval_status":"QUEUED_FOR_APPROVAL",
+            "dispatch_status":"NOT_DISPATCHED","approval_required":True,
+            "compliance":compliance}
