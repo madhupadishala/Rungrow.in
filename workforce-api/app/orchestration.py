@@ -138,17 +138,30 @@ class WorkforceOrchestrator:
                 if isinstance(delivered,str): delivered=json.loads(delivered)
                 payload={**payload,"candidates":delivered.get("candidates",[])}
         started=time.perf_counter()
+        reserved_cents=0
         try:
+            fetcher=self.tools.directory_fetcher
+            if order["tool_name"]=="public_directory_research":
+                source_urls=payload.get("source_urls",[])
+                if not source_urls:
+                    source_urls=await self.tools.directory_search.search(payload.get("query",""),payload.get("city",""),limit=20)
+                payload["source_urls"]=source_urls
+                if hasattr(fetcher,"max_steps"):
+                    step_cost=max(1,int(os.getenv("TINYFISH_STEP_COST_CENTS","2")))
+                    reserved_cents=max(1,len(source_urls))*int(fetcher.max_steps)*step_cost
+                else:
+                    reserved_cents=max(1,len(source_urls))
+            else:
+                reserved_cents=1
+            if not await self._reserve_work_order_budget(order,reserved_cents):
+                return {"work_order_id":str(order["id"]),"status":"AWAITING_APPROVAL","reason":"Work-order budget ceiling reached"}
             # Public research is an async, robots-aware operation; all other tools are pure.
             if order["tool_name"]=="public_directory_research":
                 if "research.public" not in employee.permissions:
                     raise PermissionError("Specialist role lacks research.public permission")
                 if "*" not in self.principal.permissions and not ({"agent.run","work.assign"} & set(self.principal.permissions)):
                     raise PermissionError("Orchestration principal lacks agent execution authority")
-                fetcher=self.tools.directory_fetcher
                 source_urls=payload.get("source_urls",[])
-                if not source_urls:
-                    source_urls=await self.tools.directory_search.search(payload.get("query",""),payload.get("city",""),limit=20)
                 if not fetcher.allow_domains:
                     batch=type("BlockedBatch",(),{"candidates":[],"blocked":[{"url":u,"reason":"No research domain allowlist is configured"} for u in source_urls]})()
                 else:
