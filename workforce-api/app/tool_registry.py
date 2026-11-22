@@ -199,8 +199,9 @@ class WorkforceToolRegistry:
             "workforce_tenant_id":internal,"correlation_id":str(p.get("correlation_id") or hashlib.sha256((product+external).encode()).hexdigest()[:24]),
             "provisioning_status":"PENDING_HUMAN_APPROVAL","provision":False,
             "issued_at":timestamp,"nonce":nonce,"idempotency_key":nonce}
+        unsigned_raw=json.dumps(payload,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()
+        payload["payload_sha256"]=hashlib.sha256(unsigned_raw).hexdigest()
         raw=json.dumps(payload,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()
-        payload["payload_sha256"]=hashlib.sha256(raw).hexdigest()
         secret=os.getenv("STUDIO_GROWTH_OS_SERVICE_SECRET") or os.getenv("RUNGROW_ADAPTER_WEBHOOK_SECRET")
         if not secret: raise ToolAuthorizationError("Adapter signing secret is not configured")
         signer=SignedWebhookVerifier(secret)
