@@ -46,3 +46,8 @@ DROP POLICY IF EXISTS skill_test_runs_tenant_isolation ON skill_test_runs;
 CREATE POLICY skill_test_runs_tenant_isolation ON skill_test_runs
   FOR ALL USING (tenant_id = current_setting('app.current_tenant_id', true))
   WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true));
+
+-- Social publishing approvals have their own lifecycle; no CEO directive/work-order
+-- is required for a standalone campaign payload. Keep the FK to the single-use approval.
+ALTER TABLE wf_outbox_events ALTER COLUMN directive_id DROP NOT NULL;
+ALTER TABLE wf_outbox_events ALTER COLUMN work_order_id DROP NOT NULL;
