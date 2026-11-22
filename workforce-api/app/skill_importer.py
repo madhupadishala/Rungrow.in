@@ -1,4 +1,3 @@
-    re.compile(r"(?i)\b(?:execute|run|launch)\b[^\n]{0,80}\b(?:shell|terminal|command line|bash|powershell)\b"),
 """Secure importer for the open Agent Skills SKILL.md convention.
 
 The parser accepts YAML frontmatter plus Markdown instructions. Imported skills
@@ -16,6 +15,7 @@ MAX_SKILL_BYTES = 64 * 1024
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 BLOCKED_PATTERNS = (
     re.compile(r"(?i)\b(?:run|execute|invoke)\s+(?:any|arbitrary|untrusted)\s+(?:shell|bash|zsh|powershell|terminal|command)"),
+    re.compile(r"(?i)\b(?:execute|run|launch)\b[^\n]{0,80}\b(?:shell|terminal|command line|bash|powershell)\b"),
     re.compile(r"(?i)\b(?:subprocess\.(?:run|Popen|call)|os\.system|child_process\.exec|shell=true|bash\s+-c|sh\s+-c|powershell\s+-command|sudo\s+|rm\s+-rf)\b"),
     re.compile(r"(?i)\b(?:curl|wget|nc|netcat|ssh|scp)\s+[^\n]*(?:\||>|/dev/tcp)"),
     re.compile(r"(?i)\b(?:exfiltrat\w*|steal|dump|upload|forward)\b[^\n]{0,100}\b(?:secret|credential|api.?key|access.?token|private.?key|password)"),
