@@ -53,6 +53,10 @@ class PostgresWorkforceRepository(ReleaseRepositoryMixin, ReportingRepositoryMix
             text("SELECT set_config('app.is_company_admin', :admin, true)"),
             {"admin": "true" if "*" in self.principal.permissions else "false"},
         )
+        await self.session.execute(
+            text("SELECT set_config('app.can_decide_approvals', :allowed, true)"),
+            {"allowed": "true" if "*" in self.principal.permissions or "approval.decide" in self.principal.permissions else "false"},
+        )
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
