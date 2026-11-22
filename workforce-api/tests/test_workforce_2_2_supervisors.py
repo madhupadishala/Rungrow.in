@@ -199,6 +199,15 @@ async def test_postgres16_department_head_executes_all_assigned_specialists_and_
                 assert outbound_proofs[0]["status"]=="FAILED"
                 assert outbound_proofs[1]["status"]=="PASSED"
                 assert "supervisor_feedback" in outbound_proofs[1]["input_evidence"]
+                queued=(await session.execute(text("""SELECT status,payload_hash FROM wf_outbox_events
+                  WHERE tenant_id=:tenant AND work_order_id=:order"""),
+                  {"tenant":tenant,"order":order_id})).mappings().all()
+                assert len(queued)==1 and queued[0]["status"]=="QUEUED_FOR_APPROVAL"
+                pending=(await session.execute(text("""SELECT status,payload_hash FROM wf_approvals
+                  WHERE tenant_id=:tenant AND id IN (SELECT approval_id FROM wf_outbox_events
+                    WHERE tenant_id=:tenant AND work_order_id=:order)"""),
+                  {"tenant":tenant,"order":order_id})).mappings().one()
+                assert pending["status"]=="PENDING" and pending["payload_hash"]==queued[0]["payload_hash"]
     finally:
         await engine.dispose()
 
@@ -230,18 +239,13 @@ async def test_postgres16_outreach_approval_dispatch_is_single_use_and_fails_clo
                    'Outreach','Prepare approved outreach','[]'::jsonb,'outbound-sdr','personalized_outreach_draft',
                    '{}'::jsonb,100,0,'IN_PROGRESS',0)"""),
                   {"id":order_id,"tenant":tenant,"directive":directive_id})
-                payload={"to":"+15551234567","message":"Hello. I am RunGrow's AI assistant."}
-                approval=await repo.create_approval(product_id="photo-studio-growth-os",
-                    employee_id="outbound-sdr",action_type="whatsapp.send",payload=payload,
-                    expires_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc)+__import__("datetime").timedelta(hours=1))
-                await session.execute(text("""INSERT INTO wf_outbox_events
-                  (id,tenant_id,product_id,directive_id,work_order_id,approval_id,employee_id,
-                   action_type,payload_hash,payload,status)
-                  VALUES (:id,:tenant,'photo-studio-growth-os',:directive,:order,:approval,
-                   'outbound-sdr','whatsapp.send',:hash,CAST(:payload AS jsonb),'QUEUED_FOR_APPROVAL')"""),
-                  {"id":str(uuid4()),"tenant":tenant,"directive":directive_id,"order":order_id,
-                   "approval":approval["id"],"hash":approval["payload_hash"],
-                   "payload":__import__("json").dumps({"channel":"whatsapp","dispatch_payload":payload})})
+                payload={"to":"+15551234567","channel":"whatsapp","body":"Hello. I am RunGrow's AI assistant."}
+                draft,_,_=WorkforceToolRegistry().execute(name="personalized_outreach_draft",
+                    employee=BY_ID["outbound-sdr"],principal_permissions=frozenset({"*"}),
+                    tenant_id=tenant,payload=payload)
+                order={"id":order_id,"directive_id":directive_id,"product_id":"photo-studio-growth-os"}
+                approval=await WorkforceOrchestrator(repo,agent)._queue_approval_event(
+                    order,BY_ID["outbound-sdr"],"personalized_outreach_draft",payload,draft)
                 repo.principal=founder
                 await session.execute(text("SELECT set_config('app.current_principal_id',:principal,true)"),
                     {"principal":founder.user_id})
@@ -291,17 +295,9 @@ async def test_postgres16_signed_onboarding_approval_consumes_once_and_records_b
                    'Onboarding','Prepare onboarding','[]'::jsonb,'onboarding','product_onboarding_trigger',
                    '{}'::jsonb,100,0,'IN_PROGRESS',0)"""),
                   {"id":order_id,"tenant":tenant,"directive":directive_id})
-                approval=await repo.create_approval(product_id="photo-studio-growth-os",
-                    employee_id="onboarding",action_type="product.onboarding.dispatch",payload=payload,
-                    expires_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc)+__import__("datetime").timedelta(hours=1))
-                await session.execute(text("""INSERT INTO wf_outbox_events
-                  (id,tenant_id,product_id,directive_id,work_order_id,approval_id,employee_id,
-                   action_type,payload_hash,payload,status)
-                  VALUES (:id,:tenant,'photo-studio-growth-os',:directive,:order,:approval,
-                   'onboarding','product.onboarding.dispatch',:hash,CAST(:outbox AS jsonb),'QUEUED_FOR_APPROVAL')"""),
-                  {"id":str(uuid4()),"tenant":tenant,"directive":directive_id,"order":order_id,
-                   "approval":approval["id"],"hash":approval["payload_hash"],
-                   "outbox":__import__("json").dumps({"channel":"product_adapter","dispatch_payload":payload})})
+                order={"id":order_id,"directive_id":directive_id,"product_id":"photo-studio-growth-os"}
+                approval=await WorkforceOrchestrator(repo,agent)._queue_approval_event(
+                    order,BY_ID["onboarding"],"product_onboarding_trigger",{},payload)
                 repo.principal=founder
                 await session.execute(text("SELECT set_config('app.current_principal_id',:principal,true)"),
                     {"principal":founder.user_id})
