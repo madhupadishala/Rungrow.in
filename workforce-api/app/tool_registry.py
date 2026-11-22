@@ -4,7 +4,7 @@ All tools are deterministic, evidence-producing and side-effect free. External
 publication, outreach and spend are deliberately not registered as executable tools.
 """
 from __future__ import annotations
-import hashlib, json, re, time, os
+import hashlib, json, re, time, os, secrets
 import httpx
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 from .registry import BY_ID, Employee
 from .commercial_intelligence import RobotsCompliantHttpFetcher, TinyFishResearchProvider, score_icp, AI_IDENTITY_DISCLOSURE
 from .skill_registry import PRODUCT_PLAYBOOKS
+from .adapters.base import SignedWebhookVerifier
 
 @dataclass(frozen=True)
 class SpecialistTool:
@@ -171,6 +172,8 @@ class WorkforceToolRegistry:
 
     def _proposal(self,p):
         playbook=self._assert_commercial_product(p.get("product_id"),live_action=True)
+        if playbook.get("pricing_status") != "PROVISIONAL_FOUNDER_APPROVED":
+            raise ToolAuthorizationError("Product pricing is not Founder-approved")
         tier=str(p.get("tier","Starter"))
         if tier not in playbook["tiers"]: raise ValueError("Tier is not in published price book")
         price=float(playbook["tiers"][tier]["monthly_inr"])
@@ -190,8 +193,19 @@ class WorkforceToolRegistry:
         external=str(p.get("external_tenant_id","")).strip()
         internal=str(p.get("workforce_tenant_id","")).strip()
         if not external or not internal or external==internal: raise ValueError("Distinct verified tenant bindings required")
+        timestamp=str(int(time.time()))
+        nonce=str(p.get("idempotency_key") or secrets.token_urlsafe(24))
         payload={"api_version":"v1","product_id":product,"external_tenant_id":external,
             "workforce_tenant_id":internal,"correlation_id":str(p.get("correlation_id") or hashlib.sha256((product+external).encode()).hexdigest()[:24]),
-            "provisioning_status":"PENDING_HUMAN_APPROVAL","provision":False}
-        payload["payload_sha256"]=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",",":")).encode()).hexdigest()
-        return {"adapter_payload":payload,"validated":True,"approval_required":True,"provisioned":False}
+            "provisioning_status":"PENDING_HUMAN_APPROVAL","provision":False,
+            "issued_at":timestamp,"nonce":nonce,"idempotency_key":nonce}
+        raw=json.dumps(payload,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()
+        payload["payload_sha256"]=hashlib.sha256(raw).hexdigest()
+        secret=os.getenv("STUDIO_GROWTH_OS_SERVICE_SECRET") or os.getenv("RUNGROW_ADAPTER_WEBHOOK_SECRET")
+        if not secret: raise ToolAuthorizationError("Adapter signing secret is not configured")
+        signer=SignedWebhookVerifier(secret)
+        signature=signer.sign(raw,timestamp,tenant_id=external,product_id=product,
+            workforce_tenant_id=internal,scopes=frozenset({"tenant.provision"}))
+        return {"adapter_payload":payload,"signature_headers":{"X-RunGrow-Signature":signature,
+            "X-RunGrow-Timestamp":timestamp,"Idempotency-Key":nonce},
+            "validated":True,"approval_required":True,"provisioned":False}
