@@ -169,3 +169,22 @@ async def test_postgres16_social_campaign_queues_single_use_approval_and_outbox(
                 assert outbox["status"]=="QUEUED_FOR_APPROVAL"
                 assert outbox["payload_hash"]==queued["approval_payload_hash"]
     finally: await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_postgres16_skill_catalog_seeds_120_tenant_scoped_definitions_idempotently():
+    assert DB_URL
+    engine=create_async_engine(DB_URL,pool_pre_ping=True); factory=async_sessionmaker(engine,expire_on_commit=False)
+    principal=Principal("catalog-founder","skill-catalog-"+uuid4().hex,"founder",frozenset({"*"}))
+    try:
+        async with factory() as session:
+            async with PostgresWorkforceRepository(session,principal) as repo:
+                gym=SkillGymEngine(repo,principal)
+                first=await gym.seed_catalog()
+                second=await gym.seed_catalog()
+                rows=await repo._rows("SELECT skill_id,status,version_hash FROM agent_skills WHERE tenant_id=:tenant",
+                    {"tenant":principal.tenant_id})
+                assert first["seeded"]==120 and second["seeded"]==120
+                assert len(rows)==120
+                assert all(x["status"]=="DRAFT" and len(x["version_hash"])==64 for x in rows)
+    finally: await engine.dispose()
