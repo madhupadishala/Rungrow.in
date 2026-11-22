@@ -1035,7 +1035,7 @@ async def approve_single_use_outbox_action(approval_id: str,
       attempt_count=attempt_count+1,updated_at=now() WHERE id=:id AND tenant_id=:tenant
       AND status='QUEUED_FOR_APPROVAL'"""),{"id":outbox["id"],"tenant":p.tenant_id})
     try:
-        if approval["action_type"] in {"whatsapp.send","email.send"}:
+        if approval["action_type"] in {"whatsapp.send","email.send","email.artifacts.send"}:
             from .communications import IntegrationNotConfiguredError, TransactionalEmailGateway, WhatsAppCloudGateway
             employee=BY_ID.get(approval["employee_id"])
             if employee is None:
