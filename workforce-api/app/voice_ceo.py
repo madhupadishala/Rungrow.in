@@ -64,7 +64,7 @@ class VoiceCEOSessionManager:
         }
         return jwt.encode(claims, api_secret, algorithm="HS256")
 
-    async def create_session(self, repo, principal, *, client_mode: str = "browser", product_id: str | None = None):
+    async def create_session(self, repo, principal, *, client_mode: str = "livekit", product_id: str | None = None):
         self._require(principal, "voice.use")
         self._require(principal, "executive.read")
         if product_id:
@@ -78,7 +78,9 @@ class VoiceCEOSessionManager:
         api_secret = os.getenv(LIVEKIT_API_SECRET_ENV, "").strip()
         now = self.clock()
         configured = bool(api_url and api_key and api_secret)
-        status = "ACTIVE" if configured else "BLOCKED_UNCONFIGURED"
+        if client_mode not in {"browser", "livekit"}:
+            raise ValueError("client_mode must be browser or livekit")
+        status = "ACTIVE" if configured or client_mode == "browser" else "BLOCKED_UNCONFIGURED"
         await repo.session.execute(text("""
             INSERT INTO voice_sessions
               (id, tenant_id, principal_id, principal_role, product_id, room_name,
@@ -93,11 +95,12 @@ class VoiceCEOSessionManager:
             "disclosure": AI_IDENTITY_DISCLOSURE, "created": now,
             "expires": now + timedelta(hours=1),
         })
-        if not configured:
+        if not configured and client_mode == "livekit":
             raise LiveKitNotConfigured(session_id)
-        token = self._livekit_token(api_key, api_secret, principal.user_id, room_name, now)
+        token = self._livekit_token(api_key, api_secret, principal.user_id, room_name, now) if configured else None
         return {
-            "session_id": session_id, "room_name": room_name, "livekit_url": api_url,
+            "session_id": session_id, "room_name": room_name, "livekit_url": api_url or None,
+            "transport": "livekit" if configured else "browser_fallback",
             "participant_identity": principal.user_id, "participant_token": token,
             "token_expires_at": (now + timedelta(hours=1)).isoformat(),
             "identity_disclosure": AI_IDENTITY_DISCLOSURE, "status": status,
