@@ -2,6 +2,9 @@
 import os
 from uuid import uuid4
 import pytest
+import httpx
+from pydantic import BaseModel
+from app.model_gateway import ModelGateway, OpenAICompatibleProvider, MockModelProvider
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
@@ -74,3 +77,58 @@ async def test_postgres16_skill_audit_table_is_tenant_scoped():
                 assert len(bundle["skill_version_hash"])==64
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_non_mock_model_gateway_structured_ceo_department_and_supervisor_paths():
+    class CEOPlan(BaseModel):
+        objectives: list[str]
+    class DepartmentAssignment(BaseModel):
+        specialists: list[str]
+    class SupervisorReview(BaseModel):
+        accepted: bool
+        supervisor_feedback: str
+
+    responses = [
+        '{"objectives":["Research ICP","Prepare evidence"]}',
+        '{"specialists":["market-intel","lead-research"]}',
+        'not-json',
+        '{"accepted":false,"supervisor_feedback":"Add attributable source URLs and a confidence score."}',
+    ]
+    calls = []
+    def handler(request):
+        calls.append(request)
+        content = responses.pop(0)
+        return httpx.Response(200, json={"choices":[{"message":{"content":content}}],"usage":{"prompt_tokens":10,"completion_tokens":5}})
+    transport = httpx.MockTransport(handler)
+    provider = OpenAICompatibleProvider(base_url="https://model.test/v1", api_key="fixture", transport=transport)
+    gateway = ModelGateway({"openai-compatible":provider}, primary_provider="openai-compatible",
+        primary_model="fixture-model")
+    common = {"tenant_id":"tenant-w22","product_id":"photo-studio-growth-os","employee_id":"digital-ceo","run_id":"run-w22"}
+    ceo,_ = await gateway.generate_structured(messages=[{"role":"user","content":"decompose objective"}],
+        output_model=CEOPlan, **common)
+    assignment,_ = await gateway.generate_structured(messages=[{"role":"user","content":"assign specialists"}],
+        output_model=DepartmentAssignment, **common)
+    review,_ = await gateway.generate_structured(messages=[{"role":"user","content":"review evidence"}],
+        output_model=SupervisorReview, **common)
+    assert ceo.objectives == ["Research ICP","Prepare evidence"]
+    assert assignment.specialists == ["market-intel","lead-research"]
+    assert review.accepted is False and "source URLs" in review.supervisor_feedback
+    assert len(calls) == 4  # three live HTTP calls plus strict-schema JSON repair
+
+@pytest.mark.asyncio
+async def test_non_mock_model_gateway_uses_deterministic_fallback_on_transient_http_failure():
+    def unavailable(request):
+        return httpx.Response(503, json={"error":"temporarily unavailable"})
+    primary = OpenAICompatibleProvider(base_url="https://model.test/v1",
+        transport=httpx.MockTransport(unavailable))
+    fallback = MockModelProvider([{"value":"fallback"}])
+    class Result(BaseModel):
+        value: str
+    gateway = ModelGateway({"openai-compatible":primary,"mock":fallback},
+        primary_provider="openai-compatible",primary_model="fixture",
+        fallback_provider="mock",fallback_model="fallback")
+    result,_ = await gateway.generate_structured(messages=[{"role":"user","content":"test fallback"}],
+        output_model=Result,tenant_id="tenant-w22",product_id=None,
+        employee_id="digital-ceo",run_id="fallback-run")
+    assert result.value == "fallback"
