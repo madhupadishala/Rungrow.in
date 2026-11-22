@@ -11,6 +11,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 from .registry import BY_ID, Employee
 from .commercial_intelligence import RobotsCompliantHttpFetcher, TinyFishResearchProvider, score_icp, AI_IDENTITY_DISCLOSURE
+from .skill_registry import PRODUCT_PLAYBOOKS
 
 @dataclass(frozen=True)
 class SpecialistTool:
@@ -67,6 +68,14 @@ class WorkforceToolRegistry:
             frozenset({"compliance.read"}),self._compliance))
         self.register(SpecialistTool("product_handoff_draft",frozenset({"sales-ops","ae","cs-director","onboarding"}),
             frozenset({"customer.read"}),self._handoff))
+        self.register(SpecialistTool("account_research_brief",frozenset({"market-intel","lead-research","outbound-sdr"}),
+            frozenset({"research.public"}),self._account_research))
+        self.register(SpecialistTool("personalized_outreach_draft",frozenset({"outbound-sdr"}),
+            frozenset({"message.draft"}),self._outreach))
+        self.register(SpecialistTool("commercial_proposal_builder",frozenset({"ae","solutions"}),
+            frozenset({"proposal.draft"}),self._proposal))
+        self.register(SpecialistTool("product_onboarding_trigger",frozenset({"onboarding","sales-ops"}),
+            frozenset({"customer.update"}),self._onboarding))
     def register(self, tool: SpecialistTool):
         if tool.name in self._tools: raise ValueError(f"Duplicate tool: {tool.name}")
         self._tools[tool.name] = tool
@@ -124,3 +133,65 @@ class WorkforceToolRegistry:
         return {"product_id":p.get("product_id"),"prospect":p.get("prospect",{}),
                 "sales_context":p.get("sales_context",{}),"recommended_next_step":p.get("next_step","human discovery"),
                 "external_contact_performed":False,"source_evidence":p.get("source_evidence",[])}
+
+    @staticmethod
+    def _assert_commercial_product(product_id, live_action=False):
+        playbook=PRODUCT_PLAYBOOKS.get(str(product_id))
+        if not playbook: raise ValueError("Unknown product playbook")
+        if live_action and playbook.get("stage")=="DISCOVERY_ONLY":
+            raise ToolAuthorizationError("DISCOVERY_ONLY product: live commercial action blocked")
+        return playbook
+
+    def _account_research(self,p):
+        playbook=self._assert_commercial_product(p.get("product_id"))
+        candidates=p.get("candidates",[])
+        if not isinstance(candidates,list): raise ValueError("candidates must be an array")
+        evidence=[]
+        for item in candidates[:20]:
+            url=str(item.get("source_url",""))
+            if url.startswith("https://") and urlparse(url).hostname:
+                evidence.append({"business_name":item.get("business_name",""),"city":item.get("city",p.get("city","")),
+                    "specialty":item.get("segment",""),"source_url":url,"evidence_snippet":item.get("evidence_snippet","")})
+        return {"product_id":p.get("product_id"),"account_profile":{"business_name":p.get("business_name") or (evidence[0]["business_name"] if evidence else ""),
+            "city":p.get("city",""),"specialty":p.get("specialty",""),"digital_maturity":p.get("digital_maturity","unknown"),
+            "pain_points":p.get("pain_points",[]),"decision_maker_hooks":p.get("decision_maker_hooks",[])},
+            "evidence":evidence,"icp_definition":playbook["icp"],"evidence_status":"VERIFIED" if evidence else "INSUFFICIENT",
+            "external_contact_performed":False}
+
+    def _outreach(self,p):
+        self._assert_commercial_product(p.get("product_id"),live_action=True)
+        channel=str(p.get("channel","whatsapp")).lower()
+        if channel not in {"whatsapp","email"}: raise ValueError("channel must be whatsapp or email")
+        disclosure=AI_IDENTITY_DISCLOSURE
+        body=str(p.get("body","")).strip()
+        if "ai" not in body.lower() and "artificial intelligence" not in body.lower(): body += "\\n\\n"+disclosure
+        return {"channel":channel,"recipient_ref":p.get("prospect_ref"),"draft":body,
+            "ai_identity_disclosure":disclosure,"approval_status":"PENDING_HUMAN_APPROVAL",
+            "approval_required":True,"queued":True,"sent":False}
+
+    def _proposal(self,p):
+        playbook=self._assert_commercial_product(p.get("product_id"),live_action=True)
+        tier=str(p.get("tier","Starter"))
+        if tier not in playbook["tiers"]: raise ValueError("Tier is not in published price book")
+        price=float(playbook["tiers"][tier]["monthly_inr"])
+        months=max(1,min(36,int(p.get("months",12))))
+        total=round(price*months,2)
+        return {"product_id":p["product_id"],"currency":"INR","tier":tier,
+            "line_items":[{"description":tier+" subscription","quantity":months,"unit_price_inr":price,"total_inr":total}],
+            "subtotal_inr":total,"taxes":"Excluded; confirm applicable tax treatment",
+            "roi_summary":{"assumed_monthly_value_inr":float(p.get("assumed_monthly_value_inr",0)),
+                "subscription_monthly_inr":price,"assumptions_explicit":True},
+            "approval_status":"DRAFT_ONLY","commercial_commitment":False}
+
+    def _onboarding(self,p):
+        self._assert_commercial_product(p.get("product_id"),live_action=True)
+        product=p["product_id"]
+        if product not in {"photo-studio-growth-os","clinics-counter"}: raise ValueError("No registered v1 adapter")
+        external=str(p.get("external_tenant_id","")).strip()
+        internal=str(p.get("workforce_tenant_id","")).strip()
+        if not external or not internal or external==internal: raise ValueError("Distinct verified tenant bindings required")
+        payload={"api_version":"v1","product_id":product,"external_tenant_id":external,
+            "workforce_tenant_id":internal,"correlation_id":str(p.get("correlation_id") or hashlib.sha256((product+external).encode()).hexdigest()[:24]),
+            "provisioning_status":"PENDING_HUMAN_APPROVAL","provision":False}
+        payload["payload_sha256"]=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+        return {"adapter_payload":payload,"validated":True,"approval_required":True,"provisioned":False}
