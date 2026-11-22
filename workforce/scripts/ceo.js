@@ -73,5 +73,6 @@
  $("voice-send").addEventListener("click",async()=>{const value=$("voice-text").value.trim();if(!value)return;try{await sendVoiceTurn(value,"text");$("voice-text").value=""}catch(e){addVoiceLine("CEO",e.message)}});
  $("voice-text").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();$("voice-send").click()}});
  $("voice-mic").addEventListener("click",()=>{if(!voiceActive)return;if(voiceRecognition){voiceRecognition.onend=null;voiceRecognition.stop();voiceRecognition=null;$("voice-mic").textContent="Start microphone";$("voice-state").textContent="Session active · microphone paused"}else startBrowserRecognition()});
-\n if(location.protocol==="https:"&&location.hostname==="localhost")$("api-base").value=location.origin;
+
+ if(location.protocol==="https:"&&location.hostname==="localhost")$("api-base").value=location.origin;
 })();
