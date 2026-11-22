@@ -66,13 +66,13 @@ def parse_skill_md(source: str) -> ImportedSkill:
         raise SkillImportError("description must contain 1–1024 characters")
     for optional in ("license", "compatibility"):
         value = header.get(optional)
-        if value is not None and (not isinstance(value, str) or len(value) > 1024):
+        if value is not None and (not isinstance(value, str) or len(value) > (500 if optional == "compatibility" else 1024)):
             raise SkillImportError(f"{optional} must be a string no longer than 1024 characters")
     metadata = header.get("metadata", {})
     if metadata is None:
         metadata = {}
-    if not isinstance(metadata, dict) or len(metadata) > 32:
-        raise SkillImportError("metadata must be a mapping with at most 32 entries")
+    if not isinstance(metadata, dict) or len(metadata) > 32 or any(not isinstance(k, str) or not isinstance(v, str) for k, v in metadata.items()):
+        raise SkillImportError("metadata must be a string-to-string mapping with at most 32 entries")
     allowed = header.get("allowed-tools", [])
     if isinstance(allowed, str):
         allowed = allowed.split()
