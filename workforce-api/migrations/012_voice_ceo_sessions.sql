@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS voice_sessions (
   created_at timestamptz NOT NULL DEFAULT now(),
   expires_at timestamptz NOT NULL,
   closed_at timestamptz,
+  pending_approval_id uuid,
+  pending_approval_requested_at timestamptz,
   UNIQUE (tenant_id, room_name)
 );
 CREATE INDEX IF NOT EXISTS voice_sessions_tenant_created
