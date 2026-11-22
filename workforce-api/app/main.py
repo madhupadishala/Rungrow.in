@@ -951,3 +951,55 @@ async def send_governed_email(body: EmailSendRequest,
     p: Principal=Depends(require_permission("communication.send")),
     repo: WorkforceRepositoryProtocol=Depends(get_workforce_repo)):
     return await _execute_governed_communication("email",body,p,repo)
+
+
+# Workforce 2.1: hierarchical executive directives and department work orders.
+from .orchestration import WorkforceOrchestrator
+
+class FounderDirectiveRequest(BaseModel):
+    command: str = Field(min_length=8, max_length=8000)
+    product_id: str = Field(min_length=2, max_length=120)
+
+class FounderDirectiveApproval(BaseModel):
+    approval_id: str = Field(min_length=20, max_length=100)
+
+@app.post("/v1/directives")
+async def submit_founder_directive(body: FounderDirectiveRequest,
+    p: Principal = Depends(require_permission("work.assign")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo)):
+    authorize_product_access(p, body.product_id)
+    try:
+        return await WorkforceOrchestrator(repo, p).submit_directive(body.command, body.product_id)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+@app.get("/v1/directives/{directive_id}")
+async def get_founder_directive(directive_id: str,
+    p: Principal = Depends(require_permission("work.read")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo)):
+    result = await WorkforceOrchestrator(repo, p).get_directive(directive_id)
+    if not result:
+        raise HTTPException(404, "Directive not found")
+    authorize_product_access(p, result.get("product_id"))
+    return result
+
+@app.post("/v1/directives/{directive_id}/approve")
+async def approve_founder_directive(directive_id: str, body: FounderDirectiveApproval,
+    p: Principal = Depends(require_permission("approval.decide")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo)):
+    service = WorkforceOrchestrator(repo, p)
+    directive = await service.get_directive(directive_id)
+    if not directive:
+        raise HTTPException(404, "Directive not found")
+    authorize_product_access(p, directive.get("product_id"))
+    if directive["status"] != "AWAITING_APPROVAL" or str(directive.get("approval_id")) != body.approval_id:
+        raise HTTPException(409, "Directive is not awaiting this approval")
+    try:
+        await repo.consume_approval(body.approval_id, product_id=directive.get("product_id"),
+            employee_id="digital-ceo", action_type="directive.external_execution",
+            payload=directive["consolidated_proposal"], run_id=directive_id)
+        return await service.approve_external(directive_id, body.approval_id)
+    except PermissionError as exc:
+        raise HTTPException(409, str(exc)) from exc
