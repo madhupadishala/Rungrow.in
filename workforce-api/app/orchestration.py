@@ -8,6 +8,7 @@ from uuid import uuid4
 from sqlalchemy import text
 from .registry import BY_ID
 from .tool_registry import WorkforceToolRegistry, ToolAuthorizationError
+from .skill_registry import resolve_runtime_skill_bundle, PRODUCT_PLAYBOOKS
 
 DEPARTMENT_PLAN = (
  {"department":"Growth & Marketing","head":"growth-director","specialist":"market-intel","tool":"public_directory_research","title":"Research target market and public directories"},
@@ -26,6 +27,11 @@ class WorkforceOrchestrator:
         self.session=repository.session
         self.principal=principal
         self.tools=tool_registry or WorkforceToolRegistry()
+        self.model_gateway=None
+        self.model_provider=os.getenv('WORKFORCE_MODEL_PROVIDER','mock').lower()
+        if self.model_provider not in {'','mock','offline','none'}:
+            from .main import get_model_gateway
+            self.model_gateway=get_model_gateway(repository)
 
     async def submit_directive(self, command: str, product_id: str | None=None) -> dict:
         if not command or len(command.strip())<8: raise ValueError("Founder directive is too short")
@@ -131,6 +137,9 @@ class WorkforceOrchestrator:
         employee=BY_ID[order["specialist_role_id"]]
         payload=order["tool_input"]
         if isinstance(payload,str): payload=json.loads(payload)
+        skill_bundle=resolve_runtime_skill_bundle(order["department"],order.get("product_id"),employee.id)
+        payload["runtime_skill_bundle"]=skill_bundle
+        payload["skill_version_hash"]=skill_bundle["skill_version_hash"]
         if order["tool_name"]=="icp_lead_scoring":
             prior=await self.session.execute(text("""SELECT deliverable FROM department_work_orders
               WHERE tenant_id=:tenant AND directive_id=:directive AND department='Growth & Marketing'
@@ -224,7 +233,8 @@ class WorkforceOrchestrator:
     async def _review(self,order,result,passed,reason):
         history=order.get("review_history") or []
         if isinstance(history,str): history=json.loads(history)
-        history.append({"reviewer":order["department_head_id"],"passed":passed,"reason":reason,"revision":order["revision_count"]})
+        feedback=reason if passed else ("Revision required by "+order["department_head_id"]+": address missing evidence and satisfy acceptance criteria before resubmission. "+reason)
+        history.append({"reviewer":order["department_head_id"],"passed":passed,"reason":reason,"supervisor_feedback":feedback,"revision":order["revision_count"]})
         if passed:
             status="APPROVED_BY_HEAD"; deliverable=result
         elif int(order["revision_count"])<2:
