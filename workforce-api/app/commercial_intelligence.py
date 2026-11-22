@@ -269,6 +269,21 @@ class TinyFishResearchProvider:
         host = (parsed.hostname or "").lower().rstrip(".")
         if parsed.scheme not in {"http", "https"} or not host or parsed.username or parsed.password:
             raise PermissionError("TinyFish source must be a credential-free public HTTP(S) URL")
+        if host in {"localhost"} or host.endswith((".localhost", ".local", ".internal")):
+            raise PermissionError("TinyFish source cannot target local or private hosts")
+        try:
+            address = ipaddress.ip_address(host)
+            if not address.is_global:
+                raise PermissionError("TinyFish source cannot target a private or non-global IP")
+        except ValueError as exc:
+            if "does not appear to be an IPv4 or IPv6 address" not in str(exc):
+                raise
+        try:
+            resolved = {ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(host, None)}
+        except (OSError, ValueError) as exc:
+            raise PermissionError("TinyFish source host could not be resolved safely") from exc
+        if not resolved or any(not address.is_global for address in resolved):
+            raise PermissionError("TinyFish source resolves to a private or non-global address")
         if not self.allow_domains:
             raise PermissionError("TinyFish research is disabled: RUNGROW_RESEARCH_ALLOW_DOMAINS is empty")
         if not self._domain_matches(host, self.allow_domains):
@@ -357,7 +372,7 @@ class TinyFishResearchProvider:
                 self.audit_events.append({"event": "tinyfish.extraction.completed",
                     "source_domain": urlparse(source_url).hostname, "records": min(len(businesses), 50),
                     "tenant_safe": True, "outreach": False})
-            except (ValueError, PermissionError, httpx.HTTPError, json.JSONDecodeError) as exc:
+            except (ValueError, PermissionError, httpx.HTTPError, json.JSONDecodeError, TypeError, AttributeError) as exc:
                 reason = str(exc)[:300]
                 batch.blocked.append({"url": str(raw_url)[:1000], "reason": reason})
                 self.audit_events.append({"event": "tinyfish.extraction.blocked",
