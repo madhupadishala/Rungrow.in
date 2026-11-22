@@ -53,6 +53,10 @@ class PostgresWorkforceRepository(ReleaseRepositoryMixin, ReportingRepositoryMix
             text("SELECT set_config('app.is_company_admin', :admin, true)"),
             {"admin": "true" if "*" in self.principal.permissions else "false"},
         )
+        await self.session.execute(
+            text("SELECT set_config('app.can_decide_approvals', :allowed, true)"),
+            {"allowed": "true" if "*" in self.principal.permissions or "approval.decide" in self.principal.permissions else "false"},
+        )
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
@@ -268,7 +272,7 @@ class PostgresWorkforceRepository(ReleaseRepositoryMixin, ReportingRepositoryMix
           VALUES (:id,:tenant,:product,:actor,:action,:type,:resource,CAST(:details AS jsonb),now())
         """), {"id": str(uuid4()), "tenant": self.principal.tenant_id, "product": product_id,
                "actor": self.principal.user_id, "action": action, "type": resource_type,
-               "resource": resource_id, "details": json.dumps(details)})
+               "resource": resource_id, "details": json.dumps(details, default=str)})
 
     async def upsert_prospect(self, *, product_id, dedupe_key, business_name, city, segment,
                              decision_maker_name, public_contact_channel, source_url, evidence_urls,

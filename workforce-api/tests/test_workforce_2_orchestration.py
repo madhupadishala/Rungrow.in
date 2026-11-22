@@ -76,9 +76,9 @@ async def test_founder_directive_executes_department_graph_and_single_use_approv
                 assert legal_order["revision_count"] == 1
                 assert len(legal_order["review_history"]) == 2
                 assert all(x["status"] == "APPROVED_BY_HEAD" for x in detail["department_work_orders"])
-                assert len(detail["tool_execution_proofs"]) == 6
+                assert len(detail["tool_execution_proofs"]) == 7
                 assert sum(x["status"] == "FAILED" for x in detail["tool_execution_proofs"]) == 1
-                assert sum(x["status"] == "PASSED" for x in detail["tool_execution_proofs"]) == 5
+                assert sum(x["status"] == "PASSED" for x in detail["tool_execution_proofs"]) == 6
                 approval_id = str(detail["approval_id"])
                 assert approval_id
 

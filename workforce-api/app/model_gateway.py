@@ -38,13 +38,14 @@ class MockModelProvider:
         return ModelResponse(str(value),len(json.dumps(messages))//4, len(str(value))//4,"mock",model,0.0)
 
 class OpenAICompatibleProvider:
-    def __init__(self, base_url: str | None=None, api_key: str | None=None, timeout: float=30):
+    def __init__(self, base_url: str | None=None, api_key: str | None=None, timeout: float=30, transport=None):
         self.base_url=(base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
         self.api_key=api_key or os.getenv("OPENAI_API_KEY")
         self.timeout=timeout
+        self.transport=transport
     async def generate(self, *, model, messages, temperature=0):
         headers={"Authorization":f"Bearer {self.api_key}"} if self.api_key else {}
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=self.timeout,transport=self.transport) as client:
             response=await client.post(self.base_url+"/chat/completions",headers=headers,json={"model":model,"messages":messages,"temperature":temperature})
             response.raise_for_status(); data=response.json()
         usage=data.get("usage",{})
