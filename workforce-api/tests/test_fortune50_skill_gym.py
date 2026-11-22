@@ -163,10 +163,9 @@ async def test_postgres16_social_campaign_queues_single_use_approval_and_outbox(
                     channel="linkedin",content="RunGrow AI assistant: solve studio enquiry follow-up. Book a guided demo.",
                     utm={"utm_source":"linkedin","utm_medium":"organic_social"}),principal,repo)
                 assert queued["status"]=="QUEUED_FOR_APPROVAL"
-                approval=next(x for x in await repo.list_approvals() if str(x["id"])==queued["approval_id"])
                 outbox=await repo._one("SELECT status,payload_hash FROM wf_outbox_events WHERE approval_id=:id",
                     {"id":queued["approval_id"]})
-                assert approval["status"]=="PENDING"
+                assert queued["approval_status"]=="PENDING"
                 assert outbox["status"]=="QUEUED_FOR_APPROVAL"
-                assert outbox["payload_hash"]==approval["payload_hash"]
+                assert outbox["payload_hash"]==queued["approval_payload_hash"]
     finally: await engine.dispose()
