@@ -4,7 +4,8 @@ All tools are deterministic, evidence-producing and side-effect free. External
 publication, outreach and spend are deliberately not registered as executable tools.
 """
 from __future__ import annotations
-import hashlib, json, re, time
+import hashlib, json, re, time, os
+import httpx
 from dataclasses import dataclass
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -21,11 +22,35 @@ class SpecialistTool:
 
 class ToolAuthorizationError(PermissionError): pass
 
+class SearXNGDirectorySearch:
+    """Optional self-hosted SearXNG JSON search; results are constrained to approved domains."""
+    def __init__(self, base_url=None, allow_domains=None):
+        self.base_url=(base_url or os.getenv("RUNGROW_SEARXNG_URL","")).rstrip("/")
+        self.allow_domains=set(allow_domains or (x.strip().lower() for x in os.getenv("RUNGROW_RESEARCH_ALLOW_DOMAINS","").split(",") if x.strip()))
+
+    async def search(self, query, city, limit=20):
+        if not self.base_url or not self.allow_domains:
+            return []
+        async with httpx.AsyncClient(timeout=12.0, follow_redirects=False) as client:
+            response=await client.get(self.base_url+"/search",params={"q":f"{query} {city} business directory","format":"json"})
+            response.raise_for_status()
+            data=response.json()
+        urls=[]
+        for item in data.get("results",[])[:max(1,min(limit,50))]:
+            url=str(item.get("url",""))
+            host=urlparse(url).hostname or ""
+            host=host.lower().rstrip(".")
+            if any(host==domain or host.endswith("."+domain) for domain in self.allow_domains):
+                urls.append(url)
+        return urls
+
+
 class WorkforceToolRegistry:
     def __init__(self, directory_fetcher=None):
         self.directory_fetcher = directory_fetcher or RobotsCompliantHttpFetcher(
             allow_domains={x.strip() for x in __import__("os").getenv("RUNGROW_RESEARCH_ALLOW_DOMAINS","").split(",") if x.strip()},
             deny_domains={x.strip() for x in __import__("os").getenv("RUNGROW_RESEARCH_DENY_DOMAINS","").split(",") if x.strip()})
+        self.directory_search = SearXNGDirectorySearch(allow_domains=self.directory_fetcher.allow_domains)
         self._tools: dict[str, SpecialistTool] = {}
         self.register(SpecialistTool("public_directory_research",frozenset({"market-intel","lead-research"}),
             frozenset({"research.public"}),self._research))
