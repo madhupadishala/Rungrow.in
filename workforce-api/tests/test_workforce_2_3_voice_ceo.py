@@ -113,3 +113,74 @@ def test_voice_session_requires_voice_rbac():
     principal = Principal("reader", "tenant", "reader", frozenset({"executive.read"}))
     with pytest.raises(VoiceSessionForbidden):
         VoiceCEOSessionManager._require(principal, "voice.use")
+
+
+@pytest.mark.asyncio
+async def test_postgres16_voice_briefing_and_multi_turn_founder_directive(monkeypatch):
+    assert DB_URL, "CI must supply PostgreSQL 16 RUNGROW_TEST_DATABASE_URL"
+    monkeypatch.setenv("LIVEKIT_URL", "wss://voice.example.test")
+    monkeypatch.setenv("LIVEKIT_API_KEY", "ci-livekit-key")
+    monkeypatch.setenv("LIVEKIT_API_SECRET", "ci-livekit-secret-for-tests")
+    engine = create_async_engine(DB_URL, pool_pre_ping=True)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    tenant = "voice-directive-" + uuid4().hex
+    principal = Principal("oidc-founder", tenant, "founder",
+        frozenset({"voice.use", "executive.read", "work.assign"}),
+        product_ids=frozenset({"photo-studio-growth-os"}))
+    try:
+        from app.main import VoiceTurnRequest, process_voice_turn
+        async with factory() as session:
+            async with PostgresWorkforceRepository(session, principal) as repo:
+                manager = VoiceCEOSessionManager()
+                created = await manager.create_session(
+                    repo, principal, product_id="photo-studio-growth-os")
+                briefing = await process_voice_turn(created["session_id"],
+                    VoiceTurnRequest(transcript="Give me the executive briefing"),
+                    principal, repo)
+                assert briefing["action"]["type"] == "executive_briefing"
+                assert "₹5 crore baseline" in briefing["response"]
+                directive = await process_voice_turn(created["session_id"],
+                    VoiceTurnRequest(transcript="Prepare a market research plan for our product"),
+                    principal, repo)
+                assert directive["action"]["type"] == "directive_created"
+                assert directive["action"]["execution"] == "delegated_not_externally_dispatched"
+                stored = await repo._rows(
+                    "SELECT speaker, transcript FROM voice_turns WHERE session_id=:id ORDER BY created_at",
+                    {"id": created["session_id"]})
+                assert len(stored) == 4
+                assert stored[1]["speaker"] == "CEO"
+                assert "executive briefing" in stored[1]["transcript"].lower()
+                assert stored[3]["speaker"] == "CEO"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_postgres16_voice_approval_confirmation_cannot_bypass_rbac(monkeypatch):
+    assert DB_URL, "CI must supply PostgreSQL 16 RUNGROW_TEST_DATABASE_URL"
+    monkeypatch.setenv("LIVEKIT_URL", "wss://voice.example.test")
+    monkeypatch.setenv("LIVEKIT_API_KEY", "ci-livekit-key")
+    monkeypatch.setenv("LIVEKIT_API_SECRET", "ci-livekit-secret-for-tests")
+    engine = create_async_engine(DB_URL, pool_pre_ping=True)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    tenant = "voice-rbac-" + uuid4().hex
+    reader = Principal("reader-principal", tenant, "reader",
+                       frozenset({"voice.use", "executive.read"}))
+    try:
+        from fastapi import HTTPException
+        from app.main import VoiceTurnRequest, process_voice_turn
+        async with factory() as session:
+            async with PostgresWorkforceRepository(session, reader) as repo:
+                created = await VoiceCEOSessionManager().create_session(repo, reader)
+                with pytest.raises(HTTPException) as denied:
+                    await process_voice_turn(created["session_id"],
+                        VoiceTurnRequest(transcript="approve " + str(uuid4())),
+                        reader, repo)
+                assert denied.value.status_code == 403
+                with pytest.raises(HTTPException) as confirmation_denied:
+                    await process_voice_turn(created["session_id"],
+                        VoiceTurnRequest(transcript="confirm approval"),
+                        reader, repo)
+                assert confirmation_denied.value.status_code == 403
+    finally:
+        await engine.dispose()
