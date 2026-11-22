@@ -187,6 +187,7 @@ class ArtifactEngine:
         for item in line_items:
             if float(item.get("quantity", 0)) <= 0 or float(item.get("unit_price_inr", -1)) < 0:
                 raise ValueError("Quote line items require positive quantity and non-negative INR price")
+        from xml.sax.saxutils import escape as xml_escape
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -199,16 +200,16 @@ class ArtifactEngine:
         styles.add(ParagraphStyle(name="RGTitle", parent=styles["Title"], textColor=colors.HexColor(PALETTE["terracotta"])))
         story = [Paragraph("RunGrow", styles["Heading2"]),
                  Paragraph("Commercial Proposal" if quote else "Product Brochure", styles["RGTitle"]),
-                 Paragraph(self._safe_text(product_id), styles["Heading2"]), Spacer(1, 8*mm)]
+                 Paragraph(xml_escape(self._safe_text(product_id)), styles["Heading2"]), Spacer(1, 8*mm)]
         if quote:
-            story += [Paragraph("Prepared for: " + self._safe_text(customer_name), styles["BodyText"]),
+            story += [Paragraph("Prepared for: " + xml_escape(self._safe_text(customer_name)), styles["BodyText"]),
                       Paragraph("Currency: INR • GST shown separately", styles["BodyText"]), Spacer(1, 5*mm)]
             rows = [["Description", "Qty", "Unit price (INR)", "Amount (INR)"]]
             subtotal = 0.0
             for item in line_items:
                 amount = float(item["quantity"]) * float(item["unit_price_inr"])
                 subtotal += amount
-                rows.append([self._safe_text(item["description"]), str(item["quantity"]),
+                rows.append([xml_escape(self._safe_text(item["description"])), str(item["quantity"]),
                              f"{float(item['unit_price_inr']):,.2f}", f"{amount:,.2f}"])
             gst = round(subtotal * gst_rate / 100, 2)
             rows += [["", "", "Subtotal", f"{subtotal:,.2f}"],
@@ -242,6 +243,10 @@ class ArtifactEngine:
         from openpyxl.utils import get_column_letter
         if tracker_type not in {"lead_pipeline", "social_calendar", "customer_onboarding"}:
             raise ValueError("Unsupported tracker_type")
+        def cell_value(value):
+            if isinstance(value, str) and value.startswith(("=", "+", "-", "@")):
+                return "'" + value
+            return value
         wb=Workbook()
         summary=wb.active; summary.title="Summary"
         sheet_name={"lead_pipeline":"Leads","social_calendar":"30-Day Calendar",
