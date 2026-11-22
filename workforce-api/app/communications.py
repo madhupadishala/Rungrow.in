@@ -74,7 +74,24 @@ class TransactionalEmailGateway(CommunicationGateway):
     tool_name="communication.email.send"
     required_env=("EMAIL_API_KEY","EMAIL_FROM_ADDRESS")
     async def _send_provider(self,data):
-        body={"from":os.environ["EMAIL_FROM_ADDRESS"],"to":[data["to"]],
+        import base64
+        import hashlib
+        from pathlib import Path
+        body={"from":os.environ["EMAIL_FROM_ADDRESS"],
+              "to":data["to"] if isinstance(data["to"],list) else [data["to"]],
               "subject":data["subject"],"text":data["message"]}
+        attachments=[]
+        artifact_root=Path(os.getenv("RUNGROW_ARTIFACT_ROOT","/tmp/rungrow-artifacts")).resolve()
+        for item in data.get("attachments",[]):
+            path=Path(str(item.get("path",""))).resolve()
+            if not path.is_relative_to(artifact_root) or not path.is_file():
+                raise IntegrationNotConfiguredError("Email attachment is not a verified RunGrow artifact")
+            raw=path.read_bytes()
+            digest=hashlib.sha256(raw).hexdigest()
+            if item.get("sha256") and digest!=item["sha256"]:
+                raise IntegrationNotConfiguredError("Email attachment checksum validation failed")
+            attachments.append({"filename":path.name,"content":base64.b64encode(raw).decode("ascii")})
+        if attachments:
+            body["attachments"]=attachments
         return await self._post(os.getenv("EMAIL_API_URL","https://api.resend.com/emails"),
             {"Authorization":f"Bearer {os.environ['EMAIL_API_KEY']}","Content-Type":"application/json"},body)
