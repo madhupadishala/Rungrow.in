@@ -139,3 +139,50 @@ async def test_non_mock_model_gateway_uses_deterministic_fallback_on_transient_h
         output_model=Result,tenant_id="tenant-w22",product_id=None,
         employee_id="digital-ceo",run_id="fallback-run")
     assert result.value == "fallback"
+
+
+@pytest.mark.asyncio
+async def test_postgres16_department_head_executes_all_assigned_specialists_and_persists_combined_evidence():
+    assert DB_URL, "CI must supply PostgreSQL 16 RUNGROW_TEST_DATABASE_URL"
+    engine=create_async_engine(DB_URL,pool_pre_ping=True)
+    factory=async_sessionmaker(engine,expire_on_commit=False)
+    tenant="w22-fanout-"+uuid4().hex
+    directive_id=str(uuid4())
+    order_id=str(uuid4())
+    principal=Principal("w22-founder",tenant,"founder",frozenset({"*"}))
+    try:
+        async with factory() as session:
+            async with PostgresWorkforceRepository(session,principal) as repo:
+                await session.execute(text("""INSERT INTO executive_directives
+                  (id,tenant_id,product_id,founder_id,command,status)
+                  VALUES (:id,:tenant,'photo-studio-growth-os','w22-founder',
+                    'Qualify prospects and prepare an outreach draft','DELEGATED')"""),
+                  {"id":directive_id,"tenant":tenant})
+                payload={"product_id":"photo-studio-growth-os","candidates":[
+                    {"business_name":"Studio Alpha","city":"Hyderabad","source_url":"https://example.test/alpha"}],
+                    "channel":"email","body":"Hello, we can help improve studio operations.",
+                    "delegated_specialists":[
+                      {"employee_id":"lead-research","tool_name":"icp_lead_scoring","task":"Score evidence-backed ICP fit"},
+                      {"employee_id":"outbound-sdr","tool_name":"personalized_outreach_draft","task":"Prepare disclosed outreach"}]}
+                row=await session.execute(text("""INSERT INTO department_work_orders
+                  (id,tenant_id,directive_id,product_id,department,department_head_id,title,objective,
+                   dependencies,specialist_role_id,tool_name,tool_input,max_budget_cents,spent_cents,
+                   status,claimed_by,locked_by_employee_id,revision_count)
+                  VALUES (:id,:tenant,:directive,'photo-studio-growth-os','Sales & Revenue','cro',
+                   'Sales evidence','Qualify prospects','[]'::jsonb,'lead-research','icp_lead_scoring',
+                   CAST(:payload AS jsonb),1000,0,'IN_PROGRESS','w22-worker','w22-worker',0)
+                  RETURNING *"""),
+                  {"id":order_id,"tenant":tenant,"directive":directive_id,"payload":__import__("json").dumps(payload)})
+                order=dict(row.mappings().one())
+                result=await WorkforceOrchestrator(repo,principal).execute_work_order(order)
+                assert result["status"]=="APPROVED_BY_HEAD"
+                assert result["deliverable"]["evidence_type"]=="departmental_combined_evidence"
+                assert result["deliverable"]["specialist_count"]==2
+                proofs=(await session.execute(text("""SELECT employee_id,input_evidence,output_evidence,status
+                  FROM employee_tool_executions WHERE tenant_id=:tenant AND work_order_id=:order
+                  ORDER BY created_at"""),{"tenant":tenant,"order":order_id})).mappings().all()
+                assert {x["employee_id"] for x in proofs}=={"lead-research","outbound-sdr"}
+                assert all(len(x["input_evidence"]["skill_version_hash"])==64 for x in proofs)
+                assert all(x["status"]=="PASSED" for x in proofs)
+    finally:
+        await engine.dispose()
