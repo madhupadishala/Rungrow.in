@@ -48,21 +48,42 @@ class VoiceCEOSessionManager:
 
     @staticmethod
     def _livekit_token(api_key: str, api_secret: str, identity: str, room: str, now: datetime) -> str:
-        claims = {
-            "iss": api_key,
-            "sub": identity,
-            "nbf": int(now.timestamp()) - 5,
-            "iat": int(now.timestamp()),
-            "exp": int((now + timedelta(hours=1)).timestamp()),
-            "video": {
-                "roomJoin": True,
-                "room": room,
-                "canPublish": True,
-                "canSubscribe": True,
-                "canPublishData": True,
-            },
-        }
-        return jwt.encode(claims, api_secret, algorithm="HS256")
+        try:
+            from livekit import api
+            return (
+                api.AccessToken(api_key, api_secret)
+                .with_identity(identity)
+                .with_grants(api.VideoGrants(
+                    room_join=True, room=room, can_publish=True,
+                    can_subscribe=True, can_publish_data=True,
+                ))
+                .with_ttl(timedelta(hours=1))
+                .to_jwt()
+            )
+        except ImportError:
+            claims = {
+                "iss": api_key, "sub": identity,
+                "nbf": int(now.timestamp()) - 5, "iat": int(now.timestamp()),
+                "exp": int((now + timedelta(hours=1)).timestamp()),
+                "video": {"roomJoin": True, "room": room, "canPublish": True,
+                          "canSubscribe": True, "canPublishData": True},
+            }
+            return jwt.encode(claims, api_secret, algorithm="HS256")
+
+    @staticmethod
+    def build_agent_session(*, stt, llm, tts, vad=None):
+        """Create the official LiveKit Agents session with injected providers."""
+        from livekit.agents import Agent, AgentSession
+
+        class DigitalCEOAgent(Agent):
+            def __init__(self):
+                super().__init__(instructions=(
+                    AI_IDENTITY_DISCLOSURE + " Use concise executive language. "
+                    "Never claim an external action occurred without backend confirmation."
+                ))
+
+        session = AgentSession(stt=stt, llm=llm, tts=tts, vad=vad)
+        return session, DigitalCEOAgent()
 
     async def create_session(self, repo, principal, *, client_mode: str = "livekit", product_id: str | None = None):
         self._require(principal, "voice.use")
