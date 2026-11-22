@@ -1,3 +1,4 @@
+    re.compile(r"(?i)\b(?:execute|run|launch)\b[^\n]{0,80}\b(?:shell|terminal|command line|bash|powershell)\b"),
 """Secure importer for the open Agent Skills SKILL.md convention.
 
 The parser accepts YAML frontmatter plus Markdown instructions. Imported skills
@@ -19,9 +20,10 @@ BLOCKED_PATTERNS = (
     re.compile(r"(?i)\b(?:curl|wget|nc|netcat|ssh|scp)\s+[^\n]*(?:\||>|/dev/tcp)"),
     re.compile(r"(?i)\b(?:exfiltrat\w*|steal|dump|upload|forward)\b[^\n]{0,100}\b(?:secret|credential|api.?key|access.?token|private.?key|password)"),
     re.compile(r"(?i)\b(?:read|print|reveal|send|upload|expose)\b[^\n]{0,100}\b(?:\.env|environment variables|credentials|api keys|private keys)"),
-    re.compile(r"(?i)\b(?:bypass|solve|defeat|circumvent)\b[^\n]{0,80}\b(?:captcha|login|authentication|mfa|two.factor|access control)"),
+    re.compile(r"(?i)\b(?:bypass|solve|defeat|circumvent|ignore|disable)\b[^\n]{0,80}\b(?:captcha|login|authentication|mfa|two.factor|access control)\b"),
     re.compile(r"(?i)\b(?:ignore|override|disable|bypass)\b[^\n]{0,100}\b(?:growtoys|discovery.only|product eligibility|pricing approval)"),
-    re.compile(r"(?i)\b(?:growtoys)\b[^\n]{0,100}\b(?:sell|quote|price|discount|checkout|convert)"),
+    re.compile(r"(?i)\b(?:growtoys)\b[^\n]{0,140}\b(?:sell|quote|price|discount|checkout|convert|commercial|production|live product)\b"),
+    re.compile(r"(?i)\b(?:change|promote|treat|mark)\b[^\n]{0,100}\b(?:growtoys)\b[^\n]{0,100}\b(?:commercial|production|live)\b"),
 )
 
 @dataclass(frozen=True)
