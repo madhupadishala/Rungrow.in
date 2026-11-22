@@ -79,7 +79,7 @@ class WorkforceOrchestrator:
             payload={"product_id":product_id,"query":command[:300],"city":city,"source_urls":urls,
                      "candidates":[],"lead_count":20,"cost_per_lead_inr":100,
                      "contingency_pct":0.15,"draft":command + " RunGrow AI assistant acting on behalf of RunGrow.","prospect":{},"sales_context":{},
-                     "next_step":"human discovery","source_evidence":[]}
+                     "next_step":"human discovery","source_evidence":[],"delegated_specialists":[{"employee_id":e.id,"skills":list(e.skills),"task":"Prepare distinct evidence for "+spec["department"]} for e in sorted([x for x in BY_ID.values() if x.department==spec["department"] and x.id!=spec["head"] and x.product_id in (None,product_id)],key=lambda x:x.id)[:2]]}
             deps=[]
             if spec["department"]=="Sales & Revenue": deps=["Growth & Marketing"]
             if spec["department"]=="Finance & Administration": deps=["Sales & Revenue"]
