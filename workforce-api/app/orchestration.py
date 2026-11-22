@@ -225,6 +225,8 @@ class WorkforceOrchestrator:
                 actual_cents=sum(int(x.get("steps",fetcher.max_steps)) for x in batch.usage)*max(1,int(os.getenv("TINYFISH_STEP_COST_CENTS","2")))
             await self._settle_work_order_budget(order,reserved_cents,actual_cents)
             passed=self._acceptance(order["tool_name"],result)
+            if passed:
+                await self._queue_approval_event(order,employee,order["tool_name"],payload,result)
             status="PASSED" if passed else "FAILED"
             await self.session.execute(text("""INSERT INTO employee_tool_executions
               (tenant_id,directive_id,work_order_id,employee_id,tool_name,input_hash,input_evidence,
@@ -252,6 +254,47 @@ class WorkforceOrchestrator:
               {"error":str(exc)[:1000],"id":order["id"],"tenant":self.principal.tenant_id})
             await self._refresh_directive(order["directive_id"])
             return {"work_order_id":str(order["id"]),"status":"REJECTED","error":str(exc)[:1000]}
+
+    async def _queue_approval_event(self,order,employee,tool_name,payload,result):
+        """Persist a per-action, payload-bound approval and outbox event."""
+        if tool_name=="personalized_outreach_draft" and result.get("approval_required"):
+            channel=str(result.get("channel","whatsapp")).lower()
+            dispatch_payload={"to":str(payload.get("to") or payload.get("recipient") or "").strip(),
+                "message":str(result.get("draft","")).strip()}
+            if channel=="email":
+                dispatch_payload["subject"]=str(payload.get("subject") or "RunGrow introduction")
+            action_type="whatsapp.send" if channel=="whatsapp" else "email.send"
+            outbox_payload={"channel":channel,"dispatch_payload":dispatch_payload,
+                "draft_result":{"ai_identity_disclosure":result.get("ai_identity_disclosure"),
+                    "sent":False,"recipient_ref":result.get("recipient_ref")}}
+        elif tool_name=="product_onboarding_trigger" and result.get("approval_required"):
+            action_type="product.onboarding.dispatch"
+            dispatch_payload=result
+            outbox_payload={"channel":"product_adapter","dispatch_payload":dispatch_payload}
+        else:
+            return None
+        original=self.repo.principal
+        self.repo.principal=replace(original,user_id=employee.id,actor_type="agent")
+        try:
+            approval=await self.repo.create_approval(product_id=order.get("product_id"),
+                employee_id=employee.id,action_type=action_type,payload=dispatch_payload,
+                expires_at=datetime.now(timezone.utc)+timedelta(hours=24))
+        finally:
+            self.repo.principal=original
+        await self.session.execute(text("""INSERT INTO wf_outbox_events
+          (id,tenant_id,product_id,directive_id,work_order_id,approval_id,employee_id,
+           action_type,payload_hash,payload,status)
+          VALUES (:id,:tenant,:product,:directive,:work_order,:approval,:employee,
+           :action,:hash,CAST(:payload AS jsonb),'QUEUED_FOR_APPROVAL')
+          ON CONFLICT (tenant_id,approval_id) DO NOTHING"""),
+          {"id":str(uuid4()),"tenant":self.principal.tenant_id,"product":order["product_id"],
+           "directive":order["directive_id"],"work_order":order["id"],"approval":approval["id"],
+           "employee":employee.id,"action":action_type,"hash":approval["payload_hash"],
+           "payload":_json(outbox_payload)})
+        await self.repo.append_audit("outbox.queued_for_approval","outbox_event",str(approval["id"]),
+            order.get("product_id"),{"approval_id":str(approval["id"]),"action_type":action_type,
+            "payload_hash":approval["payload_hash"],"work_order_id":str(order["id"])})
+        return approval
 
     async def _execute_multi_specialist_work_order(self,order,payload,delegated):
         """Execute every head-assigned specialist and approve only the combined evidence bundle."""
@@ -290,6 +333,7 @@ class WorkforceOrchestrator:
                        "latency":latency,"status":"PASSED" if passed else "REVISION_REQUESTED"})
                     final_result=result
                     if passed:
+                        await self._queue_approval_event(order,employee,tool_name,specialist_input,result)
                         break
                     feedback=("REVISION_REQUESTED: provide a complete deliverable satisfying the department SOP. "
                               "Previous deterministic rubric failures: "+_json(result))
