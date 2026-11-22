@@ -80,7 +80,7 @@ class WorkforceOrchestrator:
           ORDER BY w.created_at LIMIT 1 FOR UPDATE SKIP LOCKED
         ) UPDATE department_work_orders w SET status='IN_PROGRESS',claimed_by=:worker,
           claimed_at=now(),locked_by_employee_id=:worker,
-          lock_expires_at=now()+interval '180 seconds',updated_at=now()
+          lock_expires_at=now()+interval '300 seconds',updated_at=now()
           FROM candidate c WHERE w.id=c.id RETURNING w.*"""),
           {"tenant":self.principal.tenant_id,"worker":worker_id})
         item=row.mappings().first()
