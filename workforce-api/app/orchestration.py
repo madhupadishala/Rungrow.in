@@ -87,9 +87,9 @@ class WorkforceOrchestrator:
             if spec["department"]=="Customer Success": deps=["Sales & Revenue"]
             await self.session.execute(text("""INSERT INTO department_work_orders
               (tenant_id,directive_id,product_id,department,department_head_id,title,objective,
-               dependencies,specialist_role_id,tool_name,tool_input)
+               dependencies,specialist_role_id,tool_name,tool_input,max_budget_cents)
               VALUES (:tenant,:directive,:product,:department,:head,:title,:objective,
-                CAST(:dependencies AS jsonb),:specialist,:tool,CAST(:payload AS jsonb))"""),
+                CAST(:dependencies AS jsonb),:specialist,:tool,CAST(:payload AS jsonb),:budget)"""),
               {"tenant":tenant,"directive":directive_id,"product":product_id,"department":spec["department"],
                "head":spec["head"],"title":spec["title"],"objective":command,
                "dependencies":_json(spec.get("dependencies",deps)),"specialist":spec["specialist"],"tool":spec["tool"],"payload":_json(payload),"budget":spec.get("budget",10000)})
