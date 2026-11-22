@@ -21,7 +21,7 @@ def test_runtime_skill_bundle_is_versioned_and_product_scoped():
     assert any("DISCOVERY_ONLY" in x for x in discovery["instructions"])
     assert any("single-use approval" in x for x in commercial["instructions"])
 
-def test_commercial_tool_catalogue_and_ai_disclosure():
+def test_commercial_tool_catalogue_and_ai_disclosure(monkeypatch):
     tools=WorkforceToolRegistry()
     assert {"account_research_brief","personalized_outreach_draft","commercial_proposal_builder","product_onboarding_trigger"}.issubset(tools.names())
     principal=frozenset({"*"})
@@ -34,13 +34,19 @@ def test_commercial_tool_catalogue_and_ai_disclosure():
         principal_permissions=principal,tenant_id="tenant-a",payload={"product_id":"photo-studio-growth-os","channel":"whatsapp","prospect":{"city":"Hyderabad"}})
     assert outreach["approval_required"] is True and outreach["sent"] is False
     assert "AI" in outreach["draft"] or "artificial intelligence" in outreach["draft"].lower()
-    with pytest.raises(ValueError,match="published price book"):
-        tools.execute(name="commercial_proposal_builder",employee=BY_ID["ae"],
-            principal_permissions=principal,tenant_id="tenant-a",payload={"product_id":"photo-studio-growth-os","tier":"Starter","months":2})
+    proposal,_,_=tools.execute(name="commercial_proposal_builder",employee=BY_ID["ae"],
+        principal_permissions=principal,tenant_id="tenant-a",payload={"product_id":"photo-studio-growth-os","tier":"Starter","months":2})
+    assert proposal["currency"] == "INR" and proposal["subtotal_inr"] == 9998
+    assert proposal["line_items"][0]["unit_price_inr"] == 4999
+    monkeypatch.setenv("STUDIO_GROWTH_OS_SERVICE_SECRET", "test-adapter-secret")
     handoff,_,_=tools.execute(name="product_onboarding_trigger",employee=BY_ID["onboarding"],
         principal_permissions=principal,tenant_id="tenant-a",payload={"product_id":"photo-studio-growth-os",
         "external_tenant_id":"customer-tenant","workforce_tenant_id":"workforce-tenant"})
     assert handoff["validated"] and handoff["provisioned"] is False
+    assert handoff["signature_headers"]["X-RunGrow-Signature"].startswith("sha256=")
+    assert handoff["signature_headers"]["X-RunGrow-Timestamp"]
+    assert handoff["signature_headers"]["Idempotency-Key"]
+
 
 @pytest.mark.parametrize("tool,employee,payload",[
     ("personalized_outreach_draft","outbound-sdr",{"product_id":"growtoys","channel":"email"}),
