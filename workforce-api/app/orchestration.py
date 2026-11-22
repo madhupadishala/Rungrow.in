@@ -99,6 +99,10 @@ class WorkforceOrchestrator:
         try:
             # Public research is an async, robots-aware operation; all other tools are pure.
             if order["tool_name"]=="public_directory_research":
+                if "research.public" not in employee.permissions:
+                    raise PermissionError("Specialist role lacks research.public permission")
+                if "*" not in self.principal.permissions and not ({"agent.run","work.assign"} & set(self.principal.permissions)):
+                    raise PermissionError("Orchestration principal lacks agent execution authority")
                 fetcher=self.tools.directory_fetcher
                 if not fetcher.allow_domains:
                     batch=type("BlockedBatch",(),{"candidates":[],"blocked":[{"url":u,"reason":"No research domain allowlist is configured"} for u in payload.get("source_urls",[])]})()
@@ -139,7 +143,7 @@ class WorkforceOrchestrator:
               last_error=:error,updated_at=now() WHERE id=:id AND tenant_id=:tenant"""),
               {"error":str(exc)[:1000],"id":order["id"],"tenant":self.principal.tenant_id})
             await self._refresh_directive(order["directive_id"])
-            raise
+            return {"work_order_id":str(order["id"]),"status":"REJECTED","error":str(exc)[:1000]}
 
     @staticmethod
     def _acceptance(tool_name,result):
