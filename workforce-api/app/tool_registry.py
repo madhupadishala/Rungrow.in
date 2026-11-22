@@ -4,7 +4,7 @@ All tools are deterministic, evidence-producing and side-effect free. External
 publication, outreach and spend are deliberately not registered as executable tools.
 """
 from __future__ import annotations
-import hashlib, json, re, time, os, secrets
+import hashlib, json, re, time, os, secrets, inspect
 import httpx
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -108,6 +108,30 @@ class WorkforceToolRegistry:
             raise ToolAuthorizationError("External action requires single-use human approval")
         started=time.perf_counter()
         result=tool.handler(payload)
+        if inspect.isawaitable(result):
+            if inspect.iscoroutine(result):
+                result.close()
+            raise ToolAuthorizationError("This tool requires asynchronous execution; use execute_async")
+        latency=max(0,int((time.perf_counter()-started)*1000))
+        digest=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",",":"),default=str).encode()).hexdigest()
+        return result,latency,digest
+
+    async def execute_async(self, *, name: str, employee: Employee,
+                principal_permissions: frozenset[str], tenant_id: str,
+                payload: dict[str, Any], approved_external: bool=False):
+        tool=self._tools.get(name)
+        if tool is None: raise KeyError(f"Unknown specialist tool: {name}")
+        if employee.id not in tool.roles: raise ToolAuthorizationError("Role is not authorised for this tool")
+        if not tool.required_permissions.issubset(set(employee.permissions)):
+            raise ToolAuthorizationError("Registered employee permissions do not grant this tool")
+        if "*" not in principal_permissions and not ({"agent.run","work.assign"} & set(principal_permissions)):
+            raise ToolAuthorizationError("Orchestration principal lacks agent execution authority")
+        if tool.external_effect and not approved_external:
+            raise ToolAuthorizationError("External action requires single-use human approval")
+        started=time.perf_counter()
+        result=tool.handler(payload)
+        if inspect.isawaitable(result):
+            result=await result
         latency=max(0,int((time.perf_counter()-started)*1000))
         digest=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",",":"),default=str).encode()).hexdigest()
         return result,latency,digest
@@ -226,13 +250,20 @@ class WorkforceToolRegistry:
 
     # Workforce 2.4: social growth tools. These handlers only prepare evidence,
     # plans or approval payloads; publication remains a separate governed route.
-    def _social_trend_hook_research(self,p):
+    async def _social_trend_hook_research(self,p):
         urls=p.get("source_urls",[])
-        if not isinstance(urls,list) or len(urls)>20: raise ValueError("source_urls must contain at most 20 URLs")
-        return {"status":"RESEARCH_READY","query":str(p.get("query","")).strip(),
-            "vertical":str(p.get("vertical","Indian SMB")),"city":str(p.get("city","")),
-            "source_urls":urls,"robots_compliant":True,"external_action":False,
-            "provider":"TinyFishResearchProvider_or_RobotsCompliantHttpFetcher"}
+        if not isinstance(urls,list) or len(urls)>20:
+            raise ValueError("source_urls must contain at most 20 URLs")
+        query=str(p.get("query","")).strip()
+        if not query:
+            raise ValueError("query is required")
+        product_id=str(p.get("product_id",""))
+        if not product_id:
+            raise ValueError("product_id is required")
+        return await self.research_social_trends(
+            query=query, city=str(p.get("city","")), product_id=product_id,
+            source_urls=urls,
+        )
 
     async def research_social_trends(self, *, query, city, product_id, source_urls):
         self._assert_commercial_product(product_id)
