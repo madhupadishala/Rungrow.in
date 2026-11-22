@@ -10,9 +10,25 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.orchestration import WorkforceOrchestrator
 from app.policy import Principal
 from app.repositories import PostgresWorkforceRepository
+from app.tool_registry import WorkforceToolRegistry
+from app.commercial_intelligence import DiscoveryBatch
 
 DB_URL = os.getenv("RUNGROW_TEST_DATABASE_URL")
 pytestmark = pytest.mark.asyncio
+
+
+class FixtureDirectoryFetcher:
+    allow_domains = {"directory.example.test"}
+
+    async def discover(self, *, query, city, product_id, source_urls):
+        return DiscoveryBatch(candidates=[{
+            "business_name": "Hyderabad Example Photography Studio",
+            "segment": "wedding photography studio",
+            "city": city,
+            "source_url": "https://directory.example.test/studio",
+            "evidence_snippet": "Public photography studio directory listing",
+            "evidence_urls": ["https://directory.example.test/studio"],
+        }], blocked=[])
 
 
 @pytest.mark.asyncio
@@ -26,9 +42,9 @@ async def test_founder_directive_executes_department_graph_and_single_use_approv
     try:
         async with factory() as session:
             async with PostgresWorkforceRepository(session, principal) as repo:
-                service = WorkforceOrchestrator(repo, principal)
+                service = WorkforceOrchestrator(repo, principal, WorkforceToolRegistry(directory_fetcher=FixtureDirectoryFetcher()))
                 created = await service.submit_directive(
-                    "Prepare a campaign and lead pipeline for Photo Studio Growth OS in Hyderabad",
+                    "Prepare a campaign and lead pipeline for Photo Studio Growth OS in Hyderabad https://directory.example.test/list",
                     "photo-studio-growth-os")
                 assert created["department_count"] == 5
                 # Simulate one manager revision request, then a passing specialist resubmission.
