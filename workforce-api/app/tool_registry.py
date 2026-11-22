@@ -306,9 +306,17 @@ class WorkforceToolRegistry:
                 return {**draft,"quotation_status":"BLOCKED_DISCOVERY_ONLY","quotation":None,
                     "handoff":"Internal discovery only; no commercial quotation can be issued."}
             tier=str(p.get("tier") or next(iter(playbook.get("tiers",{})), "Starter"))
-            proposal=self._proposal({"product_id":product,"tier":tier,"months":p.get("months",12)})
+            # Delegate quotation drafting through the Account Executive tool boundary;
+            # social-engagement itself never receives proposal.draft authority.
+            proposal,_,_=self.execute(
+                name="commercial_proposal_builder", employee=BY_ID["ae"],
+                principal_permissions=frozenset({"agent.run"}),
+                tenant_id=str(p.get("tenant_id","social-inbox")),
+                payload={"product_id":product,"tier":tier,"months":p.get("months",12)},
+            )
             return {**draft,"quotation_status":"DRAFT_FOR_SALES_REVIEW","quotation":proposal,
-                "handoff_role":"ae","approval_required":True}
+                "handoff_role":"ae","quotation_tool":"commercial_proposal_builder",
+                "approval_required":True}
         return {**draft,"quotation_status":"NOT_REQUESTED","handoff_role":"social-engagement"}
 
     def _social_event_campaign_plan(self,p):
