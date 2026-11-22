@@ -176,7 +176,16 @@ async def test_postgres16_department_head_executes_all_assigned_specialists_and_
                   RETURNING *"""),
                   {"id":order_id,"tenant":tenant,"directive":directive_id,"payload":__import__("json").dumps(payload)})
                 order=dict(row.mappings().one())
-                result=await WorkforceOrchestrator(repo,principal).execute_work_order(order)
+                service=WorkforceOrchestrator(repo,principal)
+                original_acceptance=service._acceptance
+                first_review={"outbound-sdr":True}
+                def force_one_revision(tool_name,tool_result):
+                    if tool_name=="personalized_outreach_draft" and first_review["outbound-sdr"]:
+                        first_review["outbound-sdr"]=False
+                        return False
+                    return original_acceptance(tool_name,tool_result)
+                service._acceptance=force_one_revision
+                result=await service.execute_work_order(order)
                 assert result["status"]=="APPROVED_BY_HEAD"
                 assert result["deliverable"]["evidence_type"]=="departmental_combined_evidence"
                 assert result["deliverable"]["specialist_count"]==2
@@ -185,7 +194,11 @@ async def test_postgres16_department_head_executes_all_assigned_specialists_and_
                   ORDER BY created_at"""),{"tenant":tenant,"order":order_id})).mappings().all()
                 assert {x["employee_id"] for x in proofs}=={"lead-research","outbound-sdr"}
                 assert all(len(x["input_evidence"]["skill_version_hash"])==64 for x in proofs)
-                assert all(x["status"]=="PASSED" for x in proofs)
+                outbound_proofs=[x for x in proofs if x["employee_id"]=="outbound-sdr"]
+                assert len(outbound_proofs)==2
+                assert outbound_proofs[0]["status"]=="REVISION_REQUESTED"
+                assert outbound_proofs[1]["status"]=="PASSED"
+                assert "supervisor_feedback" in outbound_proofs[1]["input_evidence"]
     finally:
         await engine.dispose()
 
