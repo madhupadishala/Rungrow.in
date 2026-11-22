@@ -2,6 +2,10 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class Employee:
     id:str; department:str; title:str; manager:str; mission:str; skills:tuple[str,...]; permissions:tuple[str,...]; boundary:str; product_id:str|None=None; kpis:tuple[str,...]=()
+    technical_skills:tuple[str,...]=()
+    linguistic_skills:tuple[str,...]=()
+    domain_knowledge:tuple[str,...]=()
+    behavioral_guardrails:tuple[str,...]=()
 DATA=[
 ("digital-ceo","Executive Office","Digital CEO","Founder","Owns day-to-day company-wide execution across all RunGrow product lines and shared functions; converts founder-approved strategy into accountable operating outcomes.",("universal intelligence","research and evidence validation","reasoning and problem solving","communication and customer understanding","planning and prioritisation","cross-functional orchestration","execution tracking","self-evaluation and quality control","risk detection and escalation","coaching and collaboration"),("reports.read","executive.read","work.read","work.assign","analytics.read","strategy.draft","crm.read","product.read","operations.read"),"Reports to Founder. May coordinate and recommend; cannot make reserved founder decisions, approve own requests, bind the company, move money or bypass approval."),
 ("chief-staff","Executive Office","Chief of Staff","Digital CEO","Coordinates operating cadence and cross-team execution",("executive synthesis","prioritisation","decision logs","orchestration"),("reports.read","work.read","work.assign"),"Founder approves strategic commitments"),
@@ -60,8 +64,49 @@ DATA=[
 ("community-manager","Growth & Marketing","SMB Owner Community & Peer Trust Manager","social-media-lead","Builds customer and founder communities across WhatsApp and Telegram through useful Q&A and retention engagement.",("community moderation","peer learning","customer advocacy","Q&A facilitation","retention engagement","escalation"),("community.read","conversation.reply","customer.read"),"No unsolicited messages, private-group scraping, member export or unapproved community posts.",None,("Community response SLA <=1 business day","Monthly active member and helpful-answer rate","Zero privacy or consent violations")),
 ("customer-advocacy","Customer Success","Post-Deployment Advocacy, Case Study & Referral Lead","cs-director","Captures verified post-onboarding ROI stories, consented reviews and referral evidence for social proof.",("ROI evidence capture","case study interviews","review governance","referral design","consent management","customer outcomes"),("customer.read","customer.update","content.draft","analytics.read"),"Use only verified outcomes and explicit customer consent; no fabricated testimonials or incentives without approval.",None,("Verified ROI evidence coverage for eligible customers","Customer consent captured before public proof 100%","Qualified referral and case-study conversion"))
 ]
-EMPLOYEES=tuple(Employee(*r) for r in DATA)
+def _competency_profile(row):
+    role_id, department, title, manager, mission, skills, permissions, boundary = row[:8]
+    # Every role has concrete, role-derived operational competencies; the original
+    # specialist skills are retained and augmented with measurable execution methods.
+    technical = tuple(dict.fromkeys(
+        tuple(skills) + (
+            "Evidence capture and source traceability",
+            "CRM and spreadsheet record validation",
+            "KPI measurement and exception reporting",
+            "Role-scoped workflow and approval verification",
+        )
+    ))
+    if department in {"Growth & Marketing", "Sales"}:
+        technical += ("SERP and public-market research", "Funnel attribution and UTM analysis", "INR pricing and quotation validation")
+    elif department == "Customer Success":
+        technical += ("Onboarding milestone tracking", "Customer health and retention analysis", "ROI evidence and consent tracking")
+    elif department in {"Technology", "Product & Engineering"}:
+        technical += ("API contract verification", "Adapter and integration testing", "Database and tenant-boundary validation")
+    elif department in {"Finance", "Legal & Compliance"}:
+        technical += ("Financial reconciliation", "Policy and control evidence review", "Approval and audit-trail validation")
+    else:
+        technical += ("Operational dashboard analysis", "Structured work-order tracking", "Document and evidence quality review")
+    audience = ("Indian Photo Studios", "Independent Clinics & Dental/Derma Practices", "SaaS Onboarding")
+    languages = (
+        "English (Indian Business)", "Telugu", "Hindi", "Hinglish",
+        "Registers: consultative, educational, executive, technical",
+    )
+    guards = tuple(dict.fromkeys((
+        "No unsolicited bulk outreach, spam, scraping of private groups, or consent bypass",
+        "Disclose AI identity when communicating externally; never impersonate a human",
+        "Escalate medical, legal, financial, safety, privacy, and high-impact decisions to authorised humans",
+        "Never publish, send, spend, quote, or commit externally without the required approval",
+        "Respect tenant isolation, least privilege, product eligibility, and immutable audit evidence",
+        boundary,
+    )))
+    return technical, languages, audience, guards
+
+EMPLOYEES=tuple(
+    Employee(*r, *_competency_profile(r)) for r in DATA
+)
 BY_ID={e.id:e for e in EMPLOYEES}
 DEPARTMENTS=tuple(dict.fromkeys(e.department for e in EMPLOYEES))
 def public_registry():
-    return [{"id":e.id,"department":e.department,"title":e.title,"reports_to":e.manager,"mission":e.mission,"skills":list(e.skills),"permissions":list(e.permissions),"approval_boundary":e.boundary,"product_id":e.product_id,"kpis":list(e.kpis)} for e in EMPLOYEES]
+    return [{"id":e.id,"department":e.department,"title":e.title,"reports_to":e.manager,"mission":e.mission,"skills":list(e.skills),"permissions":list(e.permissions),"approval_boundary":e.boundary,"product_id":e.product_id,"kpis":list(e.kpis),
+        "technical_skills":list(e.technical_skills),"linguistic_skills":list(e.linguistic_skills),
+        "domain_knowledge":list(e.domain_knowledge),"behavioral_guardrails":list(e.behavioral_guardrails)} for e in EMPLOYEES]
