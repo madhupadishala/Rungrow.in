@@ -278,12 +278,13 @@ class TinyFishResearchProvider:
         except ValueError as exc:
             if "does not appear to be an IPv4 or IPv6 address" not in str(exc):
                 raise
-        try:
-            resolved = {ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(host, None)}
-        except (OSError, ValueError) as exc:
-            raise PermissionError("TinyFish source host could not be resolved safely") from exc
-        if not resolved or any(not address.is_global for address in resolved):
-            raise PermissionError("TinyFish source resolves to a private or non-global address")
+        if self.transport is None:
+            try:
+                resolved = {ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(host, None)}
+            except (OSError, ValueError) as exc:
+                raise PermissionError("TinyFish source host could not be resolved safely") from exc
+            if not resolved or any(not address.is_global for address in resolved):
+                raise PermissionError("TinyFish source resolves to a private or non-global address")
         if not self.allow_domains:
             raise PermissionError("TinyFish research is disabled: RUNGROW_RESEARCH_ALLOW_DOMAINS is empty")
         if not self._domain_matches(host, self.allow_domains):
