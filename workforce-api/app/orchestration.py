@@ -330,7 +330,7 @@ class WorkforceOrchestrator:
                       {"tenant":self.principal.tenant_id,"directive":order["directive_id"],
                        "order":order["id"],"employee":employee.id,"tool":tool_name,
                        "hash":digest,"input":_json(specialist_input),"output":_json(result),
-                       "latency":latency,"status":"PASSED" if passed else "REVISION_REQUESTED"})
+                       "latency":latency,"status":"PASSED" if passed else "FAILED"})
                     final_result=result
                     if passed:
                         await self._queue_approval_event(order,employee,tool_name,specialist_input,result)
