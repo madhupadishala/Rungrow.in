@@ -83,7 +83,7 @@ class WorkforceOrchestrator:
             payload={"product_id":product_id,"query":command[:300],"city":city,"source_urls":urls,
                      "candidates":[],"lead_count":20,"cost_per_lead_inr":100,
                      "contingency_pct":0.15,"draft":command + " RunGrow AI assistant acting on behalf of RunGrow.","prospect":{},"sales_context":{},
-                     "next_step":"human discovery","source_evidence":[],"delegated_specialists":[{"employee_id":e.id,"skills":list(e.skills),"task":"Prepare distinct evidence for "+spec["department"]} for e in sorted([x for x in BY_ID.values() if x.department==spec["department"] and x.id!=spec["head"] and x.product_id in (None,product_id)],key=lambda x:x.id)[:2]]}
+                     "next_step":"human discovery","source_evidence":[],"delegated_specialists":[{"employee_id":e.id,"tool_name":tool_name,"skills":list(e.skills),"task":"Prepare independently verifiable evidence for "+spec["department"]} for e,tool_name in sorted([(x,{"market-intel":"icp_lead_scoring","campaigns":"campaign_budget_estimate","lead-research":"icp_lead_scoring","outbound-sdr":"personalized_outreach_draft","finance":"campaign_budget_estimate","legal":"compliance_disclosure_check","onboarding":"product_handoff_draft"}.get(x.id)) for x in BY_ID.values() if x.department==spec["department"] and x.id!=spec["head"] and x.product_id in (None,product_id) and {"market-intel":"icp_lead_scoring","campaigns":"campaign_budget_estimate","lead-research":"icp_lead_scoring","outbound-sdr":"personalized_outreach_draft","finance":"campaign_budget_estimate","legal":"compliance_disclosure_check","onboarding":"product_handoff_draft"}.get(x.id)],key=lambda pair:pair[0].id)[:2]]}
             deps=[]
             if spec["department"]=="Sales & Revenue": deps=["Growth & Marketing"]
             if spec["department"]=="Finance & Administration": deps=["Sales & Revenue"]
@@ -170,6 +170,9 @@ class WorkforceOrchestrator:
         skill_bundle=resolve_runtime_skill_bundle(order["department"],order.get("product_id"),employee.id)
         payload["runtime_skill_bundle"]=skill_bundle
         payload["skill_version_hash"]=skill_bundle["skill_version_hash"]
+        delegated=payload.get("delegated_specialists",[])
+        if len(delegated)>=2:
+            return await self._execute_multi_specialist_work_order(order,payload,delegated)
         if order["tool_name"]=="icp_lead_scoring":
             prior=await self.session.execute(text("""SELECT deliverable FROM department_work_orders
               WHERE tenant_id=:tenant AND directive_id=:directive AND department='Growth & Marketing'
@@ -250,6 +253,67 @@ class WorkforceOrchestrator:
             await self._refresh_directive(order["directive_id"])
             return {"work_order_id":str(order["id"]),"status":"REJECTED","error":str(exc)[:1000]}
 
+    async def _execute_multi_specialist_work_order(self,order,payload,delegated):
+        """Execute every head-assigned specialist and approve only the combined evidence bundle."""
+        executions=[]
+        reserve=max(1,len(delegated))
+        if not await self._reserve_work_order_budget(order,reserve):
+            return {"work_order_id":str(order["id"]),"status":"AWAITING_APPROVAL","reason":"Work-order budget ceiling reached"}
+        try:
+            for assignment in delegated:
+                employee=BY_ID.get(assignment.get("employee_id"))
+                tool_name=assignment.get("tool_name")
+                if not employee or employee.department!=order["department"] or not tool_name:
+                    raise PermissionError("Department Head delegated an invalid specialist assignment")
+                feedback=""
+                final_result=None
+                for revision in range(3):
+                    skill=resolve_runtime_skill_bundle(order["department"],order.get("product_id"),employee.id)
+                    specialist_input={**payload,"runtime_skill_bundle":skill,
+                        "skill_version_hash":skill["skill_version_hash"],
+                        "specialist_task":assignment.get("task",""),
+                        "revision_cycle":revision}
+                    if feedback:
+                        specialist_input["supervisor_feedback"]=feedback
+                    result,latency,digest=self.tools.execute(name=tool_name,employee=employee,
+                        principal_permissions=self.principal.permissions,
+                        tenant_id=self.principal.tenant_id,payload=specialist_input)
+                    passed=self._acceptance(tool_name,result)
+                    await self.session.execute(text("""INSERT INTO employee_tool_executions
+                      (tenant_id,directive_id,work_order_id,employee_id,tool_name,input_hash,input_evidence,
+                       output_evidence,latency_ms,status)
+                      VALUES (:tenant,:directive,:order,:employee,:tool,:hash,CAST(:input AS jsonb),
+                       CAST(:output AS jsonb),:latency,:status)"""),
+                      {"tenant":self.principal.tenant_id,"directive":order["directive_id"],
+                       "order":order["id"],"employee":employee.id,"tool":tool_name,
+                       "hash":digest,"input":_json(specialist_input),"output":_json(result),
+                       "latency":latency,"status":"PASSED" if passed else "REVISION_REQUESTED"})
+                    final_result=result
+                    if passed:
+                        break
+                    feedback=("REVISION_REQUESTED: provide a complete deliverable satisfying the department SOP. "
+                              "Previous deterministic rubric failures: "+_json(result))
+                executions.append({"employee_id":employee.id,"tool_name":tool_name,
+                    "skill_version_hash":skill["skill_version_hash"],"result":final_result,
+                    "accepted":self._acceptance(tool_name,final_result)})
+            combined={"evidence_type":"departmental_combined_evidence","department":order["department"],
+                "department_head_id":order["department_head_id"],"specialist_count":len(executions),
+                "specialist_evidence":executions,
+                "acceptance_rubric":{"all_specialists_accepted":all(x["accepted"] for x in executions),
+                    "revision_cycles_max":2}}
+            await self._settle_work_order_budget(order,reserve,reserve)
+            return await self._review(order,combined,all(x["accepted"] for x in executions),
+                "Combined departmental evidence passed specialist acceptance rubrics" if all(x["accepted"] for x in executions)
+                else "One or more specialist deliverables failed after two revision cycles")
+        except Exception as exc:
+            await self._settle_work_order_budget(order,reserve,reserve)
+            await self.session.execute(text("""UPDATE department_work_orders SET status='REJECTED',
+              last_error=:error,locked_by_employee_id=NULL,lock_expires_at=NULL,claimed_by=NULL,claimed_at=NULL,updated_at=now()
+              WHERE id=:id AND tenant_id=:tenant"""),
+              {"error":str(exc)[:1000],"id":order["id"],"tenant":self.principal.tenant_id})
+            await self._refresh_directive(order["directive_id"])
+            return {"work_order_id":str(order["id"]),"status":"REJECTED","error":str(exc)[:1000]}
+
     @staticmethod
     def _acceptance(tool_name,result):
         if tool_name=="public_directory_research":
@@ -258,6 +322,7 @@ class WorkforceOrchestrator:
         if tool_name=="campaign_budget_estimate": return result.get("recommended_budget_inr",0)>=0 and not result.get("spend_authorised",True)
         if tool_name=="compliance_disclosure_check": return result.get("passed") is True and result.get("publication_authorised") is False
         if tool_name=="product_handoff_draft": return result.get("external_contact_performed") is False
+        if tool_name=="personalized_outreach_draft": return result.get("approval_required") is True and result.get("sent") is False and bool(result.get("ai_identity_disclosure"))
         return False
 
     async def _review(self,order,result,passed,reason):
@@ -273,7 +338,7 @@ class WorkforceOrchestrator:
                     {"role":"user","content":_json({"department":order["department"],"skill_bundle":order.get("tool_input",{}).get("runtime_skill_bundle",{}),"evidence":result,"deterministic_acceptance":passed,"reason":reason})}],
                 output_model=SupervisorDecision,tenant_id=self.principal.tenant_id,product_id=order.get("product_id"),
                 employee_id=order["department_head_id"],run_id=str(order["id"]))
-            passed=bool(decision.accepted)
+            passed=bool(passed and decision.accepted)
             reason=decision.feedback
         feedback=reason if passed else ("Revision required by "+order["department_head_id"]+": address missing evidence and satisfy acceptance criteria before resubmission. "+reason)
         history.append({"reviewer":order["department_head_id"],"passed":passed,"reason":reason,"supervisor_feedback":feedback,"revision":order["revision_count"]})
