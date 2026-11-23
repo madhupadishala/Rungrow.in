@@ -1,12 +1,54 @@
 (() => {
  const $=id=>document.getElementById(id);
- let token="",base="";
+ const DEFAULT_API="https://rungrow-in.onrender.com";
+ const CLERK_TEMPLATE="rungrow-workforce-api";
+ let token="",base=DEFAULT_API;
  const money=n=>new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:0}).format(Number(n||0));
  const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
  const names={"photo-studio-growth-os":"Photo Studio Growth OS","photo-studio-billing":"Photo Studio Billing","clinics-counter":"Clinics / Counter","entrepreneur-instagram-tools":"Entrepreneur / Instagram Tools","pharma-software-utilities":"Pharma Software & Utilities","artists-business-tools":"Artists' Business Tools","growtoys":"Growtoys"};
- async function api(path,options={}){const response=await fetch(base+path,{...options,headers:{"Authorization":"Bearer "+token,"Content-Type":"application/json",...(options.headers||{})}});const data=await response.json().catch(()=>({detail:response.statusText}));if(!response.ok)throw new Error(data.detail||"API request failed ("+response.status+")");return data}
- function connect(){base=$("api-base").value.trim().replace(/\/$/,"");token=$("api-token").value.trim();if(!base||!token)throw new Error("API base URL and bearer token are required.");}
- async function load(){connect();$("connection-state").textContent="● Loading live data";const [brief,tasks,approvals,executive,prospects,campaigns,adapters,readiness]=await Promise.all([api("/v1/ceo/briefing"),api("/v1/workforce/tasks"),api("/v1/workforce/approvals"),api("/v1/dashboards/ceo"),api("/v1/commercial/prospects"),api("/v1/commercial/campaigns"),api("/v1/adapters/readiness"),api("/v1/release/readiness")]);renderBrief(brief);renderTasks(tasks);renderApprovals(approvals,brief.pending_approvals);renderWorkload(executive.employee_workload||[]);renderExecutive(executive);renderCommercial(prospects,campaigns,adapters.adapters||[]);renderReleaseReadiness(readiness);$("connection-state").textContent="● Connected · "+new Date().toLocaleTimeString(); }
+
+ async function waitForClerk(){
+   for(let i=0;i<100;i++){
+     if(window.Clerk){
+       await window.Clerk.load();
+       return window.Clerk;
+     }
+     await new Promise(r=>setTimeout(r,100));
+   }
+   throw new Error("Clerk SDK failed to load.");
+ }
+
+ async function getFreshToken(){
+   const clerk=await waitForClerk();
+   if(!clerk.session){
+     const btn=$("auth-btn");
+     if(btn)btn.hidden=false;
+     throw new Error("Not signed in — click Sign in.");
+   }
+   const fresh=await clerk.session.getToken({template:CLERK_TEMPLATE});
+   if(!fresh)throw new Error("Unable to mint '"+CLERK_TEMPLATE+"' token from Clerk.");
+   token=fresh;
+   const box=$("api-token");
+   if(box)box.value="Active Clerk session ("+clerk.user?.primaryEmailAddress?.emailAddress+")";
+   return token;
+ }
+
+ async function api(path,options={}){
+   base=($("api-base")?.value||DEFAULT_API).trim().replace(/\/$/,"");
+   await getFreshToken();
+   const response=await fetch(base+path,{...options,headers:{"Authorization":"Bearer "+token,"Content-Type":"application/json",...(options.headers||{})}});
+   const data=await response.json().catch(()=>({detail:response.statusText}));
+   if(!response.ok)throw new Error(data.detail||"API request failed ("+response.status+")");
+   return data;
+ }
+
+ async function connect(){
+   base=($("api-base")?.value||DEFAULT_API).trim().replace(/\/$/,"");
+   if(!base)throw new Error("API base URL is required.");
+   await getFreshToken();
+ }
+
+ async function load(){await connect();$("connection-state").textContent="● Loading live data";const [brief,tasks,approvals,executive,prospects,campaigns,adapters,readiness]=await Promise.all([api("/v1/ceo/briefing"),api("/v1/workforce/tasks"),api("/v1/workforce/approvals"),api("/v1/dashboards/ceo"),api("/v1/commercial/prospects"),api("/v1/commercial/campaigns"),api("/v1/adapters/readiness"),api("/v1/release/readiness")]);renderBrief(brief);renderTasks(tasks);renderApprovals(approvals,brief.pending_approvals);renderWorkload(executive.employee_workload||[]);renderExecutive(executive);renderCommercial(prospects,campaigns,adapters.adapters||[]);renderReleaseReadiness(readiness);$("connection-state").textContent="● Connected · "+new Date().toLocaleTimeString(); }
  function renderBrief(b){const r=b.operating_revenue||{},c=b.investment_capital||{};const revenue=Number(r.actual_inr||0),capital=Number(c.received_inr||0);$("revenue-actual").textContent=money(revenue);$("capital-actual").textContent=money(capital);$("revenue-percent").textContent=(100*revenue/50000000).toFixed(2)+"%";$("capital-percent").textContent=(100*capital/50000000).toFixed(2)+"%";$("revenue-progress").style.width=Math.min(100,100*revenue/50000000)+"%";$("capital-progress").style.width=Math.min(100,100*capital/50000000)+"%";$("capital-pipeline").textContent="Committed: "+money(c.committed_pipeline_inr)+" · Signed term sheets: "+money(c.term_sheet_pipeline_inr);$("revenue-source").textContent="As of "+(r.as_of?new Date(r.as_of).toLocaleString():"—");$("briefing-time").textContent=new Date(b.generated_at).toLocaleTimeString();$("product-rows").innerHTML=(r.by_product||[]).map(x=>'<tr><td>'+esc(x.product)+'</td><td>'+money(x.actual_recognised_inr)+'</td><td>'+money(x.target_inr)+' <small>PROVISIONAL ALLOCATION</small></td><td>invoice_recognised</td></tr>').join("")||'<tr><td colspan="4">No product telemetry available.</td></tr>';$("briefing-body").innerHTML='<div class="brief-stat"><span>Completed tasks</span><b>'+b.tasks.reduce((n,x)=>n+x.completed,0)+'</b></div><div class="brief-stat"><span>Active tasks</span><b>'+b.tasks.reduce((n,x)=>n+x.active,0)+'</b></div><div class="brief-stat"><span>Dead-lettered</span><b>'+b.tasks.reduce((n,x)=>n+x.dead_lettered,0)+'</b></div><div class="brief-stat"><span>Pending approvals</span><b>'+b.pending_approvals.length+'</b></div><h4>Risks</h4><ul>'+((b.risks||[]).map(x=>'<li>'+esc(x.severity.toUpperCase())+' · '+esc(x.type)+' · '+esc(x.scope)+' ('+x.count+')</li>').join("")||'<li>No detected queue/dead-letter risks in current evidence.</li>')+'</ul><h4>Recommended next actions</h4><ul>'+b.recommended_actions.map(x=>'<li><b>'+esc(x.priority)+'</b> · '+esc(x.action)+'</li>').join("")+'</ul>'}
  function renderReleaseReadiness(data){const rows=[];const layers=data.release_layers||{};Object.entries(layers).forEach(([layer,result])=>(result.gates||[]).forEach(g=>{const missing=(g.missing_evidence||[]).map(esc).join("<br>")||"—";rows.push('<tr><td><b>'+esc(layer.replaceAll("_"," "))+'</b></td><td>'+esc(g.gate.replaceAll("_"," "))+'</td><td><b>'+esc(g.status)+'</b></td><td>'+missing+'</td></tr>')}));$("release-decision").textContent="OVERALL "+(data.overall_decision||"NO_GO");$("release-gate-rows").innerHTML=rows.join("")||'<tr><td colspan="4">No release evidence returned.</td></tr>'}
  function renderCommercial(prospects,campaigns,adapters){const rows=Array.isArray(prospects)?prospects:prospects.prospects||[];$("prospect-count").textContent=rows.length+" RECORDS";$("prospect-rows").innerHTML=rows.map(x=>{const source=/^https?:\/\//i.test(x.source_url||"")?'<a href="'+esc(x.source_url)+'" target="_blank" rel="noopener noreferrer">Public evidence ↗</a>':"—";const discovered=x.discovered_at?new Date(x.discovered_at).toLocaleString():"—";return '<tr><td><b>'+esc(x.business_name)+'</b><small>'+source+(x.is_synthetic?' · <span class="synthetic-tag">SYNTHETIC</span>':"")+'</small></td><td>'+esc(names[x.product_id]||x.product_id)+'</td><td>'+esc(x.segment)+' · '+esc(x.city)+'</td><td>'+esc(discovered)+'</td><td>'+Math.round(Number(x.confidence_score||0)*100)+'%</td><td>'+esc(x.stage)+'</td></tr>'}).join("")||'<tr><td colspan="6">No prospects discovered.</td></tr>';$("campaign-count").textContent=campaigns.length+" PLANS";$("campaign-rows").innerHTML=campaigns.map(x=>'<tr><td><b>'+esc(x.name)+'</b><small>'+esc(x.ai_identity_disclosure||"AI disclosure required")+'</small></td><td>'+esc(names[x.product_id]||x.product_id)+'</td><td>'+esc(x.target_icp_segment)+'</td><td>'+esc(x.channel)+'</td><td>'+esc(x.status)+(x.approval_id?' · APPROVAL BOUND':"")+'</td><td>'+(x.is_sandbox?"SANDBOX":"LIVE GOVERNED")+'</td></tr>').join("")||'<tr><td colspan="6">No campaign plans recorded.</td></tr>';$("adapter-count").textContent=adapters.length+" ADAPTERS";$("adapter-rows").innerHTML=adapters.map(x=>'<tr><td><b>'+esc(names[x.product_id]||x.product_id)+'</b></td><td>'+esc(x.api_version)+'</td><td>'+esc(x.commercial_stage)+'</td><td>'+esc(x.adapter_type)+'</td><td>'+esc(x.readiness)+'</td></tr>').join("")||'<tr><td colspan="5">No adapter registrations found.</td></tr>'}
@@ -16,12 +58,13 @@
  function renderApprovals(rows,pendingBrief=[]){const pending=rows.filter(x=>String(x.status).toUpperCase()==="PENDING");const timing=new Map(pendingBrief.map(x=>[x.approval_id,x]));const duration=n=>{if(n==null)return "—";const s=Math.max(0,Number(n));return s>=3600?Math.floor(s/3600)+"h "+Math.floor(s%3600/60)+"m":s>=60?Math.floor(s/60)+"m "+Math.floor(s%60)+"s":s+"s"};$("approval-count").textContent=pending.length+" PENDING";$("approval-list").innerHTML=pending.map(a=>{const t=timing.get(String(a.id))||{};return '<article class="approval" data-id="'+esc(a.id)+'" data-product="'+esc(a.product_id||"")+'"><div class="approval-head"><b>'+esc(a.action_type)+'</b><span>'+esc(names[a.product_id]||a.product_id||"Company")+'</span></div><small>Employee: '+esc(a.employee_id)+' · Age: '+duration(t.age_seconds)+' · Expires in: '+duration(t.seconds_until_expiry)+'</small><input class="decision-reason" maxlength="1000" placeholder="Mandatory decision rationale"><div class="approval-actions"><button data-decision="approved">Approve</button><button class="reject" data-decision="rejected">Reject</button></div></article>'}).join("")||'<p class="empty">No pending human decisions.</p>'}
  $("connect").addEventListener("click",()=>load().catch(e=>{$("connection-state").textContent="● "+e.message}));
  $("refresh").addEventListener("click",()=>load().then(()=>activeDirectiveId?refreshDirective(activeDirectiveId):null).catch(e=>{$("connection-state").textContent="● "+e.message}));
- $("dispatch").addEventListener("click",async()=>{try{connect();const directive=$("directive").value.trim();if(directive.length<8)throw new Error("Directive must contain at least 8 characters.");const product_ids=[...$("directive-products").selectedOptions].map(x=>x.value);const result=await api("/v1/ceo/directives",{method:"POST",body:JSON.stringify({directive,product_ids,is_sandbox:$("sandbox").checked})});$("directive-result").textContent=result.task_count+" product-scoped tasks queued · "+(result.is_sandbox?"SANDBOX":"PRODUCTION")+" · execution not started";await load()}catch(e){$("directive-result").textContent=e.message}});
- $("approval-list").addEventListener("click",async e=>{const button=e.target.closest("button[data-decision]");if(!button)return;const article=button.closest(".approval"),reason=article.querySelector(".decision-reason").value.trim();if(reason.length<8){article.querySelector(".decision-reason").focus();return}try{connect();await api("/v1/workforce/approvals/"+encodeURIComponent(article.dataset.id)+"/decision",{method:"POST",body:JSON.stringify({decision:button.dataset.decision,reason,product_id:article.dataset.product||null})});await load()}catch(err){article.querySelector(".approval-head").insertAdjacentHTML("beforeend",'<small>'+esc(err.message)+'</small>')}});
+ $("auth-btn")?.addEventListener("click",async()=>{const clerk=await waitForClerk();clerk.openSignIn({afterSignInUrl:location.href})});
+ $("dispatch").addEventListener("click",async()=>{try{await connect();const directive=$("directive").value.trim();if(directive.length<8)throw new Error("Directive must contain at least 8 characters.");const product_ids=[...$("directive-products").selectedOptions].map(x=>x.value);const result=await api("/v1/ceo/directives",{method:"POST",body:JSON.stringify({directive,product_ids,is_sandbox:$("sandbox").checked})});$("directive-result").textContent=result.task_count+" product-scoped tasks queued · "+(result.is_sandbox?"SANDBOX":"PRODUCTION")+" · execution not started";await load()}catch(e){$("directive-result").textContent=e.message}});
+ $("approval-list").addEventListener("click",async e=>{const button=e.target.closest("button[data-decision]");if(!button)return;const article=button.closest(".approval"),reason=article.querySelector(".decision-reason").value.trim();if(reason.length<8){article.querySelector(".decision-reason").focus();return}try{await connect();await api("/v1/workforce/approvals/"+encodeURIComponent(article.dataset.id)+"/decision",{method:"POST",body:JSON.stringify({decision:button.dataset.decision,reason,product_id:article.dataset.product||null})});await load()}catch(err){article.querySelector(".approval-head").insertAdjacentHTML("beforeend",'<small>'+esc(err.message)+'</small>')}});
 
  let activeDirectiveId="";
  async function refreshDirective(id){
-   connect();const d=await api("/v1/directives/"+encodeURIComponent(id));
+   await connect();const d=await api("/v1/directives/"+encodeURIComponent(id));
    $("w2-status").textContent="Directive "+id+" · "+d.status+" · "+(d.department_work_orders||[]).filter(x=>x.status==="APPROVED_BY_HEAD").length+"/"+(d.department_work_orders||[]).length+" department approvals";
    $("w2-orders").innerHTML=(d.department_work_orders||[]).map(x=>"<tr><td>"+esc(x.department)+"</td><td>"+esc(x.department_head_id)+"</td><td>"+esc(x.tool_name)+"</td><td>"+esc(x.status)+"</td><td>"+Number(x.revision_count||0)+"</td></tr>").join("")||"<tr><td colspan='5'>No department work orders.</td></tr>";
    $("w2-proposal").hidden=!d.consolidated_proposal||!Object.keys(d.consolidated_proposal).length;
@@ -34,7 +77,7 @@
    }
  }
  $("w2-submit").addEventListener("click",async()=>{
-   try{connect();const command=$("w2-directive").value.trim();const product_id=$("w2-product").value;
+   try{await connect();const command=$("w2-directive").value.trim();const product_id=$("w2-product").value;
      const result=await api("/v1/directives",{method:"POST",body:JSON.stringify({command,product_id})});
      activeDirectiveId=result.id;await refreshDirective(result.id);
    }catch(e){$("w2-status").textContent=e.message}
@@ -65,7 +108,7 @@
    voiceRecognition.onend=()=>{if(voiceActive){try{voiceRecognition.start()}catch(_){}}else $("voice-state").textContent="Session active"};
    try{voiceRecognition.start();$("voice-mic").textContent="Microphone listening"}catch(e){$("voice-state").textContent="Microphone unavailable · use text"}
  }
- $("voice-start").addEventListener("click",async()=>{try{connect();const product_id=$("voice-product").value;const created=await api("/v1/voice/sessions",{method:"POST",body:JSON.stringify({client_mode:"browser",product_id})});voiceSessionId=created.session_id;voiceActive=true;$("voice-session-id").textContent=voiceSessionId;$("voice-transport").textContent=created.transport==="livekit"?"LiveKit room connected":"Browser fallback · no live room configured";$("voice-state").textContent="● Session active";$("voice-start").disabled=true;$("voice-stop").disabled=false;$("voice-send").disabled=false;$("voice-mic").disabled=false;voiceTranscript.innerHTML="";addVoiceLine("CEO",created.identity_disclosure);speakVoice(created.identity_disclosure);
+ $("voice-start").addEventListener("click",async()=>{try{await connect();const product_id=$("voice-product").value;const created=await api("/v1/voice/sessions",{method:"POST",body:JSON.stringify({client_mode:"browser",product_id})});voiceSessionId=created.session_id;voiceActive=true;$("voice-session-id").textContent=voiceSessionId;$("voice-transport").textContent=created.transport==="livekit"?"LiveKit room connected":"Browser fallback · no live room configured";$("voice-state").textContent="● Session active";$("voice-start").disabled=true;$("voice-stop").disabled=false;$("voice-send").disabled=false;$("voice-mic").disabled=false;voiceTranscript.innerHTML="";addVoiceLine("CEO",created.identity_disclosure);speakVoice(created.identity_disclosure);
    if(created.transport==="livekit"&&window.LivekitClient&&created.participant_token){try{const Room=window.LivekitClient.Room;liveKitRoom=new Room();await liveKitRoom.connect(created.livekit_url,created.participant_token);await liveKitRoom.localParticipant.setMicrophoneEnabled(true);$("voice-transport").textContent="LiveKit connected · browser speech bridge active"}catch(e){$("voice-state").textContent="LiveKit connection failed · browser-only mode";}}
    startBrowserRecognition();
  }catch(e){$("voice-state").textContent=e.message}});
@@ -74,5 +117,19 @@
  $("voice-text").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();$("voice-send").click()}});
  $("voice-mic").addEventListener("click",()=>{if(!voiceActive)return;if(voiceRecognition){voiceRecognition.onend=null;voiceRecognition.stop();voiceRecognition=null;$("voice-mic").textContent="Start microphone";$("voice-state").textContent="Session active · microphone paused"}else startBrowserRecognition()});
 
- if(location.protocol==="https:"&&location.hostname==="localhost")$("api-base").value=location.origin;
+ $("api-base").value=DEFAULT_API;
+ (async()=>{
+   try{
+     const clerk=await waitForClerk();
+     if(!clerk.user){
+       $("auth-btn").hidden=false;
+       $("connection-state").textContent="● Not signed in · click Sign in";
+       clerk.openSignIn({afterSignInUrl:location.href});
+       return;
+     }
+     await load();
+   }catch(e){
+     $("connection-state").textContent="● "+e.message;
+   }
+ })();
 })();
