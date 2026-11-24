@@ -91,6 +91,8 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
     admin = await asyncpg.connect(dsn)
     engine = None
     try:
+        await admin.execute("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public")
+        await admin.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public")
         await admin.execute(f'CREATE SCHEMA "{schema}"')
         await admin.execute(f'SET search_path TO "{schema}"')
         for name in (
@@ -124,13 +126,14 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
                             specialist="market-intel", tool="public_directory_research",
                             status="ASSIGNED", dependencies="[]", attempts=0, max_attempts=3,
                             claimed_by=None, expired=False):
+            await set_admin_tenant(tenant)
             oid = uuid.uuid4()
             await admin.execute("""INSERT INTO department_work_orders
               (id,tenant_id,directive_id,department,department_head_id,title,objective,
                dependencies,specialist_role_id,tool_name,tool_input,status,attempt_count,
-               max_attempts,claimed_by,claimed_at,lock_expires_at)
+               max_attempts,claimed_by,locked_by_employee_id,claimed_at,lock_expires_at)
               VALUES($1,$2,$3,$4,'department-head','IT order','objective',$5::jsonb,
-                     $6,$7,'{}'::jsonb,$8,$9,$10,$11,
+                     $6,$7,'{}'::jsonb,$8,$9,$10,$11,$11,
                      CASE WHEN $11::text IS NULL THEN NULL ELSE now()-interval '10 minutes' END,
                      CASE WHEN $12 THEN now()-interval '10 minutes' ELSE now()+interval '5 minutes' END)""",
               oid, tenant, directive, department, dependencies, specialist, tool,
@@ -176,8 +179,14 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
         monkeypatch.setattr(worker_module, "session_factory", lambda: factory)
         monkeypatch.setattr(orchestration_module.WorkforceOrchestrator, "execute_work_order",
                             lambda self, order: asyncio.sleep(0.12, result={"status": "OK"}))
+        await worker._heartbeat("STARTING")
+        await set_admin_tenant(tenant_a)
+        heartbeat_before = await admin.fetchrow(
+            "SELECT last_heartbeat_at FROM worker_heartbeats WHERE worker_id=$1", worker.worker_id
+        )
         claimed = await worker._claim()
         assert claimed and str(claimed["id"]) == str(long_order)
+        initial_lease_expiry = claimed["lock_expires_at"]
         await worker._execute_one(claimed)
         await set_admin_tenant(tenant_a)
         heartbeat = await admin.fetchrow(
@@ -187,7 +196,8 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
             "SELECT lock_expires_at FROM department_work_orders WHERE id=$1", long_order
         )
         assert heartbeat and heartbeat["status"] == "IDLE"
-        assert lease and lease["lock_expires_at"] > await admin.fetchval("SELECT now()")
+        assert heartbeat_before and heartbeat["last_heartbeat_at"] > heartbeat_before["last_heartbeat_at"]
+        assert lease and lease["lock_expires_at"] > initial_lease_expiry
 
         # Atomic stale-lease recovery: attempts below max requeue; at max fail
         # without incrementing beyond max_attempts.
@@ -218,7 +228,7 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
                 gated = await WorkforceOrchestrator(repo, principal_a).claim_work_order("dependency-worker")
                 # Any other eligible work has a retry delay or is already claimed; dependent
                 # itself cannot be claimed until its prerequisite is APPROVED_BY_HEAD.
-                assert gated is None or str(gated["id"]) != str(dependent)
+                assert gated is None
         await set_admin_tenant(tenant_a)
         await admin.execute("""INSERT INTO department_work_orders
           (tenant_id,directive_id,department,department_head_id,title,objective,
