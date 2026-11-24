@@ -2,7 +2,7 @@ name: Workforce API PostgreSQL 16 Tests
 
 on:
   push:
-    branches: [feat/departmental-worker]
+    branches: [feat/departmental-worker, feat/commercial-intelligence-discovery]
     paths:
       - "workforce-api/**"
       - ".github/workflows/workforce-api-tests.yml"
