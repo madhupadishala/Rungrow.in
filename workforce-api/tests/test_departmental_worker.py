@@ -85,6 +85,7 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
     import app.departmental_worker as worker_module
     import app.orchestration as orchestration_module
 
+    monkeypatch.setenv("WORKFORCE_MODEL_PROVIDER", "mock")
     dsn = os.environ["TEST_DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
     schema = "dept_worker_it_" + uuid.uuid4().hex[:12]
     migration_dir = Path(__file__).resolve().parents[1] / "migrations"
