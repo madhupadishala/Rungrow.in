@@ -142,7 +142,7 @@ async def test_postgres_16_commercial_schema_persists_qualified_prospect_and_rev
           VALUES ($1,$2,$3,'WHATSAPP_DRAFT','WHATSAPP','Review draft',$4::jsonb,'PENDING_HUMAN_APPROVAL','founder',$5::jsonb)
           RETURNING status,content""",tenant,PRODUCT,prospect_id,json.dumps({"human_review_required":True,"outbound_dispatch":"BLOCKED"}),json.dumps({"source_url":url}))
         assert artifact["status"]=="PENDING_HUMAN_APPROVAL"
-        assert artifact["content"]["outbound_dispatch"]=="BLOCKED"
+        assert json.loads(artifact["content"])["outbound_dispatch"]=="BLOCKED"
     finally:
         await admin.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
         await admin.close()
