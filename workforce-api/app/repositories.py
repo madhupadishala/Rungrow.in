@@ -333,6 +333,67 @@ class PostgresWorkforceRepository(ReleaseRepositoryMixin, ReportingRepositoryMix
         return await self._rows("SELECT * FROM prospect_records WHERE tenant_id=:tenant AND product_id=:product ORDER BY discovered_at DESC LIMIT :limit",
             {"tenant":self.principal.tenant_id,"product":product_id,"limit":limit})
 
+    async def update_prospect_qualification(self, *, prospect_id, product_id, stage, metadata):
+        self._product(product_id)
+        if stage not in {"DISCOVERED","QUALIFIED","DISQUALIFIED"}: raise ValueError("Invalid prospect qualification stage")
+        return await self._one("""
+          UPDATE prospect_records SET stage=:stage, metadata=metadata || CAST(:metadata AS jsonb),
+            qualified_at=CASE WHEN :stage='QUALIFIED' THEN COALESCE(qualified_at,now()) ELSE NULL END,
+            qualification_score=COALESCE((CAST(:metadata AS jsonb)->'qualification'->>'score')::numeric,qualification_score),
+            updated_at=now()
+          WHERE id=:id AND tenant_id=:tenant AND product_id=:product RETURNING *
+        """,{"stage":stage,"metadata":json.dumps(metadata or {}),"id":prospect_id,
+             "tenant":self.principal.tenant_id,"product":product_id})
+
+    async def create_sales_artifact(self, *, prospect_id, product_id, artifact_type, channel, title, content, created_by, status="PENDING_HUMAN_APPROVAL", metadata=None):
+        self._product(product_id)
+        if status != "PENDING_HUMAN_APPROVAL": raise PermissionError("Generated sales artifacts must await human approval")
+        prospect=await self._one("SELECT id FROM prospect_records WHERE id=:id AND tenant_id=:tenant AND product_id=:product AND stage='QUALIFIED' AND is_synthetic=false",
+            {"id":prospect_id,"tenant":self.principal.tenant_id,"product":product_id})
+        if not prospect: raise PermissionError("Sales artifact requires a qualified, non-synthetic prospect")
+        return await self._one("""INSERT INTO sales_artifacts
+          (tenant_id,product_id,prospect_id,artifact_type,channel,title,content,status,created_by,metadata)
+          VALUES (:tenant,:product,:prospect,:type,:channel,:title,CAST(:content AS jsonb),:status,:actor,CAST(:metadata AS jsonb))
+          RETURNING *""",{"tenant":self.principal.tenant_id,"product":product_id,"prospect":prospect_id,
+          "type":artifact_type,"channel":channel,"title":title,"content":json.dumps(content),
+          "status":status,"actor":created_by,"metadata":json.dumps(metadata or {})})
+
+    async def list_sales_artifacts(self, *, prospect_id=None, product_id=None, limit=200):
+        self._product(product_id)
+        return await self._rows("""SELECT * FROM sales_artifacts WHERE tenant_id=:tenant
+          AND (:product IS NULL OR product_id=:product) AND (:prospect IS NULL OR prospect_id=:prospect)
+          ORDER BY created_at DESC LIMIT :limit""",{"tenant":self.principal.tenant_id,"product":product_id,"prospect":prospect_id,"limit":max(1,min(limit,1000))})
+
+    async def update_prospect_qualification(self, *, prospect_id, product_id, stage, metadata):
+        self._scope(product_id)
+        if stage not in {"DISCOVERED","QUALIFIED","DISQUALIFIED"}: raise ValueError("Invalid prospect qualification stage")
+        row=next((x for x in getattr(self,"prospects",[]) if str(x["id"])==str(prospect_id) and x["tenant_id"]==self.principal.tenant_id and x["product_id"]==product_id),None)
+        if not row: raise LookupError("Prospect not found")
+        row["stage"]=stage; row["metadata"]={**row.get("metadata",{}),**(metadata or {})}; row["updated_at"]=datetime.now(timezone.utc).isoformat()
+        row["qualified_at"]=row["updated_at"] if stage=="QUALIFIED" else None
+        row["qualification_score"]=(metadata or {}).get("qualification",{}).get("score")
+        self._audit("prospect.qualification.updated","prospect",str(prospect_id),product_id,{"stage":stage})
+        return row
+
+    async def create_sales_artifact(self, *, prospect_id, product_id, artifact_type, channel, title, content, created_by, status="PENDING_HUMAN_APPROVAL", metadata=None):
+        self._scope(product_id)
+        if status!="PENDING_HUMAN_APPROVAL": raise PermissionError("Generated sales artifacts must await human approval")
+        prospect=next((x for x in getattr(self,"prospects",[]) if str(x["id"])==str(prospect_id) and x["tenant_id"]==self.principal.tenant_id and x["product_id"]==product_id and x["stage"]=="QUALIFIED" and not x["is_synthetic"]),None)
+        if not prospect: raise PermissionError("Sales artifact requires a qualified, non-synthetic prospect")
+        if not hasattr(self,"sales_artifacts"): self.sales_artifacts=[]
+        item={"id":str(uuid4()),"tenant_id":self.principal.tenant_id,"product_id":product_id,"prospect_id":str(prospect_id),
+          "artifact_type":artifact_type,"channel":channel,"title":title,"content":content,"status":status,
+          "created_by":created_by,"approved_by":None,"approved_at":None,"metadata":metadata or {},
+          "created_at":datetime.now(timezone.utc).isoformat()}
+        self.sales_artifacts.append(item); self._audit("sales_artifact.created","sales_artifact",item["id"],product_id,{"status":status})
+        return item
+
+    async def list_sales_artifacts(self, *, prospect_id=None, product_id=None, limit=200):
+        self._scope(product_id)
+        return [x for x in getattr(self,"sales_artifacts",[]) if x["tenant_id"]==self.principal.tenant_id
+          and (product_id is None or x["product_id"]==product_id)
+          and (prospect_id is None or str(x["prospect_id"])==str(prospect_id))][:max(1,min(limit,1000))]
+
     async def create_campaign(self, *, product_id, name, target_icp_segment, channel,
                               messaging_brief, ai_identity_disclosure, is_sandbox, created_by, metadata):
         self._product(product_id)
