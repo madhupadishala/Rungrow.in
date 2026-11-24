@@ -57,9 +57,9 @@ class DepartmentalWorker:
                 await session.execute(text("""
                     INSERT INTO worker_heartbeats
                       (worker_id, tenant_id, started_at, last_heartbeat_at, status, current_work_order_id)
-                    VALUES (:worker, :tenant, now(), now(), :status, :current)
+                    VALUES (:worker, :tenant, clock_timestamp(), clock_timestamp(), :status, :current)
                     ON CONFLICT (worker_id) DO UPDATE SET
-                      last_heartbeat_at=now(), status=EXCLUDED.status,
+                      last_heartbeat_at=clock_timestamp(), status=EXCLUDED.status,
                       current_work_order_id=EXCLUDED.current_work_order_id
                     WHERE worker_heartbeats.tenant_id=EXCLUDED.tenant_id
                 """), {"worker": self.worker_id, "tenant": self.tenant_id,
@@ -79,10 +79,10 @@ class DepartmentalWorker:
             async with PostgresWorkforceRepository(session, self._principal()):
                 result = await session.execute(text("""
                     UPDATE department_work_orders
-                    SET lock_expires_at=now() + (:lease_seconds * interval '1 second'),
-                        updated_at=now()
+                    SET lock_expires_at=clock_timestamp() + (:lease_seconds * interval '1 second'),
+                        updated_at=clock_timestamp()
                     WHERE id=:id AND tenant_id=:tenant AND claimed_by=:worker
-                      AND status='IN_PROGRESS' AND lock_expires_at > now()
+                      AND status='IN_PROGRESS' AND lock_expires_at > clock_timestamp()
                 """), {"id": UUID(work_order_id), "tenant": self.tenant_id,
                        "worker": self.worker_id, "lease_seconds": self.lease_seconds})
                 return result.rowcount == 1

@@ -200,12 +200,12 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
         long_directive = await add_directive(tenant_a)
         long_order = await add_order(tenant_a, long_directive)
         monkeypatch.setenv("RUNGROW_INTERNAL_TENANT_ID", tenant_a)
-        worker = worker_module.DepartmentalWorker(tenant_id=tenant_a, heartbeat_seconds=0.01,
-            lease_renew_seconds=0.02, lease_seconds=300)
+        worker = worker_module.DepartmentalWorker(tenant_id=tenant_a, heartbeat_seconds=0.025,
+            lease_renew_seconds=0.04, lease_seconds=300)
         monkeypatch.setattr(worker, "_factory", lambda: factory)
         monkeypatch.setattr(worker_module, "session_factory", lambda: factory)
         async def slow_execute(self, order):
-            await asyncio.sleep(0.035)
+            await asyncio.sleep(0.09)
             async with factory() as session:
                 async with PostgresWorkforceRepository(session, principal_a):
                     heartbeat_one = (await session.execute(text(
@@ -214,7 +214,7 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
                     lease_one = (await session.execute(text(
                         "SELECT lock_expires_at FROM department_work_orders WHERE id=:id"
                     ), {"id": order["id"]})).scalar_one()
-            await asyncio.sleep(0.045)
+            await asyncio.sleep(0.09)
             async with factory() as session:
                 async with PostgresWorkforceRepository(session, principal_a):
                     heartbeat_two = (await session.execute(text(
