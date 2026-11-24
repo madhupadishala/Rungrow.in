@@ -229,6 +229,7 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
             assert lease_two > order["lock_expires_at"]
             return {"status": "OK"}
 
+        original_execute = orchestration_module.WorkforceOrchestrator.execute_work_order
         monkeypatch.setattr(orchestration_module.WorkforceOrchestrator, "execute_work_order", slow_execute)
         await worker._heartbeat("STARTING")
         await set_admin_tenant(tenant_a)
@@ -249,6 +250,10 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
         assert heartbeat and heartbeat["status"] == "IDLE"
         assert heartbeat_before and heartbeat["last_heartbeat_at"] > heartbeat_before["last_heartbeat_at"]
         assert lease and lease["lock_expires_at"] > initial_lease_expiry
+
+        # Restore the real execution path before transient/permanent failure cases.
+        monkeypatch.setattr(orchestration_module.WorkforceOrchestrator,
+                            "execute_work_order", original_execute)
 
         # Atomic stale-lease recovery: attempts below max requeue; at max fail
         # without incrementing beyond max_attempts.
