@@ -300,9 +300,9 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
                 )
         await set_admin_tenant(tenant_a)
         transient_row = await admin.fetchrow(
-            "SELECT status,attempt_count FROM department_work_orders WHERE id=$1", transient_id
+            "SELECT status,attempt_count,spent_cents FROM department_work_orders WHERE id=$1", transient_id
         )
-        assert (transient_row["status"], transient_row["attempt_count"]) == ("QUEUED", 1)
+        assert (transient_row["status"], transient_row["attempt_count"], transient_row["spent_cents"]) == ("QUEUED", 1, 0)
 
         class DeniedTools:
             directory_fetcher = None

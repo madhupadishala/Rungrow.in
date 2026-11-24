@@ -18,6 +18,18 @@ ALTER TABLE department_work_orders
 ALTER TABLE department_work_orders
   VALIDATE CONSTRAINT department_work_orders_status_check;
 
+DO $constraints$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='department_work_orders_attempt_bounds_check') THEN
+    ALTER TABLE department_work_orders
+      ADD CONSTRAINT department_work_orders_attempt_bounds_check
+      CHECK (attempt_count >= 0 AND max_attempts > 0 AND attempt_count <= max_attempts) NOT VALID;
+  END IF;
+END
+$constraints$;
+ALTER TABLE department_work_orders
+  VALIDATE CONSTRAINT department_work_orders_attempt_bounds_check;
+
 CREATE INDEX IF NOT EXISTS department_work_orders_retry_idx
   ON department_work_orders (tenant_id, status, next_retry_at, created_at);
 CREATE INDEX IF NOT EXISTS department_work_orders_expired_lease_idx
