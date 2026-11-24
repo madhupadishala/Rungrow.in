@@ -13,7 +13,7 @@ from sqlalchemy import text
 from .config import settings
 from .policy import Principal
 from .repositories import PostgresWorkforceRepository, session_factory
-from .orchestration import WorkforceOrchestrator
+from .orchestration import WorkforceOrchestrator, TransientExecutionError
 
 
 class LeaseLostError(RuntimeError):
@@ -121,6 +121,12 @@ class DepartmentalWorker:
             if execution_task and not execution_task.done():
                 execution_task.cancel()
             raise
+        except TransientExecutionError as exc:
+            factory, retry_session = await self._repo()
+            async with retry_session:
+                async with PostgresWorkforceRepository(retry_session, self._principal()) as retry_repo:
+                    retry_orchestrator = WorkforceOrchestrator(retry_repo, self._principal())
+                    await retry_orchestrator.schedule_retry(order, self.worker_id, exc, self.max_attempts)
         finally:
             stop_renewal.set()
             renew_task.cancel()
