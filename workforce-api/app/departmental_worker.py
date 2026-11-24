@@ -5,7 +5,7 @@ import asyncio
 import os
 import socket
 from contextlib import suppress
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import text
 
@@ -63,7 +63,7 @@ class DepartmentalWorker:
                       current_work_order_id=EXCLUDED.current_work_order_id
                     WHERE worker_heartbeats.tenant_id=EXCLUDED.tenant_id
                 """), {"worker": self.worker_id, "tenant": self.tenant_id,
-                       "status": state, "current": self._current_order_id})
+                       "status": state, "current": UUID(self._current_order_id) if self._current_order_id else None})
 
     async def _claim(self) -> dict | None:
         factory, session = await self._repo()
@@ -83,7 +83,7 @@ class DepartmentalWorker:
                         updated_at=now()
                     WHERE id=:id AND tenant_id=:tenant AND claimed_by=:worker
                       AND status='IN_PROGRESS' AND lock_expires_at > now()
-                """), {"id": work_order_id, "tenant": self.tenant_id,
+                """), {"id": UUID(work_order_id), "tenant": self.tenant_id,
                        "worker": self.worker_id, "lease_seconds": self.lease_seconds})
                 return result.rowcount == 1
 
