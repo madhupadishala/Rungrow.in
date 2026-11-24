@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, OperationalError, InterfaceError
+import httpx
 from .registry import BY_ID
 from .tool_registry import WorkforceToolRegistry, ToolAuthorizationError
 from .skill_registry import resolve_runtime_skill_bundle, PRODUCT_PLAYBOOKS
@@ -17,6 +19,29 @@ DEPARTMENT_PLAN = (
  {"department":"Legal, Risk & Compliance","head":"legal","specialist":"legal","tool":"compliance_disclosure_check","title":"Review AI disclosure and campaign compliance"},
  {"department":"Customer Success","head":"cs-director","specialist":"onboarding","tool":"product_handoff_draft","title":"Prepare customer-success handoff template"},
 )
+
+class TransientExecutionError(RuntimeError):
+    """Retryable network, database, or upstream availability failure."""
+
+
+class PermanentExecutionError(RuntimeError):
+    """Non-retryable policy, authorization, schema, or capability failure."""
+
+
+def classify_execution_error(exc: Exception) -> Exception:
+    if isinstance(exc, (TransientExecutionError, PermanentExecutionError)):
+        return exc
+    if isinstance(exc, (TimeoutError, ConnectionError, asyncio.TimeoutError,
+                        DBAPIError, OperationalError, InterfaceError,
+                        httpx.TimeoutException, httpx.NetworkError)):
+        return TransientExecutionError(str(exc))
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status == 429 or (isinstance(status, int) and status >= 500):
+        return TransientExecutionError(str(exc))
+    if isinstance(exc, (PermissionError, ValueError, KeyError, LookupError, ToolAuthorizationError)):
+        return PermanentExecutionError(str(exc))
+    return PermanentExecutionError(str(exc))
+
 
 def _json(value): return json.dumps(value,ensure_ascii=False,default=str)
 def _dict(row): return dict(row) if row else None
@@ -240,6 +265,10 @@ class WorkforceOrchestrator:
                 return await self._review(order,result,False,"Department acceptance criteria failed")
             return await self._review(order,result,True,"Evidence and acceptance criteria passed")
         except Exception as exc:
+            classified=classify_execution_error(exc)
+            if isinstance(classified, TransientExecutionError):
+                # Worker schedules retries in a fresh transaction after this one rolls back.
+                raise classified from exc
             digest=hashlib.sha256(_json(payload).encode()).hexdigest()
             await self.session.execute(text("""INSERT INTO employee_tool_executions
               (tenant_id,directive_id,work_order_id,employee_id,tool_name,input_hash,input_evidence,
@@ -248,12 +277,14 @@ class WorkforceOrchestrator:
                '{}'::jsonb,:latency,'FAILED',:error)"""),
               {"tenant":self.principal.tenant_id,"directive":order["directive_id"],"order":order["id"],
                "employee":employee.id,"tool":order["tool_name"],"hash":digest,"input":_json(payload),
-               "latency":int((time.perf_counter()-started)*1000),"error":str(exc)[:1000]})
+               "latency":int((time.perf_counter()-started)*1000),"error":str(classified)[:1000]})
             await self.session.execute(text("""UPDATE department_work_orders SET status='REJECTED',
-              last_error=:error,locked_by_employee_id=NULL,lock_expires_at=NULL,claimed_by=NULL,claimed_at=NULL,updated_at=now() WHERE id=:id AND tenant_id=:tenant"""),
-              {"error":str(exc)[:1000],"id":order["id"],"tenant":self.principal.tenant_id})
+              last_error=:error,locked_by_employee_id=NULL,lock_expires_at=NULL,claimed_by=NULL,claimed_at=NULL,updated_at=now()
+              WHERE id=:id AND tenant_id=:tenant AND claimed_by=:worker"""),
+              {"error":str(classified)[:1000],"id":order["id"],"tenant":self.principal.tenant_id,
+               "worker":order.get("claimed_by")})
             await self._refresh_directive(order["directive_id"])
-            return {"work_order_id":str(order["id"]),"status":"REJECTED","error":str(exc)[:1000]}
+            return {"work_order_id":str(order["id"]),"status":"REJECTED","error":str(classified)[:1000]}
 
     async def _queue_approval_event(self,order,employee,tool_name,payload,result):
         """Persist a per-action, payload-bound approval and outbox event."""
