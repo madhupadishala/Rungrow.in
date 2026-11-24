@@ -177,8 +177,32 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
             lease_renew_seconds=0.02, lease_seconds=300)
         monkeypatch.setattr(worker, "_factory", lambda: factory)
         monkeypatch.setattr(worker_module, "session_factory", lambda: factory)
-        monkeypatch.setattr(orchestration_module.WorkforceOrchestrator, "execute_work_order",
-                            lambda self, order: asyncio.sleep(0.12, result={"status": "OK"}))
+        async def slow_execute(self, order):
+            await asyncio.sleep(0.035)
+            async with factory() as session:
+                async with PostgresWorkforceRepository(session, principal_a):
+                    heartbeat_one = (await session.execute(text(
+                        "SELECT last_heartbeat_at FROM worker_heartbeats WHERE worker_id=:worker"
+                    ), {"worker": worker.worker_id})).scalar_one()
+                    lease_one = (await session.execute(text(
+                        "SELECT lock_expires_at FROM department_work_orders WHERE id=:id"
+                    ), {"id": order["id"]})).scalar_one()
+            await asyncio.sleep(0.045)
+            async with factory() as session:
+                async with PostgresWorkforceRepository(session, principal_a):
+                    heartbeat_two = (await session.execute(text(
+                        "SELECT last_heartbeat_at FROM worker_heartbeats WHERE worker_id=:worker"
+                    ), {"worker": worker.worker_id})).scalar_one()
+                    lease_two = (await session.execute(text(
+                        "SELECT lock_expires_at FROM department_work_orders WHERE id=:id"
+                    ), {"id": order["id"]})).scalar_one()
+            assert heartbeat_two > heartbeat_one
+            assert lease_two > lease_one
+            assert heartbeat_two > heartbeat_before["last_heartbeat_at"]
+            assert lease_two > order["lock_expires_at"]
+            return {"status": "OK"}
+
+        monkeypatch.setattr(orchestration_module.WorkforceOrchestrator, "execute_work_order", slow_execute)
         await worker._heartbeat("STARTING")
         await set_admin_tenant(tenant_a)
         heartbeat_before = await admin.fetchrow(
