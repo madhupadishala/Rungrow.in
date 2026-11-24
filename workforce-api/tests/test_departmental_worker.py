@@ -116,6 +116,11 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
                     "WHERE conname='worker_heartbeats_processed_nonnegative'",
                     "WHERE conname='worker_heartbeats_processed_nonnegative' AND conrelid='worker_heartbeats'::regclass",
                 )
+            if name == "014_departmental_worker.sql":
+                migration_sql = migration_sql.replace(
+                    "WHERE conname='department_work_orders_attempt_bounds_check'",
+                    "WHERE conname='department_work_orders_attempt_bounds_check' AND conrelid='department_work_orders'::regclass",
+                )
             await admin.execute(migration_sql)
 
         tenant_a, tenant_b = str(uuid.uuid4()), str(uuid.uuid4())
