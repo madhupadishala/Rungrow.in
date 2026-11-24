@@ -70,6 +70,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      - name: Run departmental worker PostgreSQL integration tests
+        run: python -m pytest tests/test_departmental_worker.py -v
+
+
       - name: Bootstrap checksum-verified PostgreSQL migrations and application role
         shell: bash
         run: |
@@ -94,9 +98,6 @@ jobs:
           echo "/tmp/ci-bin" >> "$GITHUB_PATH"
           export PATH="/tmp/ci-bin:$PATH"
           bash ./scripts/init_test_db.sh
-
-      - name: Run departmental worker PostgreSQL integration tests
-        run: python -m pytest tests/test_departmental_worker.py -v
 
       - name: Run complete workforce API test suite
         run: python -m pytest tests/ -v
