@@ -94,7 +94,7 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
         await admin.execute("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public")
         await admin.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public")
         await admin.execute(f'CREATE SCHEMA "{schema}"')
-        await admin.execute(f'SET search_path TO "{schema}"')
+        await admin.execute(f'SET search_path TO "{schema}", public')
         for name in (
             "003_durable_workforce_repositories.sql",
             "008_release_gates_and_worker_heartbeats.sql",
@@ -106,7 +106,7 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
         tenant_a, tenant_b = str(uuid.uuid4()), str(uuid.uuid4())
         engine = create_async_engine(
             dsn, pool_size=8, max_overflow=4,
-            connect_args={"server_settings": {"search_path": schema}},
+            connect_args={"server_settings": {"search_path": f"{schema},public"}},
         )
         factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
