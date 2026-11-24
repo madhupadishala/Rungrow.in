@@ -95,7 +95,7 @@ class DepartmentalWorker:
             try:
                 await asyncio.wait_for(
                     self._stop.wait(),
-                    timeout=max(0.1, min(self.heartbeat_seconds, next_renewal - loop.time())),
+                    timeout=max(0.001, min(self.heartbeat_seconds, next_renewal - loop.time())),
                 )
                 return
             except asyncio.TimeoutError:
