@@ -269,10 +269,17 @@ class WorkforceOrchestrator:
         return {"work_order_id": str(order["id"]), "status": "REJECTED", "error": reason[:1000]}
 
     async def execute_work_order(self, order: dict) -> dict:
-        employee = BY_ID.get(order.get("specialist_role_id"))
-        if employee is None:
-            reason = f"Unregistered specialist role: {order.get('specialist_role_id')!r}"
-            return await self._reject_permanent_work_order(order, reason, "missing_specialist_role")
+        role_id = order.get("specialist_role_id")
+        try:
+            employee = BY_ID[role_id]
+            if employee is None:
+                raise KeyError(role_id)
+        except (KeyError, TypeError):
+            reason = f"Unregistered specialist role: {role_id!r}"
+            classified = PermanentExecutionError(reason)
+            return await self._reject_permanent_work_order(
+                order, str(classified), "missing_specialist_role"
+            )
         try:
             payload=order["tool_input"]
             if isinstance(payload,str):
