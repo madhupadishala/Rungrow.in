@@ -92,8 +92,9 @@ class ProspectQualificationService:
                 url=str(prospect.get("source_url",""))
                 if hasattr(self.provider,"verify_source"):
                     evidence=await self.provider.verify_source(url,expected_name=prospect.get("business_name"))
-                elif hasattr(self.provider,"fetch_page"):
-                    page=await self.provider.fetch_page(url); title=str(page.get("title") or page.get("business_name") or "")
+                elif hasattr(self.provider,"fetch_page") or hasattr(self.provider,"page_fetcher"):
+                    fetcher=self.provider if hasattr(self.provider,"fetch_page") else self.provider.page_fetcher
+                    page=await fetcher.fetch_page(url); title=str(page.get("title") or page.get("business_name") or "")
                     evidence={"source_url":url,"evidence_snippet":str(page.get("evidence_snippet") or title),
                         "verified_business_identity":bool(title and str(prospect["business_name"]).casefold() in title.casefold()),
                         "active_public_presence":bool(title and page.get("source_url")==url)}
