@@ -113,6 +113,24 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
             await admin.execute((migration_dir / name).read_text(encoding="utf-8"))
 
         tenant_a, tenant_b = str(uuid.uuid4()), str(uuid.uuid4())
+        # Use a non-superuser connection for application-path assertions.
+        # PostgreSQL superusers bypass RLS even when FORCE ROW LEVEL SECURITY is set.
+        await admin.execute("""
+          DO $role$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rungrow_worker_test') THEN
+              CREATE ROLE rungrow_worker_test LOGIN PASSWORD 'rungrow_worker_test'
+                NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+            END IF;
+          END
+          $role$;
+        """)
+        await admin.execute(f'GRANT USAGE ON SCHEMA "{schema}" TO rungrow_worker_test')
+        await admin.execute(f'GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA "{schema}" TO rungrow_worker_test')
+        await admin.execute(f'GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA "{schema}" TO rungrow_worker_test')
+        app_netloc = "rungrow_worker_test:rungrow_worker_test@" + parts.hostname + ":" + str(parts.port or 5432)
+        app_url = urlunsplit((parts.scheme, app_netloc, parts.path, clean_query, parts.fragment))
+        engine_url = app_url.replace("postgresql://", "postgresql+asyncpg://", 1)
         engine = create_async_engine(
             engine_url, pool_size=8, max_overflow=4,
             connect_args={"server_settings": {"search_path": f"{schema},public"}},
