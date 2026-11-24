@@ -86,10 +86,18 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
     import app.orchestration as orchestration_module
 
     monkeypatch.setenv("WORKFORCE_MODEL_PROVIDER", "mock")
-    dsn = os.environ["TEST_DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+    raw_url = os.environ["TEST_DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://", 1)
+    parts = urlsplit(raw_url)
+    params = parse_qsl(parts.query)
+    sslmode = next((value for key, value in params if key == "sslmode"), None)
+    clean_query = urlencode([(key, value) for key, value in params
+                             if key not in {"sslmode", "channel_binding"}])
+    dsn = urlunsplit((parts.scheme, parts.netloc, parts.path, clean_query, parts.fragment))
+    engine_url = dsn.replace("postgresql://", "postgresql+asyncpg://", 1)
     schema = "dept_worker_it_" + uuid.uuid4().hex[:12]
     migration_dir = Path(__file__).resolve().parents[1] / "migrations"
-    admin = await asyncpg.connect(dsn)
+    admin = await asyncpg.connect(dsn, ssl="require" if sslmode == "require" else None)
     engine = None
     try:
         await admin.execute("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public")
@@ -106,7 +114,7 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
 
         tenant_a, tenant_b = str(uuid.uuid4()), str(uuid.uuid4())
         engine = create_async_engine(
-            dsn, pool_size=8, max_overflow=4,
+            engine_url, pool_size=8, max_overflow=4,
             connect_args={"server_settings": {"search_path": f"{schema},public"}},
         )
         factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
