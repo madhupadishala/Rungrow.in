@@ -445,7 +445,7 @@ def route_product_fit(candidate: dict[str, Any]) -> list[dict[str, Any]]:
         result = score_icp(product_id, candidate)
         scores.append({"product_id": product_id, **result,
                        "commercial_stage": PRODUCT_PLAYBOOKS[product_id]["stage"],
-                       "playbook_version": PRODUCT_PLAYBOOKS[product_id]["version"], "source_url_exact": source_url, "discovered_at": str(candidate.get("fetched_at") or datetime.now(timezone.utc).isoformat()), "raw_evidence_snippet": raw_snippet[:2000], "verified_business_identity": bool(candidate.get("verified_business_identity", False)), "active_public_presence": bool(candidate.get("active_public_presence", False)), "locality": candidate.get("locality")})
+                       "playbook_version": PRODUCT_PLAYBOOKS[product_id]["version"]})
     return sorted(scores, key=lambda x: (x["score"], x["product_id"]), reverse=True)
 
 
@@ -500,7 +500,7 @@ class CommercialIntelligenceService:
                 metadata={"normalized_domain": _norm(candidate.get("domain") or urlparse(source_url).hostname),
                           "normalized_phone": _normalized_phone(candidate.get("phone")),
                           "product_fit": route_product_fit(candidate),
-                          "playbook_version": PRODUCT_PLAYBOOKS[product_id]["version"]})
+                          "playbook_version": PRODUCT_PLAYBOOKS[product_id]["version"], "source_url_exact": source_url, "discovered_at": str(candidate.get("fetched_at") or datetime.now(timezone.utc).isoformat()), "raw_evidence_snippet": raw_snippet[:2000], "verified_business_identity": bool(candidate.get("verified_business_identity", False)), "active_public_presence": bool(candidate.get("active_public_presence", False)), "locality": candidate.get("locality")})
             persisted.append(record)
         await self.repository.append_audit("prospect.discovery.completed", "prospect_batch",
             hashlib.sha256(f"{tenant_id}|{product_id}|{query}|{city}".encode()).hexdigest()[:32],
