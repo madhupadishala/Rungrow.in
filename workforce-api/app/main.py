@@ -10,6 +10,8 @@ import os
 from pydantic import BaseModel, Field
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from contextlib import asynccontextmanager
+import asyncio
 from fastapi.middleware.cors import CORSMiddleware
 
 from .agent_runtime import AgentInput, AgentOrchestrator
@@ -33,7 +35,37 @@ from .health import router as health_router
 from .rate_limit import RateLimitMiddleware
 from .release_readiness import ReleaseReadinessService
 
-app = FastAPI(title="RunGrow Workforce API", version="0.5.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Keep fail-closed production validation before starting any background work.
+    if settings.app_env == "production":
+        validate_production_environment()
+    if not settings.database_url and settings.app_env != "test":
+        raise RuntimeError("DATABASE_URL is required; Workforce API refuses volatile in-memory production storage")
+    worker = None
+    worker_task = None
+    if settings.database_url and settings.app_env != "test" and os.getenv("DEPARTMENTAL_WORKER_ENABLED", "true").lower() in {"1", "true", "yes"}:
+        from .departmental_worker import DepartmentalWorker
+        worker = DepartmentalWorker()
+        worker_task = asyncio.create_task(worker.run(), name=worker.worker_id)
+    app.state.departmental_worker = worker
+    try:
+        yield
+    finally:
+        if worker is not None:
+            worker.stop()
+        if worker_task is not None:
+            try:
+                await asyncio.wait_for(worker_task, timeout=30)
+            except asyncio.TimeoutError:
+                worker_task.cancel()
+                try:
+                    await worker_task
+                except asyncio.CancelledError:
+                    pass
+
+
+app = FastAPI(title="RunGrow Workforce API", version="0.5.0", lifespan=lifespan)
 app.add_middleware(RateLimitMiddleware)
 app.include_router(health_router)
 app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins,
@@ -48,14 +80,6 @@ PRODUCT_ADAPTERS = build_product_adapter_registry()
 PRODUCT_ROLE_IDS = {e.product_id:e.id for e in EMPLOYEES if e.product_id}
 if set(PRODUCT_ROLE_IDS) != set(PRODUCTS):
     raise RuntimeError("Product portfolio and Product Growth Manager registries do not match")
-
-
-@app.on_event("startup")
-async def require_database_configuration():
-    if settings.app_env == "production":
-        validate_production_environment()
-    if not settings.database_url and settings.app_env != "test":
-        raise RuntimeError("DATABASE_URL is required; Workforce API refuses volatile in-memory production storage")
 
 
 async def get_workforce_repo(p: Principal = Depends(current_principal)):

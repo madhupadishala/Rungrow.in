@@ -1,0 +1,103 @@
+name: Workforce API PostgreSQL 16 Tests
+
+on:
+  push:
+    branches: [feat/departmental-worker]
+    paths:
+      - "workforce-api/**"
+      - ".github/workflows/workforce-api-tests.yml"
+  pull_request:
+    branches: [main, feat/departmental-worker]
+    paths:
+      - "workforce-api/**"
+      - ".github/workflows/workforce-api-tests.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workforce-api-postgres-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgres-tests:
+    name: PostgreSQL 16 · workforce-api
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # PostgreSQL 16 with the pgvector extension required by migration 003.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rungrow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rungrow_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rungrow_test
+      DATABASE_URL: postgresql+asyncpg://rungrow_app_user:rungrow_app_ci_only@localhost:5432/rungrow_test
+      RUNGROW_TEST_DATABASE_URL: postgresql+asyncpg://rungrow_app_user:rungrow_app_ci_only@localhost:5432/rungrow_test
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGDATABASE: rungrow_test
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      RUNGROW_APP_PASSWORD: rungrow_app_ci_only
+      APP_ENV: test
+      WORKFORCE_MODEL_PROVIDER: mock
+      RUNGROW_INTERNAL_TENANT_ID: 11111111-1111-1111-1111-111111111111
+    defaults:
+      run:
+        working-directory: workforce-api
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: workforce-api/pyproject.toml
+
+      - name: Install workforce API and development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run departmental worker PostgreSQL integration tests
+        run: python -m pytest tests/test_departmental_worker.py -v
+
+
+      - name: Bootstrap checksum-verified PostgreSQL migrations and application role
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          mkdir -p /tmp/ci-bin
+          cat > /tmp/ci-bin/docker <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [[ "${1:-}" == "compose" ]]; then shift; fi
+          if [[ "${1:-}" == "-f" ]]; then shift 2; fi
+          if [[ "${1:-}" == "exec" ]]; then
+            shift
+            [[ "${1:-}" == "-T" ]] && shift
+            [[ "${1:-}" == "postgres" ]] && shift
+            exec "$@"
+          fi
+          echo "Unsupported docker shim invocation: $*" >&2
+          exit 2
+          SH
+          chmod +x /tmp/ci-bin/docker
+          echo "/tmp/ci-bin" >> "$GITHUB_PATH"
+          export PATH="/tmp/ci-bin:$PATH"
+          bash ./scripts/init_test_db.sh
+
+      - name: Run complete workforce API test suite
+        run: python -m pytest tests/ -v
