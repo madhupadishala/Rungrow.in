@@ -36,7 +36,7 @@ async def test_robots_disallow_blocks_crawl_and_writes_audit_record():
 
     transport = httpx.MockTransport(handler)
     repo = InMemoryWorkforceRepository(principal(), {"photo-studio-growth-os"})
-    fetcher = RobotsCompliantHttpFetcher(transport=transport, requests_per_second=1000)
+    fetcher = RobotsCompliantHttpFetcher(transport=transport, requests_per_second=1000, allow_domains={"directory.example"})
     service = CommercialIntelligenceService(repo, fetcher)
     result = await service.discover(tenant_id="tenant-ci", product_id="photo-studio-growth-os",
         query="wedding photographer", city="Hyderabad",
