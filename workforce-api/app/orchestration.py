@@ -130,7 +130,7 @@ class WorkforceOrchestrator:
     async def claim_work_order(self, worker_id: str) -> dict | None:
         row=await self.session.execute(text("""WITH candidate AS (
           SELECT w.id FROM department_work_orders w
-          WHERE w.tenant_id=:tenant AND COALESCE(w.attempt_count,0) < COALESCE(w.max_attempts,3)
+          WHERE w.tenant_id=:tenant AND COALESCE(w.attempt_count,0) <= COALESCE(w.max_attempts,3)
             AND COALESCE(w.next_retry_at,now()) <= now()
             AND w.status IN ('ASSIGNED','REVISION_REQUESTED','QUEUED','PENDING')
             AND NOT EXISTS (
