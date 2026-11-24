@@ -68,6 +68,21 @@ class DepartmentalWorker:
         factory, session = await self._repo()
         async with session:
             async with PostgresWorkforceRepository(session, self._principal()) as repo:
+                # Expired leases are recovered atomically and strictly tenant-scoped.
+                await session.execute(text("""
+                    UPDATE department_work_orders
+                    SET attempt_count=COALESCE(attempt_count,0)+1,
+                        status=CASE WHEN COALESCE(attempt_count,0)+1 >= COALESCE(max_attempts,3)
+                                    THEN 'FAILED' ELSE 'QUEUED' END,
+                        next_retry_at=CASE WHEN COALESCE(attempt_count,0)+1 >= COALESCE(max_attempts,3)
+                                           THEN NULL ELSE now()+make_interval(secs =>
+                                             LEAST(900,5*power(2,LEAST(COALESCE(attempt_count,0),8)))::int) END,
+                        claimed_by=NULL,claimed_at=NULL,locked_by_employee_id=NULL,
+                        lock_expires_at=NULL,updated_at=now()
+                    WHERE tenant_id=:tenant AND status='IN_PROGRESS'
+                      AND (lock_expires_at <= now() OR
+                           (lock_expires_at IS NULL AND claimed_at < now()-interval '3 minutes'))
+                """), {"tenant": self.tenant_id})
                 orchestrator = WorkforceOrchestrator(repo, self._principal())
                 return await orchestrator.claim_work_order(self.worker_id)
 
