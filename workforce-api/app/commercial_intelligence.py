@@ -144,6 +144,8 @@ class RobotsCompliantHttpFetcher:
         if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("Only credential-free public HTTP(S) URLs are allowed")
         host = parsed.hostname.lower().rstrip(".")
+        if not self.allow_domains:
+            raise PermissionError("Discovery is disabled: domain allowlist is empty")
         if host in {"localhost"} or host.endswith((".localhost", ".local", ".internal")):
             raise ValueError("Private or local network targets are prohibited")
         try:
