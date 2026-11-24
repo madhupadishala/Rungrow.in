@@ -35,7 +35,7 @@ def classify_execution_error(exc: Exception) -> Exception:
                         DBAPIError, OperationalError, InterfaceError,
                         httpx.TimeoutException, httpx.NetworkError)):
         return TransientExecutionError(str(exc))
-    status = getattr(getattr(exc, "response", None), "status_code", None)
+    status = getattr(getattr(exc, "response", None), "status_code", getattr(exc, "status_code", None))
     if status == 429 or (isinstance(status, int) and status >= 500):
         return TransientExecutionError(str(exc))
     if isinstance(exc, (PermissionError, ValueError, KeyError, LookupError, ToolAuthorizationError)):
@@ -132,9 +132,7 @@ class WorkforceOrchestrator:
           SELECT w.id FROM department_work_orders w
           WHERE w.tenant_id=:tenant AND COALESCE(w.attempt_count,0) < COALESCE(w.max_attempts,3)
             AND COALESCE(w.next_retry_at,now()) <= now()
-            AND (w.status IN ('ASSIGNED','REVISION_REQUESTED','QUEUED','PENDING') OR
-            (w.status='IN_PROGRESS' AND (w.lock_expires_at <= now() OR
-             (w.lock_expires_at IS NULL AND w.claimed_at < now() - interval '3 minutes'))))
+            AND w.status IN ('ASSIGNED','REVISION_REQUESTED','QUEUED','PENDING')
             AND NOT EXISTS (
               SELECT 1 FROM jsonb_array_elements_text(w.dependencies) d(dep)
               WHERE NOT EXISTS (SELECT 1 FROM department_work_orders prior
@@ -148,6 +146,37 @@ class WorkforceOrchestrator:
           {"tenant":self.principal.tenant_id,"worker":worker_id})
         item=row.mappings().first()
         return _dict(item)
+    async def recover_stale_leases(self) -> int:
+        """Atomically recover only expired leases visible to this tenant."""
+        result = await self.session.execute(text("""WITH stale AS (
+          SELECT id,attempt_count,max_attempts
+          FROM department_work_orders
+          WHERE tenant_id=:tenant AND status='IN_PROGRESS'
+            AND lock_expires_at <= now()
+          ORDER BY lock_expires_at
+          FOR UPDATE SKIP LOCKED
+        )
+        UPDATE department_work_orders w SET
+          status=CASE WHEN COALESCE(s.attempt_count,0) < COALESCE(s.max_attempts,3)
+                      THEN 'QUEUED' ELSE 'FAILED' END,
+          attempt_count=CASE WHEN COALESCE(s.attempt_count,0) < COALESCE(s.max_attempts,3)
+                             THEN COALESCE(s.attempt_count,0)+1
+                             ELSE COALESCE(s.attempt_count,0) END,
+          next_retry_at=CASE WHEN COALESCE(s.attempt_count,0) < COALESCE(s.max_attempts,3)
+                             THEN now()+make_interval(secs =>
+                               LEAST(900,5*power(2,LEAST(COALESCE(s.attempt_count,0),8)))::int)
+                             ELSE NULL END,
+          last_error='Worker lease expired before execution completed',
+          claimed_by=NULL,claimed_at=NULL,locked_by_employee_id=NULL,
+          lock_expires_at=NULL,updated_at=now()
+        FROM stale s WHERE w.id=s.id AND w.tenant_id=:tenant
+        RETURNING w.id,w.status,w.directive_id"""), {"tenant": self.principal.tenant_id})
+        rows = result.mappings().all()
+        for row in rows:
+            if row["status"] == "FAILED":
+                await self._refresh_directive(row["directive_id"])
+        return len(rows)
+
     async def renew_lease(self, work_order_id: str, worker_id: str, lease_seconds: int=300) -> bool:
         result=await self.session.execute(text("""UPDATE department_work_orders
           SET lock_expires_at=now()+(:seconds * interval '1 second'),updated_at=now()
@@ -159,16 +188,18 @@ class WorkforceOrchestrator:
 
     async def schedule_retry(self, order: dict, worker_id: str, error: Exception, max_attempts: int=3) -> dict:
         result=await self.session.execute(text("""UPDATE department_work_orders
-          SET attempt_count=COALESCE(attempt_count,0)+1,
-              status=CASE WHEN COALESCE(attempt_count,0)+1 >= LEAST(COALESCE(max_attempts,:max_attempts),:max_attempts)
-                          THEN 'FAILED' ELSE 'QUEUED' END,
-              next_retry_at=CASE WHEN COALESCE(attempt_count,0)+1 >= LEAST(COALESCE(max_attempts,:max_attempts),:max_attempts)
-                                 THEN NULL ELSE now()+make_interval(secs =>
-                                   LEAST(900, 5 * power(2, LEAST(COALESCE(attempt_count,0),8)))::int) END,
+          SET attempt_count=CASE WHEN COALESCE(attempt_count,0) < LEAST(COALESCE(max_attempts,:max_attempts),:max_attempts)
+                                 THEN COALESCE(attempt_count,0)+1 ELSE COALESCE(attempt_count,0) END,
+              status=CASE WHEN COALESCE(attempt_count,0) < LEAST(COALESCE(max_attempts,:max_attempts),:max_attempts)
+                          THEN 'QUEUED' ELSE 'FAILED' END,
+              next_retry_at=CASE WHEN COALESCE(attempt_count,0) < LEAST(COALESCE(max_attempts,:max_attempts),:max_attempts)
+                                 THEN now()+make_interval(secs =>
+                                   LEAST(900,5*power(2,LEAST(COALESCE(attempt_count,0),8)))::int)
+                                 ELSE NULL END,
               last_error=:error,claimed_by=NULL,claimed_at=NULL,
               locked_by_employee_id=NULL,lock_expires_at=NULL,updated_at=now()
           WHERE id=:id AND tenant_id=:tenant AND claimed_by=:worker AND status='IN_PROGRESS'
-          RETURNING id,status,attempt_count,next_retry_at"""),
+          RETURNING id,status,attempt_count,next_retry_at,directive_id"""),
           {"id":order["id"],"tenant":self.principal.tenant_id,"worker":worker_id,
            "error":str(error)[:1000],"max_attempts":max_attempts})
         row=result.mappings().first()
@@ -176,7 +207,7 @@ class WorkforceOrchestrator:
             raise PermissionError("Work-order lease ownership changed before retry scheduling")
         item=dict(row)
         if item["status"] == "FAILED":
-            await self._refresh_directive(order["directive_id"])
+            await self._refresh_directive(item["directive_id"])
         return item
 
     async def _reserve_work_order_budget(self, order: dict, reserve_cents: int) -> bool:
@@ -222,7 +253,20 @@ class WorkforceOrchestrator:
               WHERE id=:id AND tenant_id=:tenant"""),
               {'refund':refund,'id':order['id'],'tenant':self.principal.tenant_id})
     async def execute_work_order(self, order: dict) -> dict:
-        employee=BY_ID[order["specialist_role_id"]]
+        employee = BY_ID.get(order.get("specialist_role_id"))
+        if employee is None:
+            reason = f"Unregistered specialist role: {order.get('specialist_role_id')!r}"
+            classified = PermanentExecutionError(reason)
+            await self.session.execute(text("""UPDATE department_work_orders SET status='REJECTED',
+              last_error=:error,claimed_by=NULL,claimed_at=NULL,locked_by_employee_id=NULL,
+              lock_expires_at=NULL,updated_at=now()
+              WHERE id=:id AND tenant_id=:tenant AND status='IN_PROGRESS' AND claimed_by=:worker"""),
+              {"error": reason[:1000], "id": order["id"], "tenant": self.principal.tenant_id,
+               "worker": order.get("claimed_by")})
+            await self.repo.append_audit("work_order.permanent_failure", "department_work_order",
+                str(order["id"]), order.get("product_id"), {"reason": reason, "failure_type": "missing_specialist_role"})
+            await self._refresh_directive(order["directive_id"])
+            return {"work_order_id": str(order["id"]), "status": "REJECTED", "error": reason}
         payload=order["tool_input"]
         if isinstance(payload,str): payload=json.loads(payload)
         skill_bundle=resolve_runtime_skill_bundle(order["department"],order.get("product_id"),employee.id)

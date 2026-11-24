@@ -5,12 +5,10 @@ import asyncio
 import os
 import socket
 from contextlib import suppress
-from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import text
 
-from .config import settings
 from .policy import Principal
 from .repositories import PostgresWorkforceRepository, session_factory
 from .orchestration import WorkforceOrchestrator, TransientExecutionError
@@ -23,13 +21,16 @@ class LeaseLostError(RuntimeError):
 class DepartmentalWorker:
     def __init__(self, *, tenant_id: str | None = None, poll_min: float = 1.0,
                  poll_max: float = 20.0, lease_seconds: int = 300,
-                 heartbeat_seconds: int = 15, max_attempts: int = 3):
+                 heartbeat_seconds: int = 15, lease_renew_seconds: int = 60,
+                 max_attempts: int = 3):
         self.tenant_id = (tenant_id or os.getenv("RUNGROW_INTERNAL_TENANT_ID", "")).strip()
         if not self.tenant_id:
             raise RuntimeError("RUNGROW_INTERNAL_TENANT_ID is required for departmental worker")
         self.worker_id = f"dept-worker-{socket.gethostname()}-{os.getpid()}-{uuid4().hex[:8]}"
         self.poll_min, self.poll_max = poll_min, poll_max
-        self.lease_seconds, self.heartbeat_seconds = lease_seconds, heartbeat_seconds
+        self.lease_seconds = lease_seconds
+        self.heartbeat_seconds = heartbeat_seconds
+        self.lease_renew_seconds = lease_renew_seconds
         self.max_attempts = max_attempts
         self._stop = asyncio.Event()
         self._current_order_id: str | None = None
@@ -39,20 +40,20 @@ class DepartmentalWorker:
         self._stop.set()
 
     def _principal(self) -> Principal:
-        # Wildcard permissions are scoped to exactly one internal tenant.
         return Principal(self.worker_id, self.tenant_id, "service",
                          frozenset({"*"}), actor_type="service",
                          product_ids=frozenset())
 
     async def _repo(self):
         factory = self._factory()
-        session = factory()
-        return factory, session
+        return factory, factory()
 
-    async def _heartbeat(self, status: str = "RUNNING") -> None:
+    async def _heartbeat(self, status: str = "IDLE") -> None:
+        # The established 008 schema uses STARTING/IDLE/BUSY/STOPPING/ERROR.
+        state = {"RUNNING": "IDLE", "STOPPED": "STOPPING"}.get(status, status)
         factory, session = await self._repo()
         async with session:
-            async with PostgresWorkforceRepository(session, self._principal()) as repo:
+            async with PostgresWorkforceRepository(session, self._principal()):
                 await session.execute(text("""
                     INSERT INTO worker_heartbeats
                       (worker_id, tenant_id, started_at, last_heartbeat_at, status, current_work_order_id)
@@ -62,28 +63,14 @@ class DepartmentalWorker:
                       current_work_order_id=EXCLUDED.current_work_order_id
                     WHERE worker_heartbeats.tenant_id=EXCLUDED.tenant_id
                 """), {"worker": self.worker_id, "tenant": self.tenant_id,
-                       "status": status, "current": self._current_order_id})
+                       "status": state, "current": self._current_order_id})
 
     async def _claim(self) -> dict | None:
         factory, session = await self._repo()
         async with session:
             async with PostgresWorkforceRepository(session, self._principal()) as repo:
-                # Expired leases are recovered atomically and strictly tenant-scoped.
-                await session.execute(text("""
-                    UPDATE department_work_orders
-                    SET attempt_count=COALESCE(attempt_count,0)+1,
-                        status=CASE WHEN COALESCE(attempt_count,0)+1 >= COALESCE(max_attempts,3)
-                                    THEN 'FAILED' ELSE 'QUEUED' END,
-                        next_retry_at=CASE WHEN COALESCE(attempt_count,0)+1 >= COALESCE(max_attempts,3)
-                                           THEN NULL ELSE now()+make_interval(secs =>
-                                             LEAST(900,5*power(2,LEAST(COALESCE(attempt_count,0),8)))::int) END,
-                        claimed_by=NULL,claimed_at=NULL,locked_by_employee_id=NULL,
-                        lock_expires_at=NULL,updated_at=now()
-                    WHERE tenant_id=:tenant AND status='IN_PROGRESS'
-                      AND (lock_expires_at <= now() OR
-                           (lock_expires_at IS NULL AND claimed_at < now()-interval '3 minutes'))
-                """), {"tenant": self.tenant_id})
                 orchestrator = WorkforceOrchestrator(repo, self._principal())
+                await orchestrator.recover_stale_leases()
                 return await orchestrator.claim_work_order(self.worker_id)
 
     async def renew_lease(self, work_order_id: str) -> bool:
@@ -100,64 +87,95 @@ class DepartmentalWorker:
                        "worker": self.worker_id, "lease_seconds": self.lease_seconds})
                 return result.rowcount == 1
 
+    async def _active_maintenance_loop(self, work_order_id: str,
+                                       lease_lost: asyncio.Event) -> None:
+        loop = asyncio.get_running_loop()
+        next_renewal = loop.time() + self.lease_renew_seconds
+        while not self._stop.is_set() and not lease_lost.is_set():
+            try:
+                await asyncio.wait_for(
+                    self._stop.wait(),
+                    timeout=max(0.1, min(self.heartbeat_seconds, next_renewal - loop.time())),
+                )
+                return
+            except asyncio.TimeoutError:
+                pass
+
+            # Each heartbeat and renewal uses its own short-lived session. Neither
+            # operation can contend with or share the execution transaction.
+            try:
+                await self._heartbeat("BUSY")
+                if loop.time() >= next_renewal:
+                    if not await self.renew_lease(work_order_id):
+                        lease_lost.set()
+                        return
+                    next_renewal = loop.time() + self.lease_renew_seconds
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Do not silently continue execution when the lease cannot be proven.
+                # A failed renewal tick is treated as loss of ownership.
+                lease_lost.set()
+                return
+
     async def _execute_one(self, order: dict) -> None:
-        self._current_order_id = str(order["id"])
-        stop_renewal = asyncio.Event()
-
-        async def renew_loop():
-            while not stop_renewal.is_set():
-                try:
-                    await asyncio.wait_for(stop_renewal.wait(), timeout=max(5, self.lease_seconds / 3))
-                    return
-                except asyncio.TimeoutError:
-                    if not await self.renew_lease(str(order["id"])):
-                        raise LeaseLostError(f"Lease lost for work order {order['id']}")
-
-        renew_task = asyncio.create_task(renew_loop())
+        work_order_id = str(order["id"])
+        self._current_order_id = work_order_id
+        lease_lost = asyncio.Event()
+        factory, session = await self._repo()
         execution_task = None
+        maintenance_task = asyncio.create_task(
+            self._active_maintenance_loop(work_order_id, lease_lost)
+        )
         try:
-            factory, session = await self._repo()
             async with session:
                 async with PostgresWorkforceRepository(session, self._principal()) as repo:
                     orchestrator = WorkforceOrchestrator(repo, self._principal())
                     execution_task = asyncio.create_task(orchestrator.execute_work_order(order))
+                    lost_task = asyncio.create_task(lease_lost.wait())
                     done, _ = await asyncio.wait(
-                        {execution_task, renew_task}, return_when=asyncio.FIRST_COMPLETED)
-                    if renew_task in done:
-                        exc = renew_task.exception()
-                        if exc:
-                            execution_task.cancel()
-                            with suppress(asyncio.CancelledError):
-                                await execution_task
-                            raise exc
-                    result = await execution_task
-                    return result
+                        {execution_task, lost_task}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if lost_task in done and lease_lost.is_set():
+                        execution_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await execution_task
+                        raise LeaseLostError(f"Lease lost for work order {work_order_id}")
+                    lost_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await lost_task
+                    await execution_task
         except asyncio.CancelledError:
             if execution_task and not execution_task.done():
                 execution_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await execution_task
             raise
         except TransientExecutionError as exc:
-            factory, retry_session = await self._repo()
+            # The execution transaction has rolled back before retry scheduling.
+            retry_factory, retry_session = await self._repo()
             async with retry_session:
                 async with PostgresWorkforceRepository(retry_session, self._principal()) as retry_repo:
-                    retry_orchestrator = WorkforceOrchestrator(retry_repo, self._principal())
-                    await retry_orchestrator.schedule_retry(order, self.worker_id, exc, self.max_attempts)
+                    await WorkforceOrchestrator(retry_repo, self._principal()).schedule_retry(
+                        order, self.worker_id, exc, self.max_attempts
+                    )
         finally:
-            stop_renewal.set()
-            renew_task.cancel()
+            maintenance_task.cancel()
             with suppress(asyncio.CancelledError):
-                await renew_task
+                await maintenance_task
             self._current_order_id = None
+            with suppress(Exception):
+                await self._heartbeat("IDLE")
 
     async def run(self) -> None:
         delay = self.poll_min
-        await self._heartbeat("RUNNING")
+        await self._heartbeat("STARTING")
         try:
             while not self._stop.is_set():
-                await self._heartbeat("RUNNING")
                 try:
                     order = await self._claim()
                     if order is None:
+                        await self._heartbeat("IDLE")
                         try:
                             await asyncio.wait_for(self._stop.wait(), timeout=delay)
                         except asyncio.TimeoutError:
@@ -169,11 +187,9 @@ class DepartmentalWorker:
                 except asyncio.CancelledError:
                     raise
                 except Exception:
-                    # The orchestrator owns business-state transitions. A worker-level
-                    # failure is logged by the service runtime and the lease expires safely.
+                    await self._heartbeat("ERROR")
                     await asyncio.sleep(delay)
                     delay = min(self.poll_max, max(self.poll_min, delay * 2))
         finally:
             with suppress(Exception):
-                await self._heartbeat("STOPPED")
-
+                await self._heartbeat("STOPPING")
