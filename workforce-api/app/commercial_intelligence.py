@@ -77,9 +77,12 @@ class DiscoveryBatch:
     usage: list[dict[str, int]] = field(default_factory=list)
 
 
-class DirectoryFetcher(Protocol):
+class DiscoveryProvider(Protocol):
     async def discover(self, *, query: str, city: str, product_id: str,
                        source_urls: list[str]) -> DiscoveryBatch: ...
+
+
+DirectoryFetcher = DiscoveryProvider
 
 
 class _PageMetadata(HTMLParser):
@@ -440,7 +443,7 @@ def route_product_fit(candidate: dict[str, Any]) -> list[dict[str, Any]]:
         result = score_icp(product_id, candidate)
         scores.append({"product_id": product_id, **result,
                        "commercial_stage": PRODUCT_PLAYBOOKS[product_id]["stage"],
-                       "playbook_version": PRODUCT_PLAYBOOKS[product_id]["version"]})
+                       "playbook_version": PRODUCT_PLAYBOOKS[product_id]["version"], "source_url_exact": source_url, "discovered_at": str(candidate.get("fetched_at") or datetime.now(timezone.utc).isoformat()), "raw_evidence_snippet": raw_snippet[:2000], "verified_business_identity": bool(candidate.get("verified_business_identity", False)), "active_public_presence": bool(candidate.get("active_public_presence", False)), "locality": candidate.get("locality")})
     return sorted(scores, key=lambda x: (x["score"], x["product_id"]), reverse=True)
 
 
@@ -475,7 +478,10 @@ class CommercialIntelligenceService:
         for candidate in batch.candidates:
             name = str(candidate.get("business_name", "")).strip()
             source_url = str(candidate.get("source_url", "")).strip()
-            if not name or not source_url:
+            raw_snippet=str(candidate.get("raw_evidence_snippet") or candidate.get("evidence_snippet", "")).strip()
+            parsed=urlparse(source_url)
+            if not name or not source_url or parsed.scheme not in {"http","https"} or not parsed.hostname or not raw_snippet:
+                await self.repository.append_audit("prospect.discovery.rejected","public_source",source_url or "missing",product_id,{"reason":"Missing exact source URL, business name or raw evidence snippet"})
                 continue
             fit = score_icp(product_id, {**candidate, "segment": candidate.get("segment") or query})
             key = prospect_dedupe_key(candidate, city)
@@ -486,7 +492,7 @@ class CommercialIntelligenceService:
                 decision_maker_name=candidate.get("decision_maker_name"),
                 public_contact_channel=candidate.get("public_contact_channel"),
                 source_url=source_url, evidence_urls=evidence_urls,
-                evidence_snippet=str(candidate.get("evidence_snippet", ""))[:2000],
+                evidence_snippet=raw_snippet[:2000],
                 confidence_score=max(0.0, min(1.0, float(candidate.get("confidence_score", fit["score"])))),
                 icp_fit_tier=fit["tier"], is_synthetic=bool(is_sandbox or candidate.get("is_synthetic", False)),
                 metadata={"normalized_domain": _norm(candidate.get("domain") or urlparse(source_url).hostname),
