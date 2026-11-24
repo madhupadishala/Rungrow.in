@@ -130,7 +130,7 @@ async def test_postgres_16_commercial_schema_persists_qualified_prospect_and_rev
             if filename=="007_commercial_intelligence_and_portfolio.sql":
                 sql=sql.replace("WHERE conname='prospect_records_confidence_bounds'","WHERE conname='prospect_records_confidence_bounds' AND conrelid='prospect_records'::regclass")
             await admin.execute(sql)
-        prospect_id=str(uuid.uuid4()); tenant="pg-commercial-test"; url="https://approved.example/dilsukhnagar/studio"
+        prospect_id=uuid.uuid4(); tenant="pg-commercial-test"; url="https://approved.example/dilsukhnagar/studio"
         await admin.execute("""INSERT INTO prospect_records
           (id,tenant_id,product_id,dedupe_key,business_name,city,segment,source_url,evidence_urls,evidence_snippet,
            confidence_score,icp_fit_tier,stage,is_synthetic,metadata,qualified_at,qualification_score)
