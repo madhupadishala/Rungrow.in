@@ -136,8 +136,8 @@ class WorkforceOrchestrator:
             AND NOT EXISTS (
               SELECT 1 FROM jsonb_array_elements_text(w.dependencies) d(dep)
               WHERE NOT EXISTS (SELECT 1 FROM department_work_orders prior
-                WHERE prior.directive_id=w.directive_id AND prior.department=d.dep
-                  AND prior.status='APPROVED_BY_HEAD'))
+                WHERE prior.tenant_id=w.tenant_id AND prior.directive_id=w.directive_id
+                  AND prior.department=d.dep AND prior.status='APPROVED_BY_HEAD'))
           ORDER BY w.created_at LIMIT 1 FOR UPDATE SKIP LOCKED
         ) UPDATE department_work_orders w SET status='IN_PROGRESS',claimed_by=:worker,
           claimed_at=now(),locked_by_employee_id=:worker,
