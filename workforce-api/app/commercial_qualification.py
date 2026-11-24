@@ -103,7 +103,7 @@ class ProspectQualificationService:
                     raise ValueError("Historical record has incomplete or unverified public evidence")
                 decision=self.evaluate(prospect,evidence)
                 await self.repository.update_prospect_qualification(prospect_id=prospect["id"],product_id=product_id,
-                    stage=decision["status"],metadata={"revalidation":{"status":"VERIFIED","checked_at":decision["evaluated_at"],
+                    stage=("QUALIFIED" if decision["status"]=="QUALIFIED" else "DISQUALIFIED"),metadata={"revalidation":{"status":"VERIFIED","checked_at":decision["evaluated_at"],
                     "source_url":url,"raw_evidence_snippet":evidence["evidence_snippet"][:2000]},"qualification":decision})
                 qualified+=int(decision["status"]=="QUALIFIED")
                 results.append({"prospect_id":str(prospect["id"]),**decision})
