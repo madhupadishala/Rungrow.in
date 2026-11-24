@@ -475,6 +475,9 @@ class WorkforceOrchestrator:
                 "Combined departmental evidence passed specialist acceptance rubrics" if all(x["accepted"] for x in executions)
                 else "One or more specialist deliverables failed after two revision cycles")
         except Exception as exc:
+            classified = classify_execution_error(exc)
+            if isinstance(classified, TransientExecutionError):
+                raise classified from exc
             await self._settle_work_order_budget(order,reserve,reserve)
             await self.session.execute(text("""UPDATE department_work_orders SET status='REJECTED',
               last_error=:error,locked_by_employee_id=NULL,lock_expires_at=NULL,claimed_by=NULL,claimed_at=NULL,updated_at=now()
@@ -532,7 +535,7 @@ class WorkforceOrchestrator:
           WHERE tenant_id=:tenant AND directive_id=:id"""),{"tenant":self.principal.tenant_id,"id":directive_id})
         items=[dict(x) for x in rows.mappings().all()]
         if any(x["status"]=="AWAITING_APPROVAL" for x in items): status="AWAITING_APPROVAL"
-        elif any(x["status"]=="REJECTED" for x in items): status="FAILED"
+        elif any(x["status"] in {"REJECTED","FAILED"} for x in items): status="FAILED"
         elif items and all(x["status"]=="APPROVED_BY_HEAD" for x in items): status="IN_REVIEW"
         else: status="DELEGATED"
         if status=="IN_REVIEW":
