@@ -130,7 +130,9 @@ class WorkforceOrchestrator:
     async def claim_work_order(self, worker_id: str) -> dict | None:
         row=await self.session.execute(text("""WITH candidate AS (
           SELECT w.id FROM department_work_orders w
-          WHERE w.tenant_id=:tenant AND (w.status IN ('ASSIGNED','REVISION_REQUESTED') OR
+          WHERE w.tenant_id=:tenant AND COALESCE(w.attempt_count,0) < COALESCE(w.max_attempts,3)
+            AND COALESCE(w.next_retry_at,now()) <= now()
+            AND (w.status IN ('ASSIGNED','REVISION_REQUESTED','QUEUED','PENDING') OR
             (w.status='IN_PROGRESS' AND (w.lock_expires_at <= now() OR
              (w.lock_expires_at IS NULL AND w.claimed_at < now() - interval '3 minutes'))))
             AND NOT EXISTS (
@@ -146,6 +148,37 @@ class WorkforceOrchestrator:
           {"tenant":self.principal.tenant_id,"worker":worker_id})
         item=row.mappings().first()
         return _dict(item)
+    async def renew_lease(self, work_order_id: str, worker_id: str, lease_seconds: int=300) -> bool:
+        result=await self.session.execute(text("""UPDATE department_work_orders
+          SET lock_expires_at=now()+(:seconds * interval '1 second'),updated_at=now()
+          WHERE id=:id AND tenant_id=:tenant AND claimed_by=:worker
+            AND status='IN_PROGRESS' AND lock_expires_at > now()"""),
+          {"id":work_order_id,"tenant":self.principal.tenant_id,
+           "worker":worker_id,"seconds":lease_seconds})
+        return result.rowcount == 1
+
+    async def schedule_retry(self, order: dict, worker_id: str, error: Exception, max_attempts: int=3) -> dict:
+        result=await self.session.execute(text("""UPDATE department_work_orders
+          SET attempt_count=COALESCE(attempt_count,0)+1,
+              status=CASE WHEN COALESCE(attempt_count,0)+1 >= LEAST(COALESCE(max_attempts,:max_attempts),:max_attempts)
+                          THEN 'FAILED' ELSE 'QUEUED' END,
+              next_retry_at=CASE WHEN COALESCE(attempt_count,0)+1 >= LEAST(COALESCE(max_attempts,:max_attempts),:max_attempts)
+                                 THEN NULL ELSE now()+make_interval(secs =>
+                                   LEAST(900, 5 * power(2, LEAST(COALESCE(attempt_count,0),8)))::int) END,
+              last_error=:error,claimed_by=NULL,claimed_at=NULL,
+              locked_by_employee_id=NULL,lock_expires_at=NULL,updated_at=now()
+          WHERE id=:id AND tenant_id=:tenant AND claimed_by=:worker AND status='IN_PROGRESS'
+          RETURNING id,status,attempt_count,next_retry_at"""),
+          {"id":order["id"],"tenant":self.principal.tenant_id,"worker":worker_id,
+           "error":str(error)[:1000],"max_attempts":max_attempts})
+        row=result.mappings().first()
+        if not row:
+            raise PermissionError("Work-order lease ownership changed before retry scheduling")
+        item=dict(row)
+        if item["status"] == "FAILED":
+            await self._refresh_directive(order["directive_id"])
+        return item
+
     async def _reserve_work_order_budget(self, order: dict, reserve_cents: int) -> bool:
         worker=order.get('locked_by_employee_id') or order.get('claimed_by')
         row=await self.session.execute(text("""UPDATE department_work_orders
