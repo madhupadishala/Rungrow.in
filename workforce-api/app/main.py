@@ -29,6 +29,7 @@ from .adapters.base import SignedWebhookVerifier
 from .adapters.photo_studio_growth_os import PhotoStudioGrowthOSAdapter, register_photo_studio_growth_os_tools
 from .digital_ceo import DigitalCEOService, is_synthetic_event
 from .commercial_intelligence import (CommercialIntelligenceService, RobotsCompliantHttpFetcher, MockDirectoryFetcher, PRODUCT_PLAYBOOKS)
+from .commercial_qualification import ProspectQualificationService, SerperDiscoveryProvider
 from .adapters.generic_product_adapter import GENERIC_PRODUCT_IDS, GenericAdapterContext, AdapterGovernanceError
 from .adapters.registry import build_product_adapter_registry
 from .health import router as health_router
@@ -322,10 +323,11 @@ def get_commercial_intelligence_service(repo: WorkforceRepositoryProtocol):
         fetcher = MockDirectoryFetcher()
     else:
         gateway = get_model_gateway(repo)
-        fetcher = RobotsCompliantHttpFetcher(
+        page_fetcher = RobotsCompliantHttpFetcher(
             allow_domains=set(filter(None, os.getenv("RUNGROW_RESEARCH_ALLOW_DOMAINS", "").split(","))),
             deny_domains=set(filter(None, os.getenv("RUNGROW_RESEARCH_DENY_DOMAINS", "").split(","))),
             requests_per_second=float(os.getenv("RUNGROW_RESEARCH_REQUESTS_PER_SECOND", "0.5")))
+        fetcher = SerperDiscoveryProvider(page_fetcher=page_fetcher) if os.getenv("SERPER_API_KEY", "").strip() else page_fetcher
     return CommercialIntelligenceService(repo, fetcher, gateway)
 
 
@@ -540,6 +542,45 @@ class ProspectDiscoveryRequest(BaseModel):
     city: str = Field(min_length=2, max_length=160)
     source_urls: list[str] = Field(default_factory=list, max_length=30)
     is_sandbox: bool = False
+
+
+
+
+class ProspectRevalidationRequest(BaseModel):
+    product_id: str
+    limit: int = Field(default=300, ge=1, le=1000)
+
+class SalesArtifactRequest(BaseModel):
+    product_id: str
+
+
+@app.post("/v1/commercial/prospects/revalidate")
+async def revalidate_commercial_prospects(body: ProspectRevalidationRequest,
+    p: Principal = Depends(require_permission("lead.enrich")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo)):
+    authorize_product_access(p, body.product_id)
+    service=get_commercial_intelligence_service(repo)
+    qualification=ProspectQualificationService(repo,service.fetcher)
+    try:
+        return await qualification.revalidate(product_id=body.product_id,limit=body.limit)
+    except Exception as exc:
+        translate_repo_error(exc)
+
+
+@app.post("/v1/commercial/prospects/{prospect_id}/sales-artifacts")
+async def create_commercial_sales_artifacts(prospect_id: str, body: SalesArtifactRequest,
+    p: Principal = Depends(require_permission("campaign.draft")),
+    repo: WorkforceRepositoryProtocol = Depends(get_workforce_repo)):
+    authorize_product_access(p,body.product_id)
+    try:
+        service=get_commercial_intelligence_service(repo)
+        qualification=ProspectQualificationService(repo,service.fetcher)
+        artifacts=await qualification.create_artifacts(prospect_id=prospect_id,
+            product_id=body.product_id,created_by=p.user_id)
+        return {"prospect_id":prospect_id,"artifacts":artifacts,"execution":"draft_only","outbound_actions":0}
+    except Exception as exc:
+        translate_repo_error(exc)
+
 
 
 class CampaignPlanRequest(BaseModel):
