@@ -110,7 +110,13 @@ async def test_postgres_departmental_worker_end_to_end(monkeypatch):
             "010_workforce_2_orchestration.sql",
             "014_departmental_worker.sql",
         ):
-            await admin.execute((migration_dir / name).read_text(encoding="utf-8"))
+            migration_sql = (migration_dir / name).read_text(encoding="utf-8")
+            if name == "008_release_gates_and_worker_heartbeats.sql":
+                migration_sql = migration_sql.replace(
+                    "WHERE conname='worker_heartbeats_processed_nonnegative'",
+                    "WHERE conname='worker_heartbeats_processed_nonnegative' AND conrelid='worker_heartbeats'::regclass",
+                )
+            await admin.execute(migration_sql)
 
         tenant_a, tenant_b = str(uuid.uuid4()), str(uuid.uuid4())
         # Use a non-superuser connection for application-path assertions.
