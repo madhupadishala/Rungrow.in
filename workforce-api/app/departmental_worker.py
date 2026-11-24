@@ -122,12 +122,12 @@ class DepartmentalWorker:
         work_order_id = str(order["id"])
         self._current_order_id = work_order_id
         lease_lost = asyncio.Event()
-        factory, session = await self._repo()
         execution_task = None
         maintenance_task = asyncio.create_task(
             self._active_maintenance_loop(work_order_id, lease_lost)
         )
         try:
+            factory, session = await self._repo()
             async with session:
                 async with PostgresWorkforceRepository(session, self._principal()) as repo:
                     orchestrator = WorkforceOrchestrator(repo, self._principal())
