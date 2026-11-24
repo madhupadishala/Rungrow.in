@@ -130,7 +130,7 @@ class WorkforceOrchestrator:
     async def claim_work_order(self, worker_id: str) -> dict | None:
         row=await self.session.execute(text("""WITH candidate AS (
           SELECT w.id FROM department_work_orders w
-          WHERE w.tenant_id=:tenant AND COALESCE(w.attempt_count,0) < COALESCE(w.max_attempts,3)
+          WHERE w.tenant_id=:tenant AND COALESCE(w.attempt_count,0) <= COALESCE(w.max_attempts,3)
             AND COALESCE(w.next_retry_at,now()) <= now()
             AND w.status IN ('ASSIGNED','REVISION_REQUESTED','QUEUED','PENDING')
             AND NOT EXISTS (
@@ -252,26 +252,43 @@ class WorkforceOrchestrator:
               SET spent_cents=GREATEST(0,spent_cents-:refund),updated_at=now()
               WHERE id=:id AND tenant_id=:tenant"""),
               {'refund':refund,'id':order['id'],'tenant':self.principal.tenant_id})
+    async def _reject_permanent_work_order(self, order: dict, reason: str,
+                                           failure_type: str="invalid_configuration") -> dict:
+        result = await self.session.execute(text("""UPDATE department_work_orders SET status='REJECTED',
+          last_error=:error,claimed_by=NULL,claimed_at=NULL,locked_by_employee_id=NULL,
+          lock_expires_at=NULL,updated_at=now()
+          WHERE id=:id AND tenant_id=:tenant AND status='IN_PROGRESS' AND claimed_by=:worker"""),
+          {"error": reason[:1000], "id": order["id"], "tenant": self.principal.tenant_id,
+           "worker": order.get("claimed_by")})
+        if result.rowcount != 1:
+            raise PermissionError("Work-order lease ownership changed before permanent failure was recorded")
+        await self.repo.append_audit("work_order.permanent_failure", "department_work_order",
+            str(order["id"]), order.get("product_id"),
+            {"reason": reason[:1000], "failure_type": failure_type})
+        await self._refresh_directive(order["directive_id"])
+        return {"work_order_id": str(order["id"]), "status": "REJECTED", "error": reason[:1000]}
+
     async def execute_work_order(self, order: dict) -> dict:
         employee = BY_ID.get(order.get("specialist_role_id"))
         if employee is None:
             reason = f"Unregistered specialist role: {order.get('specialist_role_id')!r}"
-            classified = PermanentExecutionError(reason)
-            await self.session.execute(text("""UPDATE department_work_orders SET status='REJECTED',
-              last_error=:error,claimed_by=NULL,claimed_at=NULL,locked_by_employee_id=NULL,
-              lock_expires_at=NULL,updated_at=now()
-              WHERE id=:id AND tenant_id=:tenant AND status='IN_PROGRESS' AND claimed_by=:worker"""),
-              {"error": reason[:1000], "id": order["id"], "tenant": self.principal.tenant_id,
-               "worker": order.get("claimed_by")})
-            await self.repo.append_audit("work_order.permanent_failure", "department_work_order",
-                str(order["id"]), order.get("product_id"), {"reason": reason, "failure_type": "missing_specialist_role"})
-            await self._refresh_directive(order["directive_id"])
-            return {"work_order_id": str(order["id"]), "status": "REJECTED", "error": reason}
-        payload=order["tool_input"]
-        if isinstance(payload,str): payload=json.loads(payload)
-        skill_bundle=resolve_runtime_skill_bundle(order["department"],order.get("product_id"),employee.id)
-        payload["runtime_skill_bundle"]=skill_bundle
-        payload["skill_version_hash"]=skill_bundle["skill_version_hash"]
+            return await self._reject_permanent_work_order(order, reason, "missing_specialist_role")
+        try:
+            payload=order["tool_input"]
+            if isinstance(payload,str):
+                payload=json.loads(payload)
+            if not isinstance(payload, dict):
+                raise ValueError("Work-order tool_input must be a JSON object")
+            skill_bundle=resolve_runtime_skill_bundle(order["department"],order.get("product_id"),employee.id)
+            payload["runtime_skill_bundle"]=skill_bundle
+            payload["skill_version_hash"]=skill_bundle["skill_version_hash"]
+        except Exception as exc:
+            classified = classify_execution_error(exc)
+            if isinstance(classified, TransientExecutionError):
+                raise classified from exc
+            return await self._reject_permanent_work_order(
+                order, str(classified), "invalid_specialist_or_skill_configuration"
+            )
         delegated=payload.get("delegated_specialists",[])
         if len(delegated)>=2:
             return await self._execute_multi_specialist_work_order(order,payload,delegated)
