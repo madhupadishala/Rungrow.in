@@ -377,6 +377,9 @@ class WorkforceOrchestrator:
               WHERE id=:id AND tenant_id=:tenant AND claimed_by=:worker"""),
               {"error":str(classified)[:1000],"id":order["id"],"tenant":self.principal.tenant_id,
                "worker":order.get("claimed_by")})
+            await self.repo.append_audit("work_order.permanent_failure", "department_work_order",
+                str(order["id"]), order.get("product_id"),
+                {"reason":str(classified)[:1000],"failure_type":type(classified).__name__})
             await self._refresh_directive(order["directive_id"])
             return {"work_order_id":str(order["id"]),"status":"REJECTED","error":str(classified)[:1000]}
 
@@ -482,7 +485,10 @@ class WorkforceOrchestrator:
             await self.session.execute(text("""UPDATE department_work_orders SET status='REJECTED',
               last_error=:error,locked_by_employee_id=NULL,lock_expires_at=NULL,claimed_by=NULL,claimed_at=NULL,updated_at=now()
               WHERE id=:id AND tenant_id=:tenant"""),
-              {"error":str(exc)[:1000],"id":order["id"],"tenant":self.principal.tenant_id})
+              {"error":str(classified)[:1000],"id":order["id"],"tenant":self.principal.tenant_id})
+            await self.repo.append_audit("work_order.permanent_failure", "department_work_order",
+                str(order["id"]), order.get("product_id"),
+                {"reason":str(classified)[:1000],"failure_type":type(classified).__name__})
             await self._refresh_directive(order["directive_id"])
             return {"work_order_id":str(order["id"]),"status":"REJECTED","error":str(exc)[:1000]}
 
